@@ -1,0 +1,34 @@
+# --- Datos personales y exportaciones de hojas ---
+# Las hojas contienen nombres, cédulas y correos: nunca se versionan.
+ladme/sheets/*.xlsx
+ladme/sheets/*.xls
+ladme/sheets/*.csv
+ladme/sheets/*.ods
+
+# --- Credenciales y configuración local de clasp ---
+.clasp.json
+.clasprc.json
+.env
+.env.*
+*.pem
+*.key
+
+# --- Salidas generadas por los scripts ---
+placas_qr/
+wallet_imagenes/
+*.pdf
+!ladme/docs/**/*.pdf
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- Sistema operativo y editores ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>LADME - Laboratorio de Aprendizaje de Datos y Modelado Estadístico</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+  <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
+  <script src='https://cdn.jsdelivr.net/npm/@fullcalendar/core/locales/es.global.min.js'></script>
+
+  <style>
+    :root {
+      --purple-primary: #6d28d9;
+      --purple-dark: #5b21b6;
+      --purple-light: #f3e8ff;
+      --bg-color: #fcfaff;
+    }
+    body { background-color: var(--bg-color); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+    .navbar-institutional {
+      background-color: var(--purple-primary) !important;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    }
+
+    .nav-tabs { border-bottom: 2px solid #e9d5ff; }
+    .nav-tabs .nav-link {
+      color: #6b7280;
+      font-weight: 600;
+      border: none;
+      padding: 10px 18px;
+    }
+    .nav-tabs .nav-link.active {
+      color: var(--purple-primary);
+      border-bottom: 3px solid var(--purple-primary);
+      background: transparent;
+    }
+
+    .card-custom { border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px;}
+    .card-header-purple { background-color: var(--purple-primary); color: white; border-top-left-radius: 12px !important; border-top-right-radius: 12px !important; padding: 15px 20px; }
+
+    .btn-purple { background-color: var(--purple-primary); color: white; font-weight: 600; border: none; border-radius: 8px; }
+    .btn-purple:hover { background-color: var(--purple-dark); color: white; }
+
+    .kpi-card { background: white; border-radius: 10px; padding: 15px; border-left: 5px solid var(--purple-primary); text-align: center; height:100%; box-shadow: 0 2px 8px rgba(0,0,0,0.05);}
+    .kpi-number { font-size: 2rem; font-weight: bold; color: var(--purple-dark); }
+    .kpi-subtext { font-size: 0.8rem; color: #7f8c8d; font-weight: bold; text-transform: uppercase; }
+    .equipment-box { max-height: 180px; overflow-y: auto; border: 1px solid #ced4da; padding: 10px; border-radius: 6px; background: #fff; }
+
+    #calendarUser, #calendarAdmin {
+      min-height: 580px;
+      background: white;
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }
+
+    .chart-container-single {
+      position: relative;
+      height: 380px;
+      width: 100%;
+      background: #fff;
+      border-radius: 12px;
+      padding: 15px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+      border: 1px solid #e2e8f0;
+      box-sizing: border-box;
+      margin: 0 auto;
+    }
+
+    .fc-event { cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <!-- BARRA SUPERIOR -->
+  <nav class="navbar navbar-expand-lg navbar-dark navbar-institutional mb-3">
+    <div class="container">
+      <a class="navbar-brand text-white" href="#"><i class="fa-solid fa-server me-2"></i> <strong>LADME</strong> | Aprendizaje de Datos y Modelado Estadístico</a>
+      <span class="navbar-text text-white fs-6"><i class="fa-solid fa-user me-1"></i> <span id="userEmailSpan">Cargando usuario...</span></span>
+    </div>
+  </nav>
+
+  <div class="container pb-5">
+
+    <!-- PESTAÑAS PRINCIPALES -->
+    <ul class="nav nav-tabs mb-4" id="mainTabs">
+      <li class="nav-item">
+        <button class="nav-link active" id="userTabBtn" data-bs-toggle="tab" data-bs-target="#userPane">
+          <i class="fa-solid fa-calendar-plus me-2"></i> Solicitud & Disponibilidad
+        </button>
+      </li>
+      <li class="nav-item" id="adminTabLi" style="display: none;">
+        <button class="nav-link" id="adminTabBtn" data-bs-toggle="tab" data-bs-target="#adminPane" onclick="cargarDashboard()">
+          <i class="fa-solid fa-chart-line me-2"></i> Panel Administrador
+        </button>
+      </li>
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- PESTAÑA SOLICITUD & DISPONIBILIDAD -->
+      <div class="tab-pane fade show active" id="userPane">
+
+        <!-- FICHA DE EQUIPO (solo aparece al entrar por NFC/QR con ?asset=) -->
+        <div id="fichaEquipo" class="card card-custom mt-2 mb-4" style="display: none; max-width: 950px; margin: 0 auto;">
+          <div class="card-header card-header-purple d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="fa-solid fa-desktop me-2"></i> <span id="fichaTitulo">Equipo</span></h5>
+            <span id="fichaBadge" class="badge bg-light text-dark"></span>
+          </div>
+          <div class="card-body p-4" id="fichaCuerpo"></div>
+        </div>
+
+        <!-- PANEL POLÍTICA DE DATOS -->
+        <div id="panelPoliticaDatos" class="card card-custom mt-2 mb-4" style="max-width: 950px; margin: 0 auto;">
+          <div class="card-header card-header-purple d-flex align-items-center">
+            <i class="fa-solid fa-shield-halved fa-lg me-2"></i>
+            <h5 class="mb-0 fw-semibold">Política de Tratamiento de Datos Personales</h5>
+          </div>
+          <div class="card-body p-4 text-center">
+            <p class="text-start text-secondary mb-4" style="font-size: 1.02rem; line-height: 1.6;">
+              La Universidad Nacional de Colombia, como responsable del Tratamiento de Datos Personales, informa que los datos de carácter personal recolectados mediante este formato se encuentran bajo medidas que garantizan la seguridad, confidencialidad e integridad conforme a la Ley 1581 de 2012.
+            </p>
+            <button class="btn btn-purple px-4 py-2 shadow-sm fs-6" onclick="aceptarPoliticaYContinuar()">
+              <i class="fa-solid fa-check me-2"></i> Acepto la Política de Tratamiento de Datos
+            </button>
+          </div>
+        </div>
+
+        <!-- SECCIÓN DE RESERVA -->
+        <div id="panelSeccionReserva" style="display: none;">
+
+          <div class="alert alert-info mb-4 shadow-sm border-0">
+            <i class="fa-solid fa-circle-info me-2"></i> <strong>Aviso Importante:</strong> La hora de inicio seleccionada no puede ser anterior a 5 minutos respecto a la hora actual. Puede reservar los equipos para procesos de larga duración si es necesario.
+          </div>
+
+          <div id="avisoPreseleccion" class="alert alert-primary mb-4 shadow-sm border-0" style="display: none;"></div>
+
+          <div class="row g-4 align-items-stretch">
+
+            <!-- FORMULARIO DE ASIGNACIÓN -->
+            <div class="col-lg-6">
+              <div class="card card-custom h-100 mb-0">
+                <div class="card-header card-header-purple">
+                  <h5 class="mb-0"><i class="fa-solid fa-pen-to-square me-2"></i> Registro de Asignación</h5>
+                </div>
+                <div class="card-body p-4">
+                  <form id="reservaForm" onsubmit="guardarReserva(event)">
+                    <div class="row g-3">
+
+                      <div class="col-12">
+                        <div id="avisoPerfil" class="alert alert-success py-2 mb-0" style="display:none;">
+                          <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Datos recuperados de su última reserva. Verifíquelos antes de enviar.
+                        </div>
+                      </div>
+
+                      <div class="col-md-6">
+                        <label class="form-label">Nombre Completo *</label>
+                        <input type="text" id="nombre" class="form-control" required>
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label">Número de Cédula *</label>
+                        <input type="text" id="cedula" class="form-control" required>
+                      </div>
+
+                      <div class="col-md-12">
+                        <label class="form-label">Correo Institucional *</label>
+                        <div class="input-group">
+                          <input type="text" id="correoUser" class="form-control" placeholder="usuario" required>
+                          <span class="input-group-text bg-light text-muted fw-semibold">@unal.edu.co</span>
+                        </div>
+                        <div id="ayudaCorreo" class="form-text" style="display:none;">Se usa el correo de su sesión; no se puede cambiar.</div>
+                      </div>
+
+                      <div class="col-md-6">
+                        <label class="form-label">Programa académico o nivel *</label>
+                        <select id="programa" class="form-select" onchange="manejarPrograma()" required>
+                          <option value="" selected disabled>-- Seleccione --</option>
+                          <option value="Estadística">Estadística</option>
+                          <option value="Ingeniería Mecatrónica">Ingeniería Mecatrónica</option>
+                          <option value="Geografía">Geografía</option>
+                          <option value="Biología">Biología</option>
+                          <option value="Ingeniería Biológica">Ingeniería Biológica</option>
+                          <option value="Gestión cultural y comunicativa">Gestión cultural y comunicativa</option>
+                          <option value="Posgrado">Posgrado</option>
+                          <option value="Profesor/Investigador">Profesor/Investigador</option>
+                        </select>
+                        <div id="boxPosgrado" style="display:none;" class="mt-2">
+                          <input type="text" id="nombrePosgrado" class="form-control" placeholder="Nombre del posgrado">
+                        </div>
+                      </div>
+
+                      <div class="col-md-6">
+                        <label class="form-label">Matrícula *</label>
+                        <select id="matricula" class="form-select" required>
+                          <option value="" selected disabled>-- Seleccione --</option>
+                          <option value="Primera matrícula">Primera matrícula</option>
+                          <option value="Segunda matrícula">Segunda matrícula</option>
+                          <option value="Tercera matrícula">Tercera matrícula</option>
+                          <option value="Cuarta matrícula">Cuarta matrícula</option>
+                          <option value="Quinta matrícula">Quinta matrícula</option>
+                          <option value="Sexta matrícula">Sexta matrícula</option>
+                          <option value="Séptima matrícula">Séptima matrícula</option>
+                          <option value="Octava matrícula">Octava matrícula</option>
+                          <option value="Novena matrícula">Novena matrícula</option>
+                          <option value="Décima matrícula">Décima matrícula</option>
+                        </select>
+                      </div>
+
+                      <div class="col-md-6">
+                        <label class="form-label">Fecha y Hora Inicio *</label>
+                        <div class="d-flex gap-2">
+                          <input type="date" id="fechaInicio" class="form-control p-1" required onchange="verificarDisponibilidad()">
+                          <input type="time" id="horaInicio" class="form-control p-1" required onchange="verificarDisponibilidad()">
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label">Fecha y Hora Fin *</label>
+                        <div class="d-flex gap-2">
+                          <input type="date" id="fechaFin" class="form-control p-1" required onchange="verificarDisponibilidad()">
+                          <input type="time" id="horaFin" class="form-control p-1" required onchange="verificarDisponibilidad()">
+                        </div>
+                      </div>
+
+                      <div class="col-md-12 mt-3">
+                        <label class="form-label">Computador Disponible * <small class="text-muted fw-normal">(Solo se permite 1 por solicitud)</small></label>
+                        <div id="equiposContainer" class="equipment-box">
+                          <small class="text-muted">Seleccione las fechas y horas arriba para consultar la disponibilidad...</small>
+                        </div>
+                      </div>
+
+                      <div class="col-md-12">
+                        <label class="form-label">Tipo de actividad *</label>
+                        <select id="tipoActividad" class="form-select" onchange="manejarActividad()" required>
+                          <option value="" selected disabled>-- Seleccione --</option>
+                          <option value="Docencia">Docencia</option>
+                          <option value="Investigación">Investigación</option>
+                          <option value="PAE">PAE</option>
+                          <option value="Semilleros">Semilleros</option>
+                          <option value="Trabajo de grado">Trabajo de grado</option>
+                          <option value="Otro">Otro</option>
+                        </select>
+
+                        <div id="boxActividadDetalle" style="display:none;" class="mt-2">
+                          <label id="labelActividadDetalle" class="form-label fw-bold text-purple">Detalle *</label>
+                          <input type="text" id="actividadDetalle" class="form-control">
+                          <div id="notaInvestigacion" class="form-text text-danger mt-1" style="display:none; font-size: 0.85rem;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> <strong>Nota:</strong> Investigación corresponde a actividades dentro de un proyecto de investigación. Si es una actividad en el marco de una asignatura, por favor seleccione <strong>Docencia</strong>.
+                          </div>
+                        </div>
+
+                        <div class="mt-3">
+                          <label class="form-label fw-bold">Descripción de la actividad a realizar *</label>
+                          <textarea id="descripcionActividad" class="form-control" rows="2" placeholder="Describa brevemente lo que realizará en el computador..." required></textarea>
+                        </div>
+
+                        <div class="form-check mt-3">
+                          <input class="form-check-input" type="checkbox" id="procesoDesatendido">
+                          <label class="form-check-label" for="procesoDesatendido">
+                            Dejaré un proceso ejecutándose sin estar presente (que nadie apague ni use el equipo)
+                          </label>
+                        </div>
+
+                        <div class="mt-2">
+                          <label class="form-label fw-bold">Mensaje para quien llegue al equipo <small class="text-muted fw-normal">(opcional, máx. 140 caracteres)</small></label>
+                          <input type="text" id="mensajeLlegada" class="form-control" maxlength="140" placeholder="Ej. Entrenamiento de modelo en curso, por favor no apagar">
+                          <div class="form-text">Se mostrará en la ficha pública del equipo, sin su nombre. No incluya datos personales.</div>
+                        </div>
+
+                      </div>
+                    </div>
+
+                    <div class="text-end mt-4">
+                      <button type="submit" id="btnSubmit" class="btn btn-purple"><i class="fa-solid fa-calendar-check me-2"></i> Registrar Reserva</button>
+                    </div>
+                  </form>
+                  <div id="alertBox" class="mt-3"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CALENDARIO DE RESERVAS -->
+            <div class="col-lg-6">
+              <div class="card card-custom h-100 mb-0">
+                <div class="card-header card-header-purple">
+                  <h5 class="mb-0"><i class="fa-solid fa-calendar-days me-2"></i> Estado de reservas</h5>
+                </div>
+                <div class="card-body p-3">
+                  <div class="row g-2 mb-3 align-items-center">
+                    <div class="col-md-12">
+                      <label class="form-label fw-bold text-muted small mb-1"><i class="fa-solid fa-desktop me-1"></i> Filtrar por Computador:</label>
+                      <select id="filtroEquipoUser" class="form-select form-select-sm" onchange="cargarCalendarioUsuario()">
+                        <option value="TODOS">-- Todos los Computadores --</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div id="calendarUser"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- PESTAÑA ADMINISTRADOR -->
+      <div class="tab-pane fade" id="adminPane">
+
+        <div id="avisoRemitente" class="alert alert-danger" style="display: none;"></div>
+
+        <div class="card card-custom p-3 mb-4">
+          <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label fw-bold small mb-1"><i class="fa-solid fa-calendar me-1"></i> Fecha Inicio:</label>
+              <input type="date" id="adminFechaInicio" class="form-control form-control-sm" onchange="cargarDashboard()">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-bold small mb-1"><i class="fa-solid fa-calendar me-1"></i> Fecha Fin:</label>
+              <input type="date" id="adminFechaFin" class="form-control form-control-sm" onchange="cargarDashboard()">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-bold small mb-1"><i class="fa-solid fa-desktop me-1"></i> Filtrar por Equipo:</label>
+              <select id="adminFiltroEquipo" class="form-select form-select-sm" onchange="cargarDashboard()">
+                <option value="TODOS">-- Todos los Equipos --</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <button class="btn btn-sm btn-outline-secondary w-100" onclick="limpiarFiltrosAdmin()"><i class="fa-solid fa-eraser me-1"></i> Limpiar Filtros</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- EQUIPOS NO OPERATIVOS Y RESERVAS AFECTADAS (solo visible si hay equipos no operativos) -->
+        <div id="panelAlertasEstado" class="card card-custom p-3 mb-4" style="display: none; border-left: 5px solid #dd6b20;">
+          <h6 class="fw-bold mb-2" style="color: #9c4221;"><i class="fa-solid fa-triangle-exclamation me-2"></i> Equipos no operativos y reservas afectadas</h6>
+          <div id="listaEquiposNoOperativos" class="mb-2 small"></div>
+          <div id="listaReservasAfectadas" class="table-responsive"></div>
+        </div>
+
+        <!-- BLOQUEOS DE GESTIÓN -->
+        <div class="card card-custom p-3 mb-4" style="border-left: 5px solid #5b21b6;">
+          <h6 class="fw-bold mb-2" style="color: var(--purple-dark);"><i class="fa-solid fa-lock me-2"></i> Bloqueos de gestión (revisión, mantenimiento, verificación)</h6>
+          <div class="row g-2 align-items-end mb-3">
+            <div class="col-md-3"><label class="form-label small fw-bold mb-1">Equipo</label><select id="bloqueoEquipo" class="form-select form-select-sm"></select></div>
+            <div class="col-md-2"><label class="form-label small fw-bold mb-1">Desde</label><input type="datetime-local" id="bloqueoDesde" class="form-control form-control-sm"></div>
+            <div class="col-md-2"><label class="form-label small fw-bold mb-1">Hasta</label><input type="datetime-local" id="bloqueoHasta" class="form-control form-control-sm"></div>
+            <div class="col-md-3"><label class="form-label small fw-bold mb-1">Motivo</label><input type="text" id="bloqueoMotivo" class="form-control form-control-sm" maxlength="200" placeholder="Ej. Revisión de disco"></div>
+            <div class="col-md-2"><button type="button" class="btn btn-sm btn-purple w-100" onclick="crearBloqueoUI()">Bloquear</button></div>
+          </div>
+          <div id="listaBloqueos" class="table-responsive small"></div>
+        </div>
+
+        <!-- VISTA DE RONDA -->
+        <div class="card card-custom p-3 mb-4">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold mb-0" style="color: var(--purple-dark);"><i class="fa-solid fa-list-check me-2"></i> Vista de ronda: estado de cada equipo ahora</h6>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cargarRonda()"><i class="fa-solid fa-rotate me-1"></i> Actualizar</button>
+          </div>
+          <div id="tablaRonda" class="table-responsive small"></div>
+        </div>
+
+        <div id="adminStatsContainer">
+          <div class="row g-3 mb-4">
+            <div class="col-md-6"><div class="kpi-card"><div class="kpi-subtext">Total Procesos / Reservas</div><div class="kpi-number" id="kpiTotal">-</div></div></div>
+            <div class="col-md-6"><div class="kpi-card"><div class="kpi-subtext">Horas Totales Computación</div><div class="kpi-number" id="kpiHoras">-</div></div></div>
+          </div>
+
+          <div class="row g-4 mb-4">
+            <div class="col-md-6">
+              <div class="chart-container-single">
+                <canvas id="chartActividades"></canvas>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="chart-container-single">
+                <canvas id="chartEquipos"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-4 mb-4">
+            <div class="col-md-6">
+              <div class="chart-container-single">
+                <canvas id="chartProgramas"></canvas>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="chart-container-single">
+                <canvas id="chartMatriculas"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row mt-4">
+          <div class="col-12">
+            <h5 class="mb-3" style="color: var(--purple-dark);"><i class="fa-solid fa-calendar-week me-2"></i> Calendario General de Reservas</h5>
+            <div id="calendarAdmin"></div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL DE DETALLE -->
+  <div class="modal fade" id="modalDetalleEvento" tabindex="-1" aria-labelledby="modalDetalleEventoLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header text-white" id="modalHeader" style="background-color: var(--purple-primary);">
+          <h5 class="modal-title" id="modalDetalleEventoLabel"><i class="fa-solid fa-circle-info me-2"></i> Detalles de la Reserva</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body" id="modalCuerpo"></div>
+        <div class="modal-footer" id="modalFooter">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    let calendarUser, calendarAdmin;
+    let chartInstanceAct, chartInstanceEq, chartInstanceProg, chartInstanceMatr;
+
+    let reservaSeleccionada = null; // { numFila, idReserva } de la reserva abierta en el modal admin
+
+    // Reservas vigentes/futuras sobre equipos no operativos (las llena cargarAlertasEstado)
+    let alertasEstado = [];
+
+    // Entrada por NFC/QR: el servidor pasa el ID ya validado (vacío si no hay ?asset=)
+    const ACTIVO_INICIAL = <?!= JSON.stringify((typeof activoInicial !== 'undefined') ? activoInicial : '') ?>;
+    let emailSesion = '';             // correo de la sesión (lo fija el servidor al reservar)
+    let perfilCache = null;           // datos de la última reserva de esta sesión
+    let fichaActual = null;           // última ficha cargada
+    let equipoPreseleccionado = null; // etiqueta del equipo elegido desde la ficha
+
+    // ID de la solicitud en curso. Solo se conserva mientras el resultado sea INCIERTO
+    // (fallo de red, sin respuesta); así un reintento no duplica la reserva.
+    let solicitudEnCurso = null;
+
+    function nuevoIdSolicitud() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    }
+
+    // Escapa texto antes de insertarlo con innerHTML / plantillas
+    function esc(v) {
+      return String(v === null || v === undefined ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    if (typeof ChartDataLabels !== 'undefined') {
+      Chart.register(ChartDataLabels);
+    }
+
+    const PALETA_VARIADA = [
+      '#6d28d9', '#dd6b20', '#319795', '#805ad5', '#e53e3e', '#d69e2e',
+      '#3182ce', '#38a169', '#9f7aea', '#ed64a6', '#48bb78', '#4299e1',
+      '#ed8936', '#38b2ac', '#f56565', '#ecc94b', '#667eea', '#ed64a6'
+    ];
+
+    window.onload = function() {
+      if (ACTIVO_INICIAL) cargarFicha(ACTIVO_INICIAL);
+
+      google.script.run
+        .withSuccessHandler(function(usuario) {
+          if (usuario && usuario.email) {
+            document.getElementById('userEmailSpan').innerText = usuario.email;
+            if (usuario.esAdmin) document.getElementById('adminTabLi').style.display = 'block';
+            if (usuario.remitenteIncorrecto) {
+              const av = document.getElementById('avisoRemitente');
+              av.innerHTML = '<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Atención:</strong> la aplicación se está ejecutando como <strong>' +
+                esc(usuario.ejecutaComo) + '</strong>, por eso los correos a los usuarios salen desde esa cuenta. ' +
+                'Para que salgan desde la cuenta del laboratorio, el despliegue debe hacerse iniciando sesión con esa cuenta (Implementar → Gestionar implementaciones → Nueva versión).';
+              av.style.display = 'block';
+            }
+            emailSesion = usuario.email;
+            fijarCorreoSesion(emailSesion);
+            google.script.run.withSuccessHandler(aplicarPerfil).obtenerMiPerfil();
+          }
+        }).obtenerInfoUsuario();
+
+      // Fecha LOCAL (toISOString usa UTC y, después de las 19:00 en Colombia, devolvía el día siguiente)
+      const d0 = new Date();
+      const hoy = d0.getFullYear() + '-' + String(d0.getMonth() + 1).padStart(2, '0') + '-' + String(d0.getDate()).padStart(2, '0');
+      document.getElementById('fechaInicio').setAttribute('min', hoy);
+      document.getElementById('fechaFin').setAttribute('min', hoy);
+
+      google.script.run.withSuccessHandler(function(lista) {
+        const selectUser = document.getElementById('filtroEquipoUser');
+        const selectAdmin = document.getElementById('adminFiltroEquipo');
+        if (lista && lista.length > 0) {
+          lista.forEach(eq => {
+            let opt1 = document.createElement('option');
+            opt1.value = eq; opt1.innerText = eq;
+            selectUser.appendChild(opt1);
+
+            let opt2 = document.createElement('option');
+            opt2.value = eq; opt2.innerText = eq;
+            selectAdmin.appendChild(opt2);
+
+            let opt3 = document.createElement('option');
+            opt3.value = eq; opt3.innerText = eq;
+            document.getElementById('bloqueoEquipo').appendChild(opt3);
+          });
+        }
+      }).obtenerListaEquipos();
+
+      var tabElList = [].slice.call(document.querySelectorAll('button[data-bs-toggle="tab"]'));
+      tabElList.forEach(function (tabEl) {
+        tabEl.addEventListener('shown.bs.tab', function (event) {
+          if (event.target.getAttribute('data-bs-target') === '#userPane') {
+            if (calendarUser) {
+              setTimeout(() => { calendarUser.updateSize(); }, 150);
+            }
+          } else if (event.target.getAttribute('data-bs-target') === '#adminPane') {
+            if (calendarAdmin) {
+              setTimeout(() => { calendarAdmin.updateSize(); }, 150);
+            }
+          }
+        });
+      });
+    };
+
+    // El correo del formulario es el de la sesión y no se puede editar (el servidor lo impone igualmente)
+    function fijarCorreoSesion(email) {
+      const campo = document.getElementById('correoUser');
+      if (email && /@unal\.edu\.co$/i.test(email)) {
+        campo.value = email.replace(/@unal\.edu\.co$/i, '');
+        campo.readOnly = true;
+        campo.classList.add('bg-light');
+        document.getElementById('ayudaCorreo').style.display = 'block';
+      }
+    }
+
+    // Autocompleta con los datos de la última reserva de esta misma sesión
+    function aplicarPerfil(p) {
+      if (!p || !p.ok || !p.datos) return;
+      perfilCache = p;
+      const d = p.datos;
+      document.getElementById('nombre').value = d.nombre || '';
+      document.getElementById('cedula').value = d.cedula || '';
+      const sel = document.getElementById('programa');
+      if (d.programa && d.programa.indexOf('Posgrado: ') === 0) {
+        sel.value = 'Posgrado';
+        document.getElementById('nombrePosgrado').value = d.programa.substring(10);
+      } else if (d.programa && Array.from(sel.options).some(o => o.value === d.programa)) {
+        sel.value = d.programa;
+      }
+      manejarPrograma();
+      const mat = document.getElementById('matricula');
+      if (!mat.disabled && d.matricula && Array.from(mat.options).some(o => o.value === d.matricula)) mat.value = d.matricula;
+      document.getElementById('avisoPerfil').style.display = 'block';
+    }
+
+    function aceptarPoliticaYContinuar() {
+      document.getElementById('panelPoliticaDatos').style.display = 'none';
+      document.getElementById('panelSeccionReserva').style.display = 'block';
+      cargarCalendarioUsuario();
+    }
+
+    function manejarPrograma() {
+      const val = document.getElementById('programa').value;
+      const boxPos = document.getElementById('boxPosgrado');
+      const inputPos = document.getElementById('nombrePosgrado');
+      const matr = document.getElementById('matricula');
+
+      if (val === 'Posgrado') {
+        boxPos.style.display = 'block';
+        inputPos.required = true;
+        matr.disabled = false;
+        matr.required = true;
+      } else if (val === 'Profesor/Investigador') {
+        boxPos.style.display = 'none';
+        inputPos.required = false;
+        matr.value = "";
+        matr.disabled = true;
+        matr.required = false;
+      } else {
+        boxPos.style.display = 'none';
+        inputPos.required = false;
+        matr.disabled = false;
+        matr.required = true;
+      }
+    }
+
+    function manejarActividad() {
+      const val = document.getElementById('tipoActividad').value;
+      const box = document.getElementById('boxActividadDetalle');
+      const label = document.getElementById('labelActividadDetalle');
+      const input = document.getElementById('actividadDetalle');
+      const notaInv = document.getElementById('notaInvestigacion');
+
+      box.style.display = 'block';
+      input.required = true;
+      notaInv.style.display = 'none';
+
+      if (val === 'Docencia') {
+        label.innerText = 'Nombre de la asignatura *';
+        input.placeholder = "Ej. Modelos Estadísticos";
+      } else if (val === 'Investigación') {
+        label.innerText = 'Nombre del proyecto *';
+        input.placeholder = "Ej. Análisis de datos espaciales";
+        notaInv.style.display = 'block';
+      } else if (val === 'PAE') {
+        label.innerText = 'Nombre del tutor *';
+        input.placeholder = "Ej. Profesor(a) María López";
+      } else if (val === 'Semilleros') {
+        label.innerText = 'Nombre del semillero *';
+        input.placeholder = "Ej. Semillero de Ciencia de Datos";
+      } else if (val === 'Trabajo de grado') {
+        label.innerText = 'Nombre del tutor del proyecto de grado *';
+        input.placeholder = "Ej. Profesor(a) Carlos Gómez";
+      } else if (val === 'Otro') {
+        label.innerText = '¿Cuál actividad? *';
+        input.placeholder = "Especifique su actividad";
+      } else {
+        box.style.display = 'none';
+        input.required = false;
+        input.value = '';
+      }
+    }
+
+    function verificarDisponibilidad() {
+      const fIn = document.getElementById('fechaInicio').value;
+      const hIn = document.getElementById('horaInicio').value;
+      const fFin = document.getElementById('fechaFin').value;
+      const hFin = document.getElementById('horaFin').value;
+      const container = document.getElementById('equiposContainer');
+
+      if (fIn && hIn && fFin && hFin) {
+        const ahora = new Date();
+        const limitePermitido = new Date(ahora.getTime() - (5 * 60 * 1000));
+        const reqInicio = new Date(fIn + "T" + hIn + ":00");
+        const reqFin = new Date(fFin + "T" + hFin + ":00");
+
+        if (reqInicio < limitePermitido) {
+          container.innerHTML = '<span class="text-danger fw-bold"><i class="fa-solid fa-clock"></i> La hora de inicio no puede ser anterior a 5 minutos respecto a la hora actual.</span>';
+          return;
+        }
+
+        if (reqInicio >= reqFin) {
+          container.innerHTML = '<span class="text-danger fw-bold">La fecha y hora de fin debe ser posterior a la de inicio.</span>';
+          return;
+        }
+
+        container.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Consultando disponibilidad...</span>';
+        google.script.run.withSuccessHandler(function(disponibles) {
+          container.innerHTML = '';
+          if (!disponibles || disponibles.length === 0) {
+            container.innerHTML = '<span class="text-danger fw-bold">Todas las máquinas están ocupadas en ese rango.</span>';
+          } else {
+            disponibles.forEach((eq, index) => {
+              let div = document.createElement('div');
+              div.className = 'form-check mb-1';
+              div.innerHTML = `<input class="form-check-input chk-equipo" type="radio" name="equipoSeleccionado" value="${esc(eq)}" id="eq_${index}"><label class="form-check-label" for="eq_${index}">${esc(eq)}</label>`;
+              container.appendChild(div);
+            });
+            aplicarPreseleccion(container);
+          }
+          avisoPreseleccionDisponibilidad(disponibles);
+        }).obtenerEquiposDisponibles(fIn, hIn, fFin, hFin);
+      }
+    }
+
+    function guardarReserva(e) {
+      e.preventDefault();
+
+      const chks = document.querySelectorAll('.chk-equipo:checked');
+      if (chks.length === 0) { alert("Debe seleccionar un (1) computador."); return; }
+
+      const fIn = document.getElementById('fechaInicio').value;
+      const hIn = document.getElementById('horaInicio').value;
+      const fFin = document.getElementById('fechaFin').value;
+      const hFin = document.getElementById('horaFin').value;
+
+      const ahora = new Date();
+      const limitePermitido = new Date(ahora.getTime() - (5 * 60 * 1000));
+      const reqInicio = new Date(fIn + "T" + hIn + ":00");
+
+      if (reqInicio < limitePermitido) {
+        alert("La hora de inicio de la reserva no puede ser anterior a 5 minutos respecto a la hora actual.");
+        return;
+      }
+
+      const btn = document.getElementById('btnSubmit');
+      btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Procesando...';
+
+      let correoUsuarioCompleto = document.getElementById('correoUser').value.trim().toLowerCase();
+      if (!correoUsuarioCompleto.includes('@')) correoUsuarioCompleto += "@unal.edu.co";
+
+      let progFinal = document.getElementById('programa').value;
+      if (progFinal === 'Posgrado') {
+        progFinal = "Posgrado: " + document.getElementById('nombrePosgrado').value.trim();
+      }
+      let matrFinal = document.getElementById('matricula').disabled ? "N/A" : document.getElementById('matricula').value;
+
+      let actTipo = document.getElementById('tipoActividad').value;
+      let actDetalle = document.getElementById('actividadDetalle').value.trim();
+      let descActividad = document.getElementById('descripcionActividad').value.trim();
+
+      let detalleFinal = actDetalle ? `${actDetalle} | Descripción: ${descActividad}` : `Descripción: ${descActividad}`;
+
+      if (!solicitudEnCurso) solicitudEnCurso = nuevoIdSolicitud();
+
+      const datos = {
+        tipoUsuario: (progFinal === 'Profesor/Investigador') ? "Docente/Investigador" : "Estudiante",
+        nombre: document.getElementById('nombre').value,
+        cedula: document.getElementById('cedula').value,
+        correo: correoUsuarioCompleto,
+        programa: progFinal,
+        matricula: matrFinal,
+        fechaInicio: fIn,
+        horaInicio: hIn,
+        fechaFin: fFin,
+        horaFin: hFin,
+        equipos: Array.from(chks).map(c => c.value),
+        tipoActividad: actTipo,
+        detalleActividad: detalleFinal,
+        idSolicitud: solicitudEnCurso,
+        desatendido: document.getElementById('procesoDesatendido').checked,
+        mensaje: document.getElementById('mensajeLlegada').value
+      };
+
+      google.script.run.withSuccessHandler(res => {
+        if (!res.incierto) solicitudEnCurso = null; // respuesta definitiva: el próximo envío será una solicitud nueva
+        btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-calendar-check me-2"></i> Registrar Reserva';
+        const alertBox = document.getElementById('alertBox');
+        if (res.exito) {
+          alertBox.innerHTML = `<div class="alert alert-success"><i class="fa-solid fa-check me-1"></i> ${esc(res.mensaje)}</div>`;
+          document.getElementById('reservaForm').reset();
+          fijarCorreoSesion(emailSesion);
+          if (perfilCache) aplicarPerfil(perfilCache);
+          document.getElementById('boxPosgrado').style.display = 'none';
+          document.getElementById('boxActividadDetalle').style.display = 'none';
+          document.getElementById('notaInvestigacion').style.display = 'none';
+          document.getElementById('equiposContainer').innerHTML = '<small class="text-muted">Seleccione las fechas y horas arriba para consultar la disponibilidad...</small>';
+          cargarCalendarioUsuario();
+          if(calendarAdmin) cargarDashboard();
+          equipoPreseleccionado = null;
+          document.getElementById('avisoPreseleccion').style.display = 'none';
+          if (fichaActual && fichaActual.ok) cargarFicha(fichaActual.equipo.id);
+          setTimeout(() => alertBox.innerHTML = '', 5000);
+        } else {
+          alertBox.innerHTML = `<div class="alert alert-danger"><i class="fa-solid fa-xmark me-1"></i> ${esc(res.mensaje)}</div>`;
+        }
+      }).withFailureHandler(function(err) {
+        // Sin respuesta del servidor: el resultado es incierto. Se CONSERVA solicitudEnCurso,
+        // de modo que reenviar no cree una reserva duplicada.
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-calendar-check me-2"></i> Registrar Reserva';
+        document.getElementById('alertBox').innerHTML =
+          '<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> ' +
+          'No se recibió respuesta del servidor. Su reserva pudo haberse registrado: revise el calendario y, ' +
+          'si no aparece, pulse «Registrar Reserva» de nuevo (no se duplicará).</div>';
+        cargarCalendarioUsuario();
+      }).registrarReserva(datos);
+    }
+
+    function mostrarDetalles(eventInfo, esAdministrador) {
+      const event = eventInfo.event;
+      const props = event.extendedProps;
+      const cuerpo = document.getElementById('modalCuerpo');
+      const footer = document.getElementById('modalFooter');
+
+      let html = `<ul class="list-group list-group-flush mb-0">`;
+
+      if (esAdministrador) {
+        reservaSeleccionada = { numFila: props.numFila, idReserva: props.idReserva };
+        html += `
+          <li class="list-group-item"><strong>Usuario:</strong> ${esc(props.usuario)} (${esc(props.tipoUsuario)})</li>
+          <li class="list-group-item"><strong>Cédula:</strong> ${esc(props.cedula)}</li>
+          <li class="list-group-item"><strong>Correo:</strong> ${esc(props.correo)}</li>
+          <li class="list-group-item"><strong>Programa:</strong> ${esc(props.programa)} <br><small class="text-muted">Matrícula: ${esc(props.matricula)}</small></li>
+          <li class="list-group-item"><strong>Equipo(s):</strong> ${esc(props.equipos)}</li>
+          <li class="list-group-item"><strong>Actividad:</strong> ${esc(props.actividad)}</li>
+          <li class="list-group-item"><strong>Detalles:</strong> ${esc(props.detalle)}</li>
+          <li class="list-group-item"><strong>Proceso desatendido:</strong> ${esc(props.desatendido)}</li>
+          <li class="list-group-item"><strong>Mensaje de llegada:</strong> ${esc(props.mensaje)}</li>
+          <li class="list-group-item"><strong>Inicio:</strong> ${esc(event.start ? event.start.toLocaleString() : 'N/A')}</li>
+          <li class="list-group-item"><strong>Fin:</strong> ${esc(event.end ? event.end.toLocaleString() : 'N/A')}</li>
+        `;
+
+        footer.innerHTML = `
+          <button type="button" class="btn btn-danger me-auto" onclick="confirmarCancelacion()"><i class="fa-solid fa-trash-can me-1"></i> Cancelar Reserva</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        `;
+      } else {
+        reservaSeleccionada = null;
+        html += `
+          <li class="list-group-item"><strong>Equipo Asignado:</strong> ${esc(props.equipos)}</li>
+          <li class="list-group-item"><strong>Tipo de Actividad:</strong> ${esc(props.actividad)}</li>
+          <li class="list-group-item"><strong>Horario de Inicio:</strong> ${esc(event.start ? event.start.toLocaleString() : 'N/A')}</li>
+          <li class="list-group-item"><strong>Horario de Fin:</strong> ${esc(event.end ? event.end.toLocaleString() : 'N/A')}</li>
+        `;
+        footer.innerHTML = `<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>`;
+      }
+
+      html += `</ul>`;
+      cuerpo.innerHTML = html;
+      document.getElementById('modalHeader').style.backgroundColor = event.backgroundColor || 'var(--purple-primary)';
+
+      const myModal = new bootstrap.Modal(document.getElementById('modalDetalleEvento'));
+      myModal.show();
+    }
+
+    // motivoSugerido es opcional: el botón del modal la llama sin argumentos;
+    // la lista de equipos no operativos la llama con un texto de partida.
+    function confirmarCancelacion(motivoSugerido) {
+      if (!reservaSeleccionada || !reservaSeleccionada.idReserva) {
+        alert("No se pudo identificar la reserva. Recargue el panel e intente de nuevo.");
+        return;
+      }
+      const sel = reservaSeleccionada;
+
+      const motivo = prompt("Por favor, ingrese el motivo de la cancelación para notificar al usuario:", (typeof motivoSugerido === 'string') ? motivoSugerido : "");
+      if (motivo === null) return;
+
+      const motivoLimpio = motivo.trim();
+      if (motivoLimpio === "") {
+        alert("Debe escribir un motivo para efectuar la cancelación.");
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          const modalEl = document.getElementById('modalDetalleEvento');
+          const modal = bootstrap.Modal.getInstance(modalEl);
+          if (modal) modal.hide();
+
+          if (res.exito) {
+            alert("✅ " + res.mensaje);
+          } else {
+            alert("❌ " + res.mensaje);
+          }
+          // Se recarga siempre: así el panel refleja el estado real de la hoja
+          cargarDashboard();
+          cargarCalendarioUsuario();
+          verificarDisponibilidad();
+        })
+        .withFailureHandler(function(err) {
+          alert("❌ No se pudo completar la cancelación. Recargue el panel y verifique el estado de la reserva.");
+          cargarDashboard();
+        })
+        .cancelarReserva(sel.numFila, motivoLimpio, sel.idReserva);
+    }
+
+    function cargarCalendarioUsuario() {
+      const filtroEq = document.getElementById('filtroEquipoUser') ? document.getElementById('filtroEquipoUser').value : "TODOS";
+      google.script.run.withSuccessHandler(function(eventos) {
+        var el = document.getElementById('calendarUser');
+        if (calendarUser) calendarUser.destroy();
+        calendarUser = new FullCalendar.Calendar(el, {
+          locale: 'es',
+          initialView: 'timeGridWeek',
+          height: 560,
+          headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridWeek,listWeek' },
+          slotEventOverlap: false,
+          events: eventos,
+          eventClick: function(info) { mostrarDetalles(info, false); }
+        });
+        calendarUser.render();
+      }).obtenerEventosUsuarioAnonimo(filtroEq);
+    }
+
+    function cargarDashboard() {
+      const fIn = document.getElementById('adminFechaInicio').value;
+      const fFin = document.getElementById('adminFechaFin').value;
+      const eq = document.getElementById('adminFiltroEquipo').value;
+
+      google.script.run
+        .withSuccessHandler(function(stats) {
+          document.getElementById('kpiTotal').innerText = stats.totalReservas;
+          document.getElementById('kpiHoras').innerText = stats.horasTotales + " hrs";
+          renderCalendarAdmin(stats.eventosCalendario);
+          renderCharts(stats);
+          cargarAlertasEstado();
+          cargarBloqueos();
+          cargarRonda();
+        })
+        .withFailureHandler(function(err) {
+          alert("No se pudo cargar el panel de administración (acceso no autorizado o error del servidor).");
+        })
+        .obtenerDatosAdmin(fIn, fFin, eq);
+    }
+
+    function cargarAlertasEstado() {
+      google.script.run
+        .withSuccessHandler(renderAlertasEstado)
+        .withFailureHandler(function(err) { console.log('Alertas de estado no disponibles:', err); })
+        .obtenerAlertasEstadoAdmin();
+    }
+
+    function renderAlertasEstado(res) {
+      const panel = document.getElementById('panelAlertasEstado');
+      const equipos = (res && res.equiposNoOperativos) || [];
+      alertasEstado = (res && res.reservasAfectadas) || [];
+
+      const bloqueos = (res && res.bloqueosActivos) || [];
+      if (equipos.length === 0 && bloqueos.length === 0) { panel.style.display = 'none'; return; }
+      panel.style.display = 'block';
+
+      document.getElementById('listaEquiposNoOperativos').innerHTML =
+        (equipos.length ? '<div><strong>Equipos no operativos:</strong> ' +
+          equipos.map(e => `${esc(e.equipo)} <span class="badge bg-warning text-dark">${esc(e.estado)}</span>`).join(' · ') + '</div>' : '') +
+        (bloqueos.length ? '<div class="mt-1"><strong>Bloqueos de gestión:</strong> ' +
+          bloqueos.map(b => `${esc(b.equipo)} <span class="badge bg-secondary">${esc(b.desde)} → ${esc(b.hasta)}</span>`).join(' · ') + '</div>' : '');
+
+      const cont = document.getElementById('listaReservasAfectadas');
+      if (alertasEstado.length === 0) {
+        cont.innerHTML = '<div class="text-success small"><i class="fa-solid fa-circle-check me-1"></i> No hay reservas vigentes ni futuras en esos equipos.</div>';
+        return;
+      }
+
+      let html = '<table class="table table-sm align-middle mb-0"><thead><tr>' +
+        '<th>Equipo</th><th>Estado</th><th>Usuario</th><th>Inicio</th><th>Fin</th><th></th></tr></thead><tbody>';
+      alertasEstado.forEach((a, i) => {
+        html += `<tr>
+          <td>${esc(a.equipo)}</td>
+          <td>${esc(a.estado)}</td>
+          <td>${esc(a.usuario)}<br><small class="text-muted">${esc(a.correo)}</small></td>
+          <td>${esc(new Date(a.inicio).toLocaleString())}</td>
+          <td>${esc(new Date(a.fin).toLocaleString())}</td>
+          <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelarDesdeAlerta(${i})">Cancelar…</button></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      cont.innerHTML = html;
+    }
+
+    function cancelarDesdeAlerta(i) {
+      const a = alertasEstado[i];
+      if (!a) return;
+      reservaSeleccionada = { numFila: a.numFila, idReserva: a.idReserva };
+      confirmarCancelacion('Equipo no disponible (' + a.estado + ')');
+    }
+
+    // ===== FICHA DE EQUIPO (entrada por NFC / QR) =====
+    function fmtFicha(iso) {
+      return new Date(iso).toLocaleString('es-CO', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function cargarFicha(id) {
+      document.getElementById('fichaEquipo').style.display = 'block';
+      document.getElementById('fichaTitulo').innerText = 'Equipo ' + id;
+      document.getElementById('fichaBadge').innerText = '';
+      document.getElementById('fichaCuerpo').innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Consultando el estado del equipo...</span>';
+      google.script.run
+        .withSuccessHandler(renderFicha)
+        .withFailureHandler(function() { renderFicha({ ok: false, mensaje: 'No se pudo cargar la ficha del equipo. Intente de nuevo.' }); })
+        .obtenerFichaEquipo(id);
+    }
+
+    function renderFicha(f) {
+      const cuerpo = document.getElementById('fichaCuerpo');
+      const badge = document.getElementById('fichaBadge');
+      fichaActual = f;
+
+      if (!f || !f.ok) {
+        document.getElementById('fichaTitulo').innerText = 'Equipo no encontrado';
+        badge.innerText = '';
+        cuerpo.innerHTML = `<div class="alert alert-warning mb-0">${esc(f && f.mensaje ? f.mensaje : 'No se pudo cargar la ficha del equipo.')}</div>`;
+        return;
+      }
+
+      const eq = f.equipo;
+      const uso = f.usoActual;
+      document.getElementById('fichaTitulo').innerText = eq.etiqueta;
+
+      if (!eq.reservable) { badge.className = 'badge bg-danger text-white'; badge.innerText = 'No disponible: ' + eq.estado; }
+      else if (f.bloqueoActual) { badge.className = 'badge bg-secondary text-white'; badge.innerText = 'En revisión por gestión'; }
+      else if (uso) { badge.className = 'badge bg-warning text-dark'; badge.innerText = 'En uso ahora'; }
+      else { badge.className = 'badge bg-success text-white'; badge.innerText = 'Libre ahora'; }
+
+      let html = eq.ubicacion ? `<p class="text-muted mb-3"><i class="fa-solid fa-location-dot me-1"></i> ${esc(eq.ubicacion)}</p>` : '';
+
+      if (!eq.reservable) {
+        html += `<div class="alert alert-danger"><i class="fa-solid fa-screwdriver-wrench me-2"></i> Este equipo está <strong>${esc(eq.estado)}</strong> y no se puede reservar por ahora.</div>`;
+      }
+
+      if (f.bloqueoActual) {
+        html += `<div class="alert alert-secondary"><i class="fa-solid fa-lock me-2"></i> <strong>En revisión por gestión</strong> hasta <strong>${esc(fmtFicha(f.bloqueoActual.hasta))}</strong>: ${esc(f.bloqueoActual.motivo)}</div>`;
+      }
+
+      if (uso) {
+        html += `<div class="alert alert-warning"><strong>Reservado ahora</strong> hasta <strong>${esc(fmtFicha(uso.fin))}</strong>.`;
+        if (uso.desatendido) html += ` <span class="badge bg-dark ms-1">Proceso desatendido: no apagar ni usar</span>`;
+        if (uso.mensaje) html += `<div class="mt-2"><i class="fa-solid fa-message me-1"></i> “${esc(uso.mensaje)}”</div>`;
+        html += `</div>`;
+      } else if (eq.reservable && !f.bloqueoActual) {
+        html += `<div class="alert alert-success">Libre ahora` +
+          (f.libreHasta ? `, hasta <strong>${esc(fmtFicha(f.libreHasta))}</strong>` : ' y sin reservas próximas') + `.</div>`;
+      }
+
+      if (f.esAdmin && f.admin) {
+        const t = f.admin.titular;
+        html += `<div class="border rounded p-3 mb-3 bg-light small"><strong>Solo administración, titular:</strong> ${esc(t.nombre)} · ${esc(t.correo)}<br>${esc(t.actividad)}: ${esc(t.detalle)}</div>`;
+      }
+
+      if (f.proximas && f.proximas.length) {
+        html += '<h6 class="fw-bold mt-3">Próximas reservas</h6><ul class="list-group mb-3">' +
+          f.proximas.map(p => `<li class="list-group-item py-1 small">${esc(fmtFicha(p.inicio))} → ${esc(fmtFicha(p.fin))}${p.desatendido ? ' <span class="badge bg-dark">proceso desatendido</span>' : ''}</li>`).join('') +
+          '</ul>';
+      }
+
+      if (f.bloqueosProximos && f.bloqueosProximos.length) {
+        html += '<h6 class="fw-bold mt-3">Revisiones programadas por gestión</h6><ul class="list-group mb-3">' +
+          f.bloqueosProximos.map(b => `<li class="list-group-item py-1 small"><i class="fa-solid fa-lock me-1"></i> ${esc(fmtFicha(b.desde))} → ${esc(fmtFicha(b.hasta))}: ${esc(b.motivo)}</li>`).join('') +
+          '</ul>';
+      }
+
+      let acciones = '';
+      if (eq.reservable) {
+        acciones += `<button type="button" class="btn btn-purple me-2 mb-2" onclick="reservarEsteEquipo()"><i class="fa-solid fa-calendar-plus me-1"></i> Reservar este equipo</button>`;
+        if (!uso && !f.bloqueoActual) {
+          acciones += `<button type="button" class="btn btn-success me-2 mb-2" onclick="abrirRapida()"><i class="fa-solid fa-bolt me-1"></i> Reserva rápida (desde ahora)</button>`;
+        }
+      }
+      if (uso && !uso.esTitular) {
+        acciones += `<button type="button" class="btn btn-outline-secondary me-2 mb-2" onclick="contactarTitularFicha()"><i class="fa-solid fa-envelope me-1"></i> Preguntar a quien lo tiene</button>`;
+      }
+      if (uso && uso.idReserva) {
+        acciones += `<button type="button" class="btn btn-outline-success me-2 mb-2" onclick="liberarFicha()"><i class="fa-solid fa-bolt me-1"></i> Liberar ahora</button>`;
+        acciones += `<button type="button" class="btn btn-outline-primary me-2 mb-2" onclick="mostrarExtender()"><i class="fa-solid fa-clock me-1"></i> Extender</button>`;
+        if (uso.walletUrl) {
+          acciones += `<a class="btn btn-dark me-2 mb-2" target="_blank" rel="noopener" href="${esc(uso.walletUrl)}"><i class="fa-brands fa-google-wallet me-1"></i> Agregar a Google Wallet</a>`;
+        }
+      }
+      html += `<div>${acciones}</div>`;
+
+      if (uso && uso.idReserva) {
+        html += `<div id="boxExtender" class="mt-2" style="display:none;">
+          <label class="form-label fw-bold small">Nuevo fin de la reserva</label>
+          <div class="d-flex gap-2">
+            <input type="datetime-local" id="nuevoFinFicha" class="form-control form-control-sm">
+            <button type="button" class="btn btn-sm btn-purple" onclick="confirmarExtender()">Confirmar</button>
+          </div>
+        </div>`;
+      }
+
+      if (eq.reservable && !uso && !f.bloqueoActual) {
+        html += `<div id="boxRapida" class="border rounded p-3 mt-3" style="display:none;">
+          <div class="row g-2">
+            <div class="col-6 col-md-3"><label class="form-label small fw-bold mb-1">Duración</label>
+              <select id="rapidaDur" class="form-select form-select-sm">
+                <option value="60">1 hora</option><option value="120" selected>2 horas</option><option value="240">4 horas</option>
+                <option value="480">8 horas</option><option value="720">12 horas</option><option value="1440">24 horas</option>
+              </select></div>
+            <div class="col-6 col-md-3"><label class="form-label small fw-bold mb-1">Actividad</label>
+              <select id="rapidaTipo" class="form-select form-select-sm">${ACTIVIDADES_UI.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select></div>
+            <div class="col-12 col-md-6"><label class="form-label small fw-bold mb-1">Detalle</label>
+              <input type="text" id="rapidaDetalle" class="form-control form-control-sm" maxlength="800"></div>
+            <div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" id="rapidaDesat">
+              <label class="form-check-label small" for="rapidaDesat">Dejaré un proceso ejecutándose sin estar presente (que nadie apague ni use el equipo)</label></div></div>
+            <div class="col-12"><input type="text" id="rapidaMsg" class="form-control form-control-sm" maxlength="140" placeholder="Mensaje para quien llegue (opcional, sin datos personales)"></div>
+            <div class="col-12"><button type="button" class="btn btn-sm btn-success" onclick="confirmarRapida()"><i class="fa-solid fa-bolt me-1"></i> Reservar desde ahora</button></div>
+          </div>
+        </div>`;
+      }
+
+      cuerpo.innerHTML = html;
+    }
+
+    function reservarEsteEquipo() {
+      if (!fichaActual || !fichaActual.ok) return;
+      equipoPreseleccionado = fichaActual.equipo.etiqueta;
+      const aviso = document.getElementById('avisoPreseleccion');
+      aviso.className = 'alert alert-primary mb-4 shadow-sm border-0';
+      aviso.innerHTML = `Va a reservar <strong>${esc(equipoPreseleccionado)}</strong>. Elija el intervalo de uso y se comprobará su disponibilidad.`;
+      aviso.style.display = 'block';
+      const politica = document.getElementById('panelPoliticaDatos');
+      const destino = (politica.style.display !== 'none') ? politica : document.getElementById('panelSeccionReserva');
+      destino.scrollIntoView({ behavior: 'smooth' });
+      verificarDisponibilidad();
+    }
+
+    function aplicarPreseleccion(container) {
+      if (!equipoPreseleccionado) return;
+      container.querySelectorAll('.chk-equipo').forEach(function(r) {
+        if (r.value === equipoPreseleccionado) r.checked = true;
+      });
+    }
+
+    function avisoPreseleccionDisponibilidad(disponibles) {
+      if (!equipoPreseleccionado) return;
+      const aviso = document.getElementById('avisoPreseleccion');
+      const ok = !!disponibles && disponibles.indexOf(equipoPreseleccionado) !== -1;
+      aviso.className = 'alert mb-4 shadow-sm border-0 ' + (ok ? 'alert-success' : 'alert-warning');
+      aviso.innerHTML = ok
+        ? `<strong>${esc(equipoPreseleccionado)}</strong> está disponible en ese intervalo y quedó seleccionado.`
+        : `<strong>${esc(equipoPreseleccionado)}</strong> no está disponible en ese intervalo. Puede elegir otro equipo de la lista o cambiar las fechas.`;
+      aviso.style.display = 'block';
+    }
+
+    function contactarTitularFicha() {
+      if (!fichaActual || !fichaActual.ok) return;
+      const msg = prompt('Mensaje breve para quien tiene el equipo (opcional).\nSe le enviará su correo para que pueda responderle directamente:', '');
+      if (msg === null) return;
+      google.script.run
+        .withSuccessHandler(function(r) { alert((r.exito ? '✅ ' : '❌ ') + r.mensaje); })
+        .withFailureHandler(function() { alert('❌ No se pudo enviar el mensaje. Intente de nuevo.'); })
+        .contactarTitular(fichaActual.equipo.id, msg.trim());
+    }
+
+    function liberarFicha() {
+      const uso = fichaActual && fichaActual.usoActual;
+      if (!uso || !uso.idReserva) return;
+      if (!confirm('¿Liberar ahora el equipo? Quedará disponible para otros usuarios.')) return;
+      google.script.run
+        .withSuccessHandler(function(r) {
+          alert((r.exito ? '✅ ' : '❌ ') + r.mensaje);
+          cargarFicha(fichaActual.equipo.id);
+          cargarCalendarioUsuario();
+        })
+        .withFailureHandler(function() { alert('❌ No se pudo completar la operación. Recargue e intente de nuevo.'); })
+        .liberarDesdeFicha(uso.idReserva);
+    }
+
+    function mostrarExtender() {
+      const box = document.getElementById('boxExtender');
+      if (box) box.style.display = 'block';
+    }
+
+    function confirmarExtender() {
+      const uso = fichaActual && fichaActual.usoActual;
+      if (!uso || !uso.idReserva) return;
+      const v = document.getElementById('nuevoFinFicha').value; // "YYYY-MM-DDTHH:MM"
+      if (!v) { alert('Elija la nueva fecha y hora de fin.'); return; }
+      const partes = v.split('T');
+      google.script.run
+        .withSuccessHandler(function(r) {
+          alert((r.exito ? '✅ ' : '❌ ') + r.mensaje);
+          cargarFicha(fichaActual.equipo.id);
+          cargarCalendarioUsuario();
+        })
+        .withFailureHandler(function() { alert('❌ No se pudo completar la operación. Recargue e intente de nuevo.'); })
+        .extenderDesdeFicha(uso.idReserva, partes[0], partes[1]);
+    }
+
+    // ===== RESERVA RÁPIDA (desde la ficha) =====
+    const ACTIVIDADES_UI = ['Docencia', 'Investigación', 'PAE', 'Semilleros', 'Trabajo de grado', 'Otro'];
+    let solicitudRapida = null;
+
+    function abrirRapida() {
+      const box = document.getElementById('boxRapida');
+      if (!box) return;
+      if (!perfilCache || !perfilCache.datos) {
+        alert('La reserva rápida usa los datos de su última reserva. Haga primero una con el formulario completo (más abajo) y la próxima vez será de un toque.');
+        return;
+      }
+      const d = perfilCache.datos;
+      document.getElementById('rapidaTipo').value = ACTIVIDADES_UI.indexOf(d.actividad) !== -1 ? d.actividad : 'Otro';
+      document.getElementById('rapidaDetalle').value = d.detalle || '';
+      box.style.display = 'block';
+    }
+
+    function confirmarRapida() {
+      if (!fichaActual || !fichaActual.ok) return;
+      const detalle = document.getElementById('rapidaDetalle').value.trim();
+      if (!detalle) { alert('Escriba brevemente qué va a hacer en el equipo.'); return; }
+      if (!solicitudRapida) solicitudRapida = nuevoIdSolicitud();
+      google.script.run
+        .withSuccessHandler(function(r) {
+          if (!r.incierto) solicitudRapida = null;
+          alert((r.exito ? '✅ ' : '❌ ') + r.mensaje);
+          cargarFicha(fichaActual.equipo.id);
+          cargarCalendarioUsuario();
+        })
+        .withFailureHandler(function() {
+          alert('⚠️ No se recibió respuesta del servidor. Su reserva pudo haberse registrado: revise la ficha y, si no aparece, vuelva a pulsar el botón (no se duplicará).');
+          cargarFicha(fichaActual.equipo.id);
+        })
+        .reservaRapida(fichaActual.equipo.id, Number(document.getElementById('rapidaDur').value),
+          document.getElementById('rapidaTipo').value, detalle,
+          document.getElementById('rapidaDesat').checked, document.getElementById('rapidaMsg').value, solicitudRapida);
+    }
+
+    // ===== BLOQUEOS DE GESTIÓN Y VISTA DE RONDA (solo administración) =====
+    function cargarBloqueos() {
+      google.script.run
+        .withSuccessHandler(function(lista) {
+          const cont = document.getElementById('listaBloqueos');
+          if (!lista || !lista.length) { cont.innerHTML = '<span class="text-muted">No hay bloqueos vigentes ni programados.</span>'; return; }
+          let html = '<table class="table table-sm align-middle mb-0"><thead><tr><th>Equipo</th><th>Desde</th><th>Hasta</th><th>Motivo</th><th>Creado por</th><th></th></tr></thead><tbody>';
+          lista.forEach(b => {
+            html += `<tr><td>${esc(b.equipo)}</td><td>${esc(b.desde)}</td><td>${esc(b.hasta)}</td><td>${esc(b.motivo)}</td><td>${esc(b.creadoPor)}</td>
+              <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger" data-id="${esc(b.id)}" onclick="cancelarBloqueoUI(this.dataset.id)">Quitar</button></td></tr>`;
+          });
+          cont.innerHTML = html + '</tbody></table>';
+        })
+        .withFailureHandler(function(err) { console.log('Bloqueos no disponibles:', err); })
+        .obtenerBloqueosAdmin();
+    }
+
+    function crearBloqueoUI() {
+      const eq = document.getElementById('bloqueoEquipo').value;
+      const d = document.getElementById('bloqueoDesde').value;
+      const h = document.getElementById('bloqueoHasta').value;
+      const m = document.getElementById('bloqueoMotivo').value.trim();
+      if (!eq || !d || !h || !m) { alert('Complete equipo, desde, hasta y motivo.'); return; }
+      google.script.run
+        .withSuccessHandler(function(r) {
+          alert((r.exito ? '✅ ' : '❌ ') + r.mensaje);
+          if (r.exito) { document.getElementById('bloqueoMotivo').value = ''; cargarBloqueos(); cargarAlertasEstado(); cargarRonda(); }
+        })
+        .withFailureHandler(function() { alert('❌ No se pudo crear el bloqueo. Revise la lista e intente de nuevo.'); })
+        .crearBloqueo(eq, d, h, m);
+    }
+
+    function cancelarBloqueoUI(id) {
+      if (!confirm('¿Quitar este bloqueo? El equipo volverá a poder reservarse en ese intervalo.')) return;
+      google.script.run
+        .withSuccessHandler(function(r) {
+          alert((r.exito ? '✅ ' : '❌ ') + r.mensaje);
+          cargarBloqueos(); cargarAlertasEstado(); cargarRonda();
+        })
+        .withFailureHandler(function() { alert('❌ No se pudo quitar el bloqueo.'); })
+        .cancelarBloqueo(id);
+    }
+
+    function cargarRonda() {
+      google.script.run
+        .withSuccessHandler(renderRonda)
+        .withFailureHandler(function(err) { console.log('Vista de ronda no disponible:', err); })
+        .obtenerVistaRondaAdmin();
+    }
+
+    function renderRonda(lista) {
+      const cont = document.getElementById('tablaRonda');
+      if (!lista || !lista.length) { cont.innerHTML = '<span class="text-muted">Sin equipos.</span>'; return; }
+      let html = '<table class="table table-sm align-middle mb-0"><thead><tr><th>Equipo</th><th>Estado</th><th>Ahora</th><th>Hasta</th><th>Titular y contacto</th><th>Próxima reserva</th><th></th></tr></thead><tbody>';
+      lista.forEach(e => {
+        let ahora = '<span class="badge bg-success">Libre</span>', hasta = '', tit = '';
+        if (!e.reservable) {
+          ahora = `<span class="badge bg-danger">${esc(e.estado)}</span>`;
+        } else if (e.bloqueo) {
+          ahora = `<span class="badge bg-secondary">Bloqueo: ${esc(e.bloqueo.motivo)}</span>`;
+          hasta = esc(e.bloqueo.hasta);
+        } else if (e.uso) {
+          ahora = '<span class="badge bg-warning text-dark">En uso</span>' + (e.uso.desatendido ? ' <span class="badge bg-dark">desatendido</span>' : '');
+          hasta = esc(fmtFicha(e.uso.fin));
+          tit = `${esc(e.uso.nombre)}<br><a href="mailto:${esc(e.uso.correo)}">${esc(e.uso.correo)}</a>` +
+                (e.uso.mensaje ? `<br><small class="text-muted">“${esc(e.uso.mensaje)}”</small>` : '');
+        }
+        html += `<tr>
+          <td>${esc(e.etiqueta)}<br><small class="text-muted">${esc(e.ubicacion)}</small></td>
+          <td>${esc(e.estado)}</td><td>${ahora}</td><td>${hasta}</td><td>${tit}</td>
+          <td>${e.proximaReserva ? esc(fmtFicha(e.proximaReserva)) : ''}</td>
+          <td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" data-id="${esc(e.id)}" onclick="verFicha(this.dataset.id)">Ficha</button></td>
+        </tr>`;
+      });
+      cont.innerHTML = html + '</tbody></table>';
+    }
+
+    function verFicha(id) {
+      cargarFicha(id);
+      document.getElementById('userTabBtn').click();
+      window.scrollTo(0, 0);
+    }
+
+    function limpiarFiltrosAdmin() {
+      document.getElementById('adminFechaInicio').value = '';
+      document.getElementById('adminFechaFin').value = '';
+      document.getElementById('adminFiltroEquipo').value = 'TODOS';
+      cargarDashboard();
+    }
+
+    function renderCharts(stats) {
+      if (chartInstanceAct) chartInstanceAct.destroy();
+      if (chartInstanceEq) chartInstanceEq.destroy();
+      if (chartInstanceProg) chartInstanceProg.destroy();
+      if (chartInstanceMatr) chartInstanceMatr.destroy();
+
+      const datalabelsDefault = {
+        display: true,
+        color: '#2d3748',
+        font: { weight: 'bold', size: 12 },
+        formatter: (value) => (value > 0 ? value : '')
+      };
+
+      const ctxAct = document.getElementById('chartActividades').getContext('2d');
+      chartInstanceAct = new Chart(ctxAct, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(stats.tipoActividad),
+          datasets: [{
+            data: Object.values(stats.tipoActividad),
+            backgroundColor: PALETA_VARIADA
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: { display: true, text: 'Distribución por Actividad', font: { size: 15, weight: 'bold' } },
+            legend: { position: 'top' },
+            datalabels: {
+              ...datalabelsDefault,
+              color: '#ffffff',
+              font: { weight: 'bold', size: 13 }
+            }
+          }
+        }
+      });
+
+      const ctxEq = document.getElementById('chartEquipos').getContext('2d');
+      const labelsEq = Object.keys(stats.equiposMasUsados);
+      chartInstanceEq = new Chart(ctxEq, {
+        type: 'bar',
+        data: {
+          labels: labelsEq,
+          datasets: [{
+            label: 'Reservas',
+            data: Object.values(stats.equiposMasUsados),
+            backgroundColor: PALETA_VARIADA.slice(0, labelsEq.length)
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: { display: true, text: 'Uso de Computadores', font: { size: 15, weight: 'bold' } },
+            legend: { display: false },
+            datalabels: {
+              ...datalabelsDefault,
+              anchor: 'end',
+              align: 'right',
+              offset: 6
+            }
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              grace: '15%',
+              ticks: { precision: 0, stepSize: 1 }
+            }
+          }
+        }
+      });
+
+      const ctxProg = document.getElementById('chartProgramas').getContext('2d');
+      const labelsProg = Object.keys(stats.programas);
+      chartInstanceProg = new Chart(ctxProg, {
+        type: 'bar',
+        data: {
+          labels: labelsProg,
+          datasets: [{
+            label: 'Solicitudes',
+            data: Object.values(stats.programas),
+            backgroundColor: PALETA_VARIADA.slice(2, 2 + labelsProg.length)
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: { display: true, text: 'Reservas por Programa Académico', font: { size: 15, weight: 'bold' } },
+            legend: { display: false },
+            datalabels: {
+              ...datalabelsDefault,
+              anchor: 'end',
+              align: 'top',
+              offset: 4
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grace: '15%',
+              ticks: { precision: 0, stepSize: 1 }
+            }
+          }
+        }
+      });
+
+      const ctxMatr = document.getElementById('chartMatriculas').getContext('2d');
+      const labelsMatr = Object.keys(stats.matriculas);
+      chartInstanceMatr = new Chart(ctxMatr, {
+        type: 'bar',
+        data: {
+          labels: labelsMatr,
+          datasets: [{
+            label: 'Solicitudes',
+            data: Object.values(stats.matriculas),
+            backgroundColor: PALETA_VARIADA.slice(4, 4 + labelsMatr.length)
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: { display: true, text: 'Reservas por Matrícula', font: { size: 15, weight: 'bold' } },
+            legend: { display: false },
+            datalabels: {
+              ...datalabelsDefault,
+              anchor: 'end',
+              align: 'top',
+              offset: 4
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grace: '15%',
+              ticks: { precision: 0, stepSize: 1 }
+            }
+          }
+        }
+      });
+    }
+
+    function renderCalendarAdmin(eventos) {
+      var el = document.getElementById('calendarAdmin');
+      if (calendarAdmin) calendarAdmin.destroy();
+      calendarAdmin = new FullCalendar.Calendar(el, {
+        locale: 'es',
+        initialView: 'timeGridWeek',
+        height: 580,
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listWeek' },
+        slotEventOverlap: false,
+        events: eventos,
+        eventClick: function(info) { mostrarDetalles(info, true); }
+      });
+      calendarAdmin.render();
+      setTimeout(() => { calendarAdmin.updateSize(); }, 200);
+    }
+  </script>
+</body>
+</html>
