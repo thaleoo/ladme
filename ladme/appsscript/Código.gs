@@ -9,8 +9,24 @@
 // ============================================================================
 
 const ADMIN_EMAILS = [
+  "josoriodi@unal.edu.co",
   "labdatos_paz@unal.edu.co"
 ];
+
+// Rol laboratorista (staff). Puede ver el panel operativo y validar mantenimiento,
+// pero no cambia roles ni políticas. Hoy las dos cuentas iniciales son admin.
+const LAB_EMAILS = [
+  "josoriodi@unal.edu.co",
+  "labdatos_paz@unal.edu.co"
+];
+
+// Permisos finos (D-03: 3 roles + permiso). El rol se deriva del correo; el permiso
+// se concede explícitamente. Para agregar un responsable técnico, añada su correo
+// a "validar_mantenimiento" sin convertirlo en administrador.
+const PERMISOS_POR_CORREO = {
+  "josoriodi@unal.edu.co": ["validar_mantenimiento"],
+  "labdatos_paz@unal.edu.co": ["validar_mantenimiento"]
+};
 
 // Cuenta con la que DEBE correr la aplicación. Los correos salen desde la cuenta que ejecuta el script
 // (con "Ejecutar como: Yo" es quien hizo el ÚLTIMO despliegue). Si es otra, el panel admin muestra una alerta.
@@ -30,6 +46,25 @@ const CONTACTO_ESPERA_SEG = 900; // un mismo solicitante puede escribir al mismo
 const HOJA_BLOQUEOS = "Bloqueos_LADME";
 const ENCABEZADOS_BLOQUEOS = ["ID Bloqueo", "Equipo", "Desde", "Hasta", "Motivo", "Creado por", "Fecha creación", "Estado", "Cancelado por", "Fecha cancelación"];
 const DURACIONES_RAPIDAS_MIN = [60, 120, 240, 480, 720, 1440]; // reserva rápida: 1, 2, 4, 8, 12 y 24 horas
+
+// Columnas nuevas de Reservas_LADME (S..V). Se crean solas en la primera reserva.
+const COL_ESTADO = 19;                 // S: Activa | Cancelada | Finalizada
+const COL_FECHA_CANCELACION = 20;      // T
+const COL_MOTIVO_CANCELACION = 21;     // U
+const COL_EXTENSIONES = 22;            // V: contador de extensiones usadas
+const ENCABEZADOS_RESERVAS_EXTRA = [
+  [COL_ESTADO, "Estado"],
+  [COL_FECHA_CANCELACION, "Fecha cancelación"],
+  [COL_MOTIVO_CANCELACION, "Motivo cancelación"],
+  [COL_EXTENSIONES, "Extensiones"]
+];
+
+// Política de reservas (D-02 confirmada): base 168 h + una extensión de hasta 24 h.
+const DURACION_MAX_HORAS = 168;
+const EXTENSION_MAX_HORAS = 24;
+const DURACION_MAX_TOTAL_HORAS = 192;
+const EXTENSIONES_MAX = 1;
+const MAX_RESERVAS_ACTIVAS_USUARIO = 0; // opcional: 0 = sin límite (recomendado al inicio)
 
 // Interruptor de emergencia: poner en false desactiva SOLO la comprobación de
 // identidad en los enlaces del correo (el historial sigue funcionando).
@@ -111,6 +146,117 @@ function requireAdmin_() {
   if (!esAdminActual_()) throw new Error("No autorizado.");
 }
 
+/** ¿La sesión pertenece al personal del laboratorio (admin o laboratorista)? */
+function esLaboratoristaActual_() {
+  var email = obtenerEmailActivo_();
+  if (!email) return false;
+  if (esAdminActual_()) return true;
+  return LAB_EMAILS.some(function (a) { return a.toLowerCase().trim() === email; });
+}
+
+/** Permisos finos por correo (p. ej. "validar_mantenimiento"). */
+function permisosActuales_() {
+  var email = obtenerEmailActivo_();
+  if (!email) return [];
+  return (PERMISOS_POR_CORREO[email] || []).slice();
+}
+
+function tienePermiso_(permiso) {
+  if (esAdminActual_()) return true; // el admin puede todo
+  return permisosActuales_().indexOf(String(permiso)) !== -1;
+}
+
+function requirePermiso_(permiso) {
+  if (!tienePermiso_(permiso)) throw new Error("No tiene el permiso requerido: " + permiso + ".");
+}
+
+/** Estado de una fila de Reservas_LADME. Vacío = Activa (compatibilidad con filas viejas). */
+function estadoReserva_(row) {
+  var e = row && row[COL_ESTADO - 1] ? row[COL_ESTADO - 1].toString().trim() : "";
+  return e || "Activa";
+}
+
+function esReservaCancelada_(row) {
+  return estadoReserva_(row).toLowerCase() === "cancelada";
+}
+
+/**
+ * Igual que esReservaCancelada_, pero para filas leídas a partir de la columna H
+ * (índice 8). Varias funciones de disponibilidad leen solo el tramo H..V por
+ * rendimiento, y ahí la columna Estado queda en la posición COL_ESTADO - 8.
+ */
+function esCanceladaEnSliceH_(r) {
+  var e = r[COL_ESTADO - 8] ? r[COL_ESTADO - 8].toString().trim().toLowerCase() : "";
+  return e === "cancelada";
+}
+
+/**
+ * Valida la política de duración base. Función pura.
+ * Devuelve { ok, horas } o { ok:false, mensaje }.
+ */
+function validarPoliticaBase_(inicio, fin) {
+  if (!(inicio instanceof Date) || !(fin instanceof Date) || isNaN(inicio.getTime()) || isNaN(fin.getTime())) {
+    return { ok: false, mensaje: "Fecha u hora inválida." };
+  }
+  var horas = (fin.getTime() - inicio.getTime()) / 3600000;
+  if (horas <= 0) return { ok: false, mensaje: "La fecha/hora de fin debe ser posterior a la de inicio." };
+  if (horas > DURACION_MAX_HORAS) {
+    return {
+      ok: false,
+      mensaje: "La reserva supera el máximo de " + DURACION_MAX_HORAS + " horas (7 días). " +
+        "Puede reservar hasta 168 h y solicitar una única extensión de hasta 24 h."
+    };
+  }
+  return { ok: true, horas: horas };
+}
+
+/**
+ * Valida una extensión. Función pura.
+ * - Solo una extensión por reserva.
+ * - La extensión añadida no puede superar 24 h.
+ * - El total (inicio original → nuevo fin) no puede superar 192 h.
+ * El admin puede saltarse los topes, pero queda registrado en el historial.
+ */
+function validarPoliticaExtension_(inicio, finActual, nuevoFin, extensionesUsadas, esAdmin) {
+  if (!(inicio instanceof Date) || !(finActual instanceof Date) || !(nuevoFin instanceof Date)) {
+    return { ok: false, mensaje: "Fecha u hora inválida." };
+  }
+  var usadas = Number(extensionesUsadas) || 0;
+  var horasAgregadas = (nuevoFin.getTime() - finActual.getTime()) / 3600000;
+  var horasTotales = (nuevoFin.getTime() - inicio.getTime()) / 3600000;
+  if (horasAgregadas <= 0) return { ok: false, mensaje: "El nuevo fin debe ser posterior al fin actual." };
+  if (!esAdmin && usadas >= EXTENSIONES_MAX) {
+    return { ok: false, mensaje: "Esta reserva ya usó su única extensión permitida." };
+  }
+  if (!esAdmin && horasAgregadas > EXTENSION_MAX_HORAS) {
+    return { ok: false, mensaje: "La extensión máxima es de " + EXTENSION_MAX_HORAS + " horas." };
+  }
+  if (!esAdmin && horasTotales > DURACION_MAX_TOTAL_HORAS) {
+    return { ok: false, mensaje: "La reserva no puede superar " + DURACION_MAX_TOTAL_HORAS + " horas en total (168 h + 24 h)." };
+  }
+  return { ok: true, horasAgregadas: horasAgregadas, horasTotales: horasTotales, usadas: usadas };
+}
+
+/** Cuenta reservas activas/futuras (no canceladas) del correo, excluyendo una fila si se indica. */
+function contarReservasVigentes_(correo, excluirId) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_RESERVAS);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var ncol = Math.min(Math.max(COL_ESTADO, 15), sheet.getMaxColumns());
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, ncol).getValues();
+  var ahora = new Date();
+  var objetivo = String(correo || "").toLowerCase().trim();
+  var total = 0;
+  data.forEach(function (row) {
+    if (esReservaCancelada_(row)) return;
+    var dueno = row[4] ? row[4].toString().toLowerCase().trim() : "";
+    if (dueno !== objetivo) return;
+    if (excluirId && idDeFila_(row) === excluirId) return;
+    var fin = new Date(Utilities.formatDate(new Date(row[9]), Session.getScriptTimeZone(), "yyyy-MM-dd") + "T" + formatHoraStr(row[10]) + ":00");
+    if (fin > ahora) total++;
+  });
+  return total;
+}
+
 /** ID de una fila de Reservas_LADME (col. O, o el derivado del timestamp para filas antiguas sin ID). */
 function idDeFila_(row) {
   var id = row[14] ? row[14].toString().trim() : "";
@@ -156,6 +302,12 @@ function validarDatosReserva_(datos) {
   limpio.horaInicio = String(datos.horaInicio);
   limpio.fechaFin = String(datos.fechaFin);
   limpio.horaFin = String(datos.horaFin);
+
+  // Política D-02: la reserva base no puede superar 168 h (7 días).
+  var inicioPolitica = new Date(limpio.fechaInicio + "T" + limpio.horaInicio + ":00");
+  var finPolitica = new Date(limpio.fechaFin + "T" + limpio.horaFin + ":00");
+  var politica = validarPoliticaBase_(inicioPolitica, finPolitica);
+  if (!politica.ok) return fallo(politica.mensaje);
 
   if (!Array.isArray(datos.equipos) || datos.equipos.length === 0) return fallo("Debe seleccionar un equipo.");
   if (datos.equipos.length > 1) return fallo("Solo puede seleccionar un (1) equipo por reserva.");
@@ -234,6 +386,7 @@ function inicializarHojas_() {
     sheetReservas.getRange(1, 1, 1, 15).setFontWeight("bold").setBackground("#6d28d9").setFontColor("#FFFFFF");
     sheetReservas.setFrozenRows(1);
   }
+  try { asegurarColumnasExtra_(sheetReservas); } catch (err) { Logger.log("No se pudieron asegurar columnas extra: " + err.toString()); }
 
   var sheetEquipos = ss.getSheetByName(HOJA_COMPUTADORES);
   if (!sheetEquipos) {
@@ -261,7 +414,12 @@ function cuentaEjecucion_() {
 
 function obtenerInfoUsuario() {
   var email = obtenerEmailActivo_();
-  var info = { email: email || "Usuario Institucional", esAdmin: esAdminActual_() };
+  var info = {
+    email: email || "Usuario Institucional",
+    esAdmin: esAdminActual_(),
+    esLaboratorista: esLaboratoristaActual_(),
+    permisos: permisosActuales_()
+  };
   if (info.esAdmin) {
     // Solo la administración ve con qué cuenta corre la app (de ahí salen los correos)
     var ejecuta = cuentaEjecucion_();
@@ -334,8 +492,10 @@ function obtenerEquiposDisponibles(fechaInicio, horaInicio, fechaFin, horaFin) {
   var equiposOcupados = [];
 
   if (sheetReservas && sheetReservas.getLastRow() >= 2) {
-    var reservas = sheetReservas.getRange(2, 8, sheetReservas.getLastRow() - 1, 5).getValues();
+    var anchoReservas = Math.max(5, Math.min(COL_EXTENSIONES, sheetReservas.getMaxColumns()) - 7);
+    var reservas = sheetReservas.getRange(2, 8, sheetReservas.getLastRow() - 1, anchoReservas).getValues();
     reservas.forEach(function(r) {
+      if (esCanceladaEnSliceH_(r)) return;
       var resFInStr = Utilities.formatDate(new Date(r[0]), Session.getScriptTimeZone(), "yyyy-MM-dd");
       var resHInStr = formatHoraStr(r[1]);
       var resStart = new Date(resFInStr + "T" + resHInStr + ":00");
@@ -373,10 +533,12 @@ function obtenerEventosUsuarioAnonimo(equipoFiltro) {
   var sheet = ss.getSheetByName(HOJA_RESERVAS);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
-  var data = sheet.getRange(2, 8, sheet.getLastRow() - 1, 6).getValues();
+  var anchoEventos = Math.max(6, Math.min(COL_EXTENSIONES, sheet.getMaxColumns()) - 7);
+  var data = sheet.getRange(2, 8, sheet.getLastRow() - 1, anchoEventos).getValues();
   var eventos = [];
 
   data.forEach(function(r) {
+    if (esCanceladaEnSliceH_(r)) return;
     var fIn = Utilities.formatDate(new Date(r[0]), Session.getScriptTimeZone(), "yyyy-MM-dd");
     var hIn = formatHoraStr(r[1]);
     var fFin = Utilities.formatDate(new Date(r[2]), Session.getScriptTimeZone(), "yyyy-MM-dd");
@@ -488,6 +650,18 @@ function registrarReserva(datosCrudos) {
       return { exito: false, mensaje: "El computador seleccionado ya fue reservado en ese bloque horario o no está disponible." };
     }
 
+    // 4b) Límite opcional de reservas vigentes por usuario (0 = desactivado)
+    if (MAX_RESERVAS_ACTIVAS_USUARIO > 0) {
+      var vigentes = contarReservasVigentes_(datos.correo);
+      if (vigentes >= MAX_RESERVAS_ACTIVAS_USUARIO) {
+        return {
+          exito: false,
+          mensaje: "Ya tiene " + vigentes + " reservas activas o futuras. El máximo es " +
+            MAX_RESERVAS_ACTIVAS_USUARIO + ". Cancele o libere una antes de crear otra."
+        };
+      }
+    }
+
     // 5) Escritura + confirmación (A..O como siempre; P = ID de solicitud; Q = desatendido; R = mensaje)
     var destino = sheet.getLastRow() + 1;
     escribirFilaReserva_(sheet, destino, [
@@ -495,7 +669,8 @@ function registrarReserva(datosCrudos) {
       datos.programa, datos.matricula, datos.fechaInicio, datos.horaInicio,
       datos.fechaFin, datos.horaFin, datos.equipos.join(", "),
       datos.tipoActividad, datos.detalleActividad, idReserva, datos.idSolicitud || "",
-      datos.desatendido ? "Sí" : "", datos.mensaje || ""
+      datos.desatendido ? "Sí" : "", datos.mensaje || "",
+      "Activa", "", "", 0
     ]);
     SpreadsheetApp.flush();
 
@@ -547,7 +722,6 @@ function enviarCorreosNotificacion_(datos, idReserva) {
       "Equipo: " + eqTexto + (mId ? "\nFicha (liberar o extender): " + urlBase + "?asset=" + encodeURIComponent(mId[1]) : "")
     );
 
-    var urlWallet = walletEnlaceDesdeDatos_(datosSinEscapar, idReserva);
     var htmlUsuario = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #6d28d9; border-radius: 8px; overflow: hidden;">
         <div style="background-color: #6d28d9; color: white; padding: 20px; text-align: center;">
@@ -581,7 +755,6 @@ function enviarCorreosNotificacion_(datos, idReserva) {
               <a href="${escHtml_(urlCalendario)}" style="background-color: #2b6cb0; color: white; padding: 9px 15px; text-decoration: none; border-radius: 5px; font-size: 13px; font-weight: bold; margin-left: 5px; display: inline-block;">
                 📅 Agregar a mi calendario
               </a>
-              ${urlWallet ? '<a href="' + escHtml_(urlWallet) + '" style="background-color: #202124; color: white; padding: 9px 15px; text-decoration: none; border-radius: 5px; font-size: 13px; font-weight: bold; margin-left: 5px; display: inline-block;">Agregar a Google Wallet</a>' : ""}
             </div>
             <p style="font-size: 11px; color: #64748b; margin: 5px 0 0 0; line-height: 1.3;">
               • <strong>Liberar Equipo:</strong> Si termina su actividad antes del horario previsto, use esta opción para dejar libre el equipo para otros usuarios.<br>
@@ -632,6 +805,9 @@ function generarPaginaConfirmacionHtml_(action, idReserva) {
   }
 
   var rowData = res.rowData;
+  if (esReservaCancelada_(rowData)) {
+    return generarPaginaRespuestaHtml_("Reserva Ya Cancelada", "Esta reserva fue cancelada y ya no ocupa el equipo. Si desea volver a usarlo, haga una reserva nueva.", false);
+  }
   if (!puedeActuarSobreFila_(rowData)) {
     return generarPaginaRespuestaHtml_("Acceso no autorizado", MENSAJE_ENLACE_NO_AUTORIZADO, false);
   }
@@ -651,7 +827,7 @@ function generarPaginaConfirmacionHtml_(action, idReserva) {
   var icono = action === "cancelar" ? "fa-circle-xmark" : "fa-bolt";
 
   var mensaje = action === "cancelar"
-    ? "¿Está seguro que desea <strong>cancelar completamente</strong> su reserva? El registro se eliminará y el equipo quedará libre para otros usuarios."
+    ? "¿Está seguro que desea <strong>cancelar completamente</strong> su reserva? El registro quedará marcado como cancelado y el equipo quedará libre para otros usuarios."
     : "Si termina su actividad antes del horario previsto, use esta opción para dejar libre el equipo para otros usuarios.<br><br>¿Desea confirmar la <strong>liberación inmediata</strong> del computador?";
 
   var html = `
@@ -710,7 +886,6 @@ function procesarAccionEmail_(action, idReserva) {
   var titulo = "";
   var mensaje = "";
   var esExito = false;
-  var walletPend = null;
 
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(LOCK_ESPERA_MS)) {
@@ -723,6 +898,9 @@ function procesarAccionEmail_(action, idReserva) {
     if (!res) {
       titulo = "Reserva No Encontrada";
       mensaje = "No se encontró el registro de la reserva solicitada. Es posible que ya haya sido cancelada previamente.";
+    } else if (esReservaCancelada_(res.rowData)) {
+      titulo = "Reserva Ya Cancelada";
+      mensaje = "Esta reserva ya fue cancelada. No es necesario volver a procesarla.";
     } else if (!puedeActuarSobreFila_(res.rowData)) {
       titulo = "Acceso no autorizado";
       mensaje = MENSAJE_ENLACE_NO_AUTORIZADO;
@@ -740,8 +918,10 @@ function procesarAccionEmail_(action, idReserva) {
           titulo = "No se pudo completar";
           mensaje = "No fue posible registrar el historial de la operación, por eso la reserva <strong>NO</strong> se canceló. Intente de nuevo en unos minutos o contacte a la administración.";
         } else {
-          sheet.deleteRow(rowIndex);
-          walletPend = { row: rowData, estado: "cancelada" };
+          asegurarColumnasExtra_(sheet);
+          sheet.getRange(rowIndex, COL_ESTADO).setValue("Cancelada");
+          sheet.getRange(rowIndex, COL_FECHA_CANCELACION).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"));
+          sheet.getRange(rowIndex, COL_MOTIVO_CANCELACION).setValue("");
           SpreadsheetApp.flush();
           titulo = "Reserva Cancelada";
           mensaje = "Estimado(a) <strong>" + usuario + "</strong>, tu reserva del equipo <strong>" + equipo + "</strong> ha sido cancelada exitosamente y el computador ha quedado libre.";
@@ -760,7 +940,6 @@ function procesarAccionEmail_(action, idReserva) {
           titulo = "No se pudo completar";
           mensaje = "No fue posible registrar el historial de la operación, por eso la reserva <strong>NO</strong> se modificó. Intente de nuevo en unos minutos o contacte a la administración.";
         } else {
-          walletPend = { row: rowData, estado: "finalizada", fin: new Date() };
           titulo = "¡Equipo Liberado Con Éxito!";
           mensaje = "Estimado(a) <strong>" + usuario + "</strong>, has finalizado anticipadamente tu uso del computador <strong>" + equipo + "</strong> a las " + lib.horaActualStr + ". El equipo ha quedado disponible inmediatamente para otros usuarios.";
           esExito = true;
@@ -779,7 +958,6 @@ function procesarAccionEmail_(action, idReserva) {
     try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); }
   }
 
-  if (walletPend) walletActualizar_(walletPend.row, walletPend.estado, walletPend.fin); // ya sin bloqueo
   return generarPaginaRespuestaHtml_(titulo, mensaje, esExito);
 }
 
@@ -846,16 +1024,17 @@ function buscarEquipoPorId_(assetId) {
 function todasLasReservas_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_RESERVAS);
   if (!sheet || sheet.getLastRow() < 2) return [];
-  var ncol = Math.min(COL_MENSAJE, sheet.getMaxColumns());
+  var ncol = Math.min(COL_EXTENSIONES, sheet.getMaxColumns());
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, ncol).getValues();
   var zona = Session.getScriptTimeZone();
   var salida = [];
   data.forEach(function (row, i) {
     try {
+      if (esReservaCancelada_(row)) return;
       var equipos = (row[11] ? row[11].toString() : "").split(", ").map(function (x) { return x.trim(); }).filter(String);
       var inicio = new Date(Utilities.formatDate(new Date(row[7]), zona, "yyyy-MM-dd") + "T" + formatHoraStr(row[8]) + ":00");
       var fin = new Date(Utilities.formatDate(new Date(row[9]), zona, "yyyy-MM-dd") + "T" + formatHoraStr(row[10]) + ":00");
-      salida.push({ numFila: i + 2, row: row, equipos: equipos, inicio: inicio, fin: fin });
+      salida.push({ numFila: i + 2, row: row, equipos: equipos, inicio: inicio, fin: fin, estado: estadoReserva_(row), extensiones: Number(row[COL_EXTENSIONES - 1]) || 0 });
     } catch (err) {
       Logger.log("Fila " + (i + 2) + " omitida: " + err.toString());
     }
@@ -932,12 +1111,18 @@ function obtenerFichaEquipo(assetId) {
       fin: actual.fin.toISOString(),
       desatendido: !!(actual.row[COL_DESATENDIDO - 1]),
       mensaje: actual.row[COL_MENSAJE - 1] ? actual.row[COL_MENSAJE - 1].toString() : "",
-      esTitular: esTitular
+      esTitular: esTitular,
+      // Política D-02: 168 h + una única extensión de hasta 24 h (192 h en total).
+      extensionesUsadas: Number(actual.row[COL_EXTENSIONES - 1]) || 0,
+      extensionesMax: EXTENSIONES_MAX,
+      horasTotales: (actual.fin.getTime() - actual.inicio.getTime()) / 3600000,
+      horasMaxTotal: DURACION_MAX_TOTAL_HORAS,
+      horasMaxExtension: EXTENSION_MAX_HORAS
     };
+    ficha.usoActual.extensible = (esTitular || admin) &&
+      (admin || (ficha.usoActual.extensionesUsadas < EXTENSIONES_MAX &&
+        ficha.usoActual.horasTotales < DURACION_MAX_TOTAL_HORAS));
     if (esTitular || admin) ficha.usoActual.idReserva = idDeFila_(actual.row);
-    if (esTitular && walletHabilitado_()) {
-      ficha.usoActual.walletUrl = walletEnlaceGuardar_(walletReservaDesdeFila_(actual.row, actual.inicio, actual.fin));
-    }
     if (admin) {
       ficha.admin = {
         titular: {
@@ -1030,8 +1215,10 @@ function obtenerMiPerfil() {
   if (!sesion) return { ok: false };
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_RESERVAS);
   if (!sheet || sheet.getLastRow() < 2) return { ok: true, correo: sesion, datos: null };
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 14).getValues();
+  var anchoPerfil = Math.max(14, Math.min(COL_ESTADO, sheet.getMaxColumns()));
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, anchoPerfil).getValues();
   for (var i = data.length - 1; i >= 0; i--) {
+    if (esReservaCancelada_(data[i])) continue;
     var correo = data[i][4] ? data[i][4].toString().toLowerCase().trim() : "";
     if (correo === sesion) {
       return {
@@ -1085,7 +1272,6 @@ function registrarContacto_(solicitante, eq, idReserva, titular, texto) {
 function liberarDesdeFicha(idReserva) {
   var lock = null;
   var tieneLock = false;
-  var walletPend = null;
   try {
     if (!idReserva || !/^RES-\d+$/.test(String(idReserva))) return { exito: false, mensaje: "Solicitud inválida." };
 
@@ -1095,11 +1281,11 @@ function liberarDesdeFicha(idReserva) {
 
     var res = buscarFilaPorId_(String(idReserva));
     if (!res) return { exito: false, mensaje: "No se encontró la reserva (puede haber sido cancelada)." };
+    if (esReservaCancelada_(res.rowData)) return { exito: false, mensaje: "Esta reserva ya fue cancelada." };
     if (!esTitularOAdmin_(res.rowData)) return { exito: false, mensaje: "Solo quien hizo la reserva (o la administración) puede liberarla." };
 
     var lib = ejecutarLiberacion_(res.sheet, res.rowIndex, res.rowData, obtenerEmailActivo_() || "(sin sesión)", "LIBERADA_FICHA");
     if (lib.estado === "ok") {
-      walletPend = { row: res.rowData, estado: "finalizada", fin: new Date() };
       return { exito: true, mensaje: "Equipo liberado a las " + lib.horaActualStr + ". Ya está disponible para otros usuarios." };
     }
     if (lib.estado === "finalizada") return { exito: false, mensaje: "Esta reserva ya había terminado." };
@@ -1110,18 +1296,17 @@ function liberarDesdeFicha(idReserva) {
     return { exito: false, mensaje: "Error al liberar el equipo. Revise el estado de la reserva e intente de nuevo." };
   } finally {
     if (tieneLock) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
-    if (walletPend) walletActualizar_(walletPend.row, walletPend.estado, walletPend.fin); // ya sin bloqueo; nunca interrumpe la operación
   }
 }
 
 /**
  * El titular (o un administrador) extiende el FIN de su reserva en curso desde la ficha.
+ * Política D-02: una sola extensión de hasta 24 h; total máximo 192 h.
  * Reutiliza obtenerEquiposDisponibles: el tramo [fin actual, nuevo fin) debe estar libre y el equipo operativo.
  */
 function extenderDesdeFicha(idReserva, fechaFin, horaFin) {
   var lock = null;
   var tieneLock = false;
-  var walletPend = null;
   try {
     if (!idReserva || !/^RES-\d+$/.test(String(idReserva))) return { exito: false, mensaje: "Solicitud inválida." };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fechaFin)) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(horaFin))) {
@@ -1132,11 +1317,19 @@ function extenderDesdeFicha(idReserva, fechaFin, horaFin) {
     tieneLock = lock.tryLock(LOCK_ESPERA_MS);
     if (!tieneLock) return { exito: false, mensaje: "El sistema está procesando otras solicitudes. Intente de nuevo en unos segundos." };
 
+    var hojaReservas = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_RESERVAS);
+    if (!hojaReservas) return { exito: false, mensaje: "No se encontró la hoja de reservas." };
+    asegurarColumnasExtra_(hojaReservas);
+
     var res = buscarFilaPorId_(String(idReserva));
     if (!res) return { exito: false, mensaje: "No se encontró la reserva (puede haber sido cancelada)." };
+    if (esReservaCancelada_(res.rowData)) return { exito: false, mensaje: "Esta reserva ya fue cancelada." };
     if (!esTitularOAdmin_(res.rowData)) return { exito: false, mensaje: "Solo quien hizo la reserva (o la administración) puede extenderla." };
 
     var zona = Session.getScriptTimeZone();
+    var fInAct = Utilities.formatDate(new Date(res.rowData[7]), zona, "yyyy-MM-dd");
+    var hInAct = formatHoraStr(res.rowData[8]);
+    var inicioActual = new Date(fInAct + "T" + hInAct + ":00");
     var fFinAct = Utilities.formatDate(new Date(res.rowData[9]), zona, "yyyy-MM-dd");
     var hFinAct = formatHoraStr(res.rowData[10]);
     var finActual = new Date(fFinAct + "T" + hFinAct + ":00");
@@ -1147,6 +1340,11 @@ function extenderDesdeFicha(idReserva, fechaFin, horaFin) {
     if (finActual <= ahora) return { exito: false, mensaje: "Esta reserva ya terminó. Haga una reserva nueva." };
     if (nuevoFin <= finActual) return { exito: false, mensaje: "El nuevo fin debe ser posterior al fin actual (" + fFinAct + " " + hFinAct + ")." };
 
+    var extensiones = Number(res.rowData[COL_EXTENSIONES - 1]) || 0;
+    var admin = esAdminActual_();
+    var politica = validarPoliticaExtension_(inicioActual, finActual, nuevoFin, extensiones, admin);
+    if (!politica.ok) return { exito: false, mensaje: politica.mensaje };
+
     // Todos los equipos de la fila deben seguir libres y operativos en el tramo añadido
     var libres = obtenerEquiposDisponibles(fFinAct, hFinAct, fechaFin, horaFin);
     var equiposFila = (res.rowData[11] ? res.rowData[11].toString() : "").split(", ").map(function (x) { return x.trim(); });
@@ -1156,22 +1354,29 @@ function extenderDesdeFicha(idReserva, fechaFin, horaFin) {
       }
     }
 
-    var detalle = "Fin anterior: " + fFinAct + " " + hFinAct + " | Fin nuevo: " + fechaFin + " " + horaFin;
+    var detalle = "Fin anterior: " + fFinAct + " " + hFinAct + " | Fin nuevo: " + fechaFin + " " + horaFin +
+      " | Extensión " + (extensiones + 1) + " de " + EXTENSIONES_MAX +
+      " | Horas añadidas: " + politica.horasAgregadas.toFixed(2) +
+      " | Total: " + politica.horasTotales.toFixed(2) + " h" +
+      (admin ? " | Aplicada por admin" : "");
     if (!archivarReserva_(res.sheet, res.rowIndex, "EXTENDIDA_FICHA", obtenerEmailActivo_() || "(sin sesión)", detalle)) {
       return { exito: false, mensaje: "No se pudo guardar el historial, por eso la reserva NO se modificó. Intente de nuevo." };
     }
 
     res.sheet.getRange(res.rowIndex, 10).setValue(fechaFin);
     res.sheet.getRange(res.rowIndex, 11).setValue(horaFin);
+    res.sheet.getRange(res.rowIndex, COL_EXTENSIONES).setNumberFormat("@").setValue(String(extensiones + 1));
     SpreadsheetApp.flush();
-    walletPend = { row: res.rowData, estado: "activa", fin: nuevoFin };
-    return { exito: true, mensaje: "Reserva extendida hasta el " + fechaFin + " a las " + horaFin + "." };
+    return {
+      exito: true,
+      mensaje: "Reserva extendida hasta el " + fechaFin + " a las " + horaFin + ". " +
+        "Extensión " + (extensiones + 1) + " de " + EXTENSIONES_MAX + " usada."
+    };
   } catch (err) {
     Logger.log("Error en extenderDesdeFicha: " + err.toString());
     return { exito: false, mensaje: "Error al extender la reserva. Revise su estado e intente de nuevo." };
   } finally {
     if (tieneLock) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
-    if (walletPend) walletActualizar_(walletPend.row, walletPend.estado, walletPend.fin); // ya sin bloqueo; nunca interrumpe la operación
   }
 }
 
@@ -1451,6 +1656,7 @@ function obtenerDatosAdmin(fechaInicio, fechaFin, equipoFiltro) {
 
   rows.forEach(function(row, index) {
     var numFilaReal = index + 2;
+    if (esReservaCancelada_(row)) return; // el panel operativo no muestra canceladas
     var resStart = new Date(Utilities.formatDate(new Date(row[7]), Session.getScriptTimeZone(), "yyyy-MM-dd") + "T" + formatHoraStr(row[8]) + ":00");
     var resEnd = new Date(Utilities.formatDate(new Date(row[9]), Session.getScriptTimeZone(), "yyyy-MM-dd") + "T" + formatHoraStr(row[10]) + ":00");
 
@@ -1583,10 +1789,15 @@ function cancelarReserva(numFila, motivo, idReserva) {
     if (!sheet || numFila < 2 || numFila > sheet.getLastRow()) {
       return { exito: false, mensaje: "No se encontró el registro de la reserva. Recargue el panel." };
     }
+    asegurarColumnasExtra_(sheet);
 
-    var filaDatos = sheet.getRange(numFila, 1, 1, 15).getValues()[0];
+    var anchoFila = Math.min(COL_EXTENSIONES, sheet.getMaxColumns());
+    var filaDatos = sheet.getRange(numFila, 1, 1, anchoFila).getValues()[0];
     if (idDeFila_(filaDatos) !== String(idReserva)) {
       return { exito: false, mensaje: "La lista de reservas cambió desde que se cargó el panel. Recargue e intente de nuevo; no se canceló nada." };
+    }
+    if (esReservaCancelada_(filaDatos)) {
+      return { exito: false, mensaje: "Esta reserva ya estaba cancelada." };
     }
 
     nombreUser = filaDatos[2];
@@ -1597,12 +1808,15 @@ function cancelarReserva(numFila, motivo, idReserva) {
     horaFin = formatHoraStr(filaDatos[10]);
     equiposUser = filaDatos[11];
 
-    // Archivar PRIMERO; si falla, no se borra nada.
+    // Archivar PRIMERO; si falla, no se marca nada.
     if (!archivarReserva_(sheet, numFila, "CANCELADA_PANEL", obtenerEmailActivo_(), motivoLimpio)) {
       return { exito: false, mensaje: "No se pudo guardar el historial de la operación, por eso la reserva NO fue cancelada. Intente de nuevo." };
     }
 
-    sheet.deleteRow(numFila);
+    // Soft-cancel (D-04): la fila queda con Estado = Cancelada y se excluye de disponibilidad.
+    sheet.getRange(numFila, COL_ESTADO).setValue("Cancelada");
+    sheet.getRange(numFila, COL_FECHA_CANCELACION).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"));
+    sheet.getRange(numFila, COL_MOTIVO_CANCELACION).setValue(motivoLimpio);
     SpreadsheetApp.flush();
   } catch (err) {
     Logger.log("Error en cancelarReserva: " + err.toString());
@@ -1613,8 +1827,7 @@ function cancelarReserva(numFila, motivo, idReserva) {
     }
   }
 
-  // Pase de Wallet (mejor esfuerzo) y correo, ya fuera del bloqueo
-  walletActualizar_(filaDatos, "cancelada");
+  // Correo, ya fuera del bloqueo
   enviarCorreoCancelacion_(nombreUser, correoUser, equiposUser, fechaInicio, horaInicio, fechaFin, horaFin, motivoLimpio);
   return { exito: true, mensaje: "La reserva fue cancelada y se ha notificado por correo al usuario con el motivo suministrado." };
 }
@@ -1755,12 +1968,16 @@ function archivarReserva_(sheetReservas, rowIndex, accion, actor, motivo) {
   }
 }
 
-/** Garantiza que la hoja tenga la columna P y su encabezado. Llamar dentro del bloqueo. */
+/** Garantiza las columnas extra de Reservas_LADME (P..V) y sus encabezados. Llamar dentro del bloqueo. */
 function asegurarColumnasExtra_(sheet) {
-  if (sheet.getMaxColumns() < COL_MENSAJE) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_MENSAJE - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < COL_EXTENSIONES) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_EXTENSIONES - sheet.getMaxColumns());
   }
-  [[COL_ID_SOLICITUD, "ID Solicitud"], [COL_DESATENDIDO, "Proceso Desatendido"], [COL_MENSAJE, "Mensaje para quien llegue"]]
+  [
+    [COL_ID_SOLICITUD, "ID Solicitud"],
+    [COL_DESATENDIDO, "Proceso Desatendido"],
+    [COL_MENSAJE, "Mensaje para quien llegue"]
+  ].concat(ENCABEZADOS_RESERVAS_EXTRA)
     .forEach(function (p) {
       var enc = sheet.getRange(1, p[0]);
       if (!enc.getValue()) enc.setValue(p[1]).setFontWeight("bold");
@@ -1773,7 +1990,7 @@ function asegurarColumnasExtra_(sheet) {
  * Fechas y horas se siguen escribiendo como siempre (Sheets las reconoce).
  */
 function escribirFilaReserva_(sheet, fila, valores) {
-  [3, 4, 6, 7, 14, COL_MENSAJE].forEach(function (c) {
+  [3, 4, 6, 7, 14, COL_MENSAJE, COL_ESTADO, COL_FECHA_CANCELACION, COL_MOTIVO_CANCELACION, COL_EXTENSIONES].forEach(function (c) {
     sheet.getRange(fila, c).setNumberFormat("@");
   });
   sheet.getRange(fila, 1, 1, valores.length).setValues([valores]);
@@ -1796,273 +2013,6 @@ function buscarSolicitudRepetida_(sheet, idSolicitud) {
     }
   }
   return null;
-}
-
-// ============================================================================
-// GOOGLE WALLET (opcional): un pase por reserva.
-//  - Todo es "mejor esfuerzo": si Wallet no está configurado o falla, las reservas funcionan igual.
-//  - Los secretos viven SOLO en Propiedades del script (Configuración del proyecto), nunca en el código ni en hojas.
-//  - El pase NO lleva datos personales (ni nombre, ni cédula, ni correo).
-//  Propiedades: WALLET_ISSUER_ID, WALLET_SA_EMAIL, WALLET_SA_KEY (obligatorias);
-//               WALLET_LOGO_URL, WALLET_WIDE_LOGO_URL, WALLET_HERO_URL, WALLET_CLASE_SUFIJO, WALLET_DESACTIVADO=1 (opcionales).
-// ============================================================================
-
-const WALLET_SCOPE = "https://www.googleapis.com/auth/wallet_object.issuer";
-const WALLET_API = "https://walletobjects.googleapis.com/walletobjects/v1";
-const WALLET_CLASE_SUFIJO_DEF = "ladme_reserva_v1";
-const WALLET_COLOR = "#5b21b6";
-
-function walletConfig_() {
-  var p = PropertiesService.getScriptProperties();
-  var cfg = {
-    issuerId: (p.getProperty("WALLET_ISSUER_ID") || "").trim(),
-    saEmail: (p.getProperty("WALLET_SA_EMAIL") || "").trim(),
-    saKey: (p.getProperty("WALLET_SA_KEY") || "").replace(/\\n/g, "\n"),
-    claseSufijo: (p.getProperty("WALLET_CLASE_SUFIJO") || WALLET_CLASE_SUFIJO_DEF).trim(),
-    logoUrl: (p.getProperty("WALLET_LOGO_URL") || "").trim(),
-    wideLogoUrl: (p.getProperty("WALLET_WIDE_LOGO_URL") || "").trim(),
-    heroUrl: (p.getProperty("WALLET_HERO_URL") || "").trim()
-  };
-  cfg.ok = !!(cfg.issuerId && cfg.saEmail && cfg.saKey) && p.getProperty("WALLET_DESACTIVADO") !== "1";
-  return cfg;
-}
-
-function walletHabilitado_() { return walletConfig_().ok; }
-
-/** Quien ejecuta desde el editor (o visita la app siendo la cuenta que la desplegó) es el propietario. */
-function esPropietarioScript_() {
-  try {
-    var activo = Session.getActiveUser().getEmail();
-    return !!activo && activo === Session.getEffectiveUser().getEmail();
-  } catch (err) { return false; }
-}
-function requirePropietarioOAdmin_() {
-  if (!esAdminActual_() && !esPropietarioScript_()) throw new Error("No autorizado.");
-}
-
-function walletBase64Url_(dato) { return Utilities.base64EncodeWebSafe(dato).replace(/=+$/, ""); }
-
-/** JWT RS256 firmado con la clave de la cuenta de servicio. */
-function walletFirmarJwt_(claims, saKey) {
-  var cabecera = walletBase64Url_(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  var cuerpo = walletBase64Url_(JSON.stringify(claims));
-  var aFirmar = cabecera + "." + cuerpo;
-  return aFirmar + "." + walletBase64Url_(Utilities.computeRsaSha256Signature(aFirmar, saKey));
-}
-
-function walletToken_(cfg, forzar) {
-  var cache = CacheService.getScriptCache();
-  if (!forzar) { var guardado = cache.get("wallet_token"); if (guardado) return guardado; }
-  var ahora = Math.floor(Date.now() / 1000);
-  var assertion = walletFirmarJwt_({
-    iss: cfg.saEmail, scope: WALLET_SCOPE, aud: "https://oauth2.googleapis.com/token", iat: ahora, exp: ahora + 3600
-  }, cfg.saKey);
-  var r = UrlFetchApp.fetch("https://oauth2.googleapis.com/token", {
-    method: "post", muteHttpExceptions: true,
-    payload: { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: assertion }
-  });
-  if (r.getResponseCode() !== 200) throw new Error("No se obtuvo el token de Wallet (" + r.getResponseCode() + "): " + r.getContentText().substring(0, 200));
-  var token = JSON.parse(r.getContentText()).access_token;
-  cache.put("wallet_token", token, 3000);
-  return token;
-}
-
-/** Llamada a la API REST de Wallet. Reintenta una vez con token nuevo si responde 401. Devuelve { codigo, texto }. */
-function walletApi_(cfg, metodo, ruta, cuerpo) {
-  function intentar(forzar) {
-    var opts = { method: metodo, headers: { Authorization: "Bearer " + walletToken_(cfg, forzar) }, muteHttpExceptions: true };
-    if (cuerpo) { opts.contentType = "application/json"; opts.payload = JSON.stringify(cuerpo); }
-    var r = UrlFetchApp.fetch(WALLET_API + ruta, opts);
-    return { codigo: r.getResponseCode(), texto: r.getContentText() };
-  }
-  var res = intentar(false);
-  if (res.codigo === 401) res = intentar(true);
-  return res;
-}
-
-/** "lun 3 nov · 08:00" (en español y en la zona horaria del script). */
-function walletTextoFecha_(d) {
-  var p = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-M-d-H-mm").split("-");
-  var dia = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])).getUTCDay();
-  var dias = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-  var meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-  return dias[dia] + " " + p[2] + " " + meses[+p[1] - 1] + " · " + ("0" + p[3]).slice(-2) + ":" + p[4];
-}
-
-/** Datos mínimos de una reserva para el pase. Sin datos personales. */
-function walletReservaDesdeDatos_(idReserva, etiqueta, actividad, inicio, fin, desatendido) {
-  var m = /^\[([^\]]+)\]\s*(.*)$/.exec(etiqueta || "");
-  var id = m ? m[1] : "";
-  var eq = id ? buscarEquipoPorId_(id) : null;
-  return {
-    idReserva: idReserva,
-    id: id || "Equipo",
-    nombre: eq ? (eq.nombre + (eq.marca ? " (" + eq.marca + ")" : "")) : (m ? m[2] : (etiqueta || "")),
-    ubicacion: eq ? eq.ubicacion : "",
-    actividad: actividad || "",
-    inicio: inicio, fin: fin, desatendido: !!desatendido
-  };
-}
-
-function walletReservaDesdeFila_(row, inicio, fin) {
-  var zona = Session.getScriptTimeZone();
-  if (!inicio) inicio = new Date(Utilities.formatDate(new Date(row[7]), zona, "yyyy-MM-dd") + "T" + formatHoraStr(row[8]) + ":00");
-  if (!fin) fin = new Date(Utilities.formatDate(new Date(row[9]), zona, "yyyy-MM-dd") + "T" + formatHoraStr(row[10]) + ":00");
-  var etiqueta = (row[11] ? row[11].toString() : "").split(", ")[0].trim();
-  return walletReservaDesdeDatos_(idDeFila_(row), etiqueta, row[12] ? row[12].toString() : "", inicio, fin, !!(row[COL_DESATENDIDO - 1]));
-}
-
-/** GenericObject del pase. estado: "activa" | "finalizada" | "cancelada". */
-function walletConstruirObjeto_(cfg, r, estado) {
-  function ls(v) { return { defaultValue: { language: "es-CO", value: v } }; }
-  var ficha = ScriptApp.getService().getUrl() + "?asset=" + encodeURIComponent(r.id);
-  var subtitulos = { activa: "Reserva confirmada", finalizada: "Reserva finalizada", cancelada: "Reserva cancelada" };
-  var estados = { activa: "ACTIVE", finalizada: "COMPLETED", cancelada: "INACTIVE" };
-  estado = subtitulos[estado] ? estado : "activa";
-
-  var modulos = [
-    { id: "desde", header: "Desde", body: walletTextoFecha_(r.inicio) },
-    { id: "hasta", header: "Hasta", body: walletTextoFecha_(r.fin) },
-    { id: "lugar", header: "Ubicación", body: r.ubicacion || "LADME" },
-    { id: "actividad", header: "Actividad", body: r.actividad || "—" }
-  ];
-  if (r.desatendido) modulos.push({ id: "aviso", header: "Proceso desatendido", body: "No apagar ni usar este equipo" });
-
-  var obj = {
-    id: cfg.issuerId + "." + r.idReserva,
-    classId: cfg.issuerId + "." + cfg.claseSufijo,
-    genericType: "GENERIC_OTHER",
-    state: estados[estado],
-    hexBackgroundColor: WALLET_COLOR,
-    cardTitle: ls("LADME · Reserva de equipo"),
-    header: ls(r.id + " · " + r.nombre),
-    subheader: ls(subtitulos[estado]),
-    textModulesData: modulos,
-    linksModuleData: { uris: [{ uri: ficha, description: "Ver ficha del equipo (liberar o extender)", id: "ficha" }] },
-    barcode: { type: "QR_CODE", value: ficha, alternateText: r.id },
-    validTimeInterval: { start: { date: r.inicio.toISOString() }, end: { date: r.fin.toISOString() } },
-    notifications: { upcomingNotification: { enableNotification: true } }
-  };
-  if (cfg.logoUrl) obj.logo = { sourceUri: { uri: cfg.logoUrl }, contentDescription: ls("Logo de LADME") };
-  if (cfg.wideLogoUrl) obj.wideLogo = { sourceUri: { uri: cfg.wideLogoUrl }, contentDescription: ls("LADME") };
-  if (cfg.heroUrl) obj.heroImage = { sourceUri: { uri: cfg.heroUrl }, contentDescription: ls("Banner de LADME") };
-  return obj;
-}
-
-/** Plantilla de la clase: dos filas con dos datos cada una (Desde/Hasta y Ubicación/Actividad). */
-function walletConstruirClase_(cfg, conPlantilla) {
-  var clase = { id: cfg.issuerId + "." + cfg.claseSufijo };
-  if (conPlantilla) {
-    var item = function (id) { return { firstValue: { fields: [{ fieldPath: "object.textModulesData['" + id + "']" }] } }; };
-    clase.classTemplateInfo = {
-      cardTemplateOverride: {
-        cardRowTemplateInfos: [
-          { twoItems: { startItem: item("desde"), endItem: item("hasta") } },
-          { twoItems: { startItem: item("lugar"), endItem: item("actividad") } }
-        ]
-      }
-    };
-  }
-  return clase;
-}
-
-/** Enlace "Agregar a Google Wallet" (JWT firmado). Devuelve "" si Wallet no está configurado o algo falla. */
-function walletEnlaceGuardar_(r) {
-  var cfg = walletConfig_();
-  if (!cfg.ok) return "";
-  try {
-    var jwt = walletFirmarJwt_({
-      iss: cfg.saEmail, aud: "google", typ: "savetowallet", iat: Math.floor(Date.now() / 1000), origins: [],
-      payload: { genericObjects: [walletConstruirObjeto_(cfg, r, "activa")] }
-    }, cfg.saKey);
-    return "https://pay.google.com/gp/v/save/" + jwt;
-  } catch (err) {
-    Logger.log("Wallet: no se pudo generar el enlace: " + err.toString());
-    return "";
-  }
-}
-
-/** Enlace para el correo de confirmación, a partir de los datos de la reserva recién creada. */
-function walletEnlaceDesdeDatos_(datos, idReserva) {
-  if (!walletHabilitado_()) return "";
-  try {
-    var etiqueta = Array.isArray(datos.equipos) ? String(datos.equipos[0] || "") : "";
-    return walletEnlaceGuardar_(walletReservaDesdeDatos_(
-      idReserva, etiqueta, String(datos.tipoActividad || ""),
-      new Date(datos.fechaInicio + "T" + datos.horaInicio + ":00"),
-      new Date(datos.fechaFin + "T" + datos.horaFin + ":00"), datos.desatendido === true));
-  } catch (err) {
-    Logger.log("Wallet: enlace del correo omitido: " + err.toString());
-    return "";
-  }
-}
-
-/**
- * Actualiza el pase de una reserva (si la persona ya lo guardó). Mejor esfuerzo: nunca lanza errores.
- * row = fila de la reserva ANTES del cambio; finNuevo = fin a mostrar (extender o liberar).
- */
-function walletActualizar_(row, estado, finNuevo) {
-  try {
-    var cfg = walletConfig_();
-    if (!cfg.ok) return;
-    var r = walletReservaDesdeFila_(row, null, finNuevo || null);
-    var obj = walletConstruirObjeto_(cfg, r, estado);
-    var res = walletApi_(cfg, "patch", "/genericObject/" + encodeURIComponent(obj.id), obj);
-    if (res.codigo === 404) return; // la persona no guardó el pase: no hay nada que actualizar
-    if (res.codigo >= 300) Logger.log("Wallet: la actualización devolvió " + res.codigo + ": " + res.texto.substring(0, 300));
-  } catch (err) {
-    Logger.log("Wallet: no se pudo actualizar el pase: " + err.toString());
-  }
-}
-
-/**
- * PASO ÚNICO DE CONFIGURACIÓN (propietario o admin): crea o actualiza la clase de pases.
- * Si Google rechaza la plantilla de filas, reintenta sin ella (el pase funciona igual, con el diseño por defecto).
- */
-function walletConfigurarClase() {
-  requirePropietarioOAdmin_();
-  var cfg = walletConfig_();
-  if (!cfg.ok) { Logger.log("Wallet no está configurado: faltan WALLET_ISSUER_ID, WALLET_SA_EMAIL o WALLET_SA_KEY en Propiedades del script."); return; }
-  var ruta = "/genericClass/" + encodeURIComponent(cfg.issuerId + "." + cfg.claseSufijo);
-  var existe = walletApi_(cfg, "get", ruta).codigo === 200;
-  var variantes = [true, false];
-  for (var i = 0; i < variantes.length; i++) {
-    var cuerpo = walletConstruirClase_(cfg, variantes[i]);
-    var r = existe ? walletApi_(cfg, "patch", ruta, cuerpo) : walletApi_(cfg, "post", "/genericClass", cuerpo);
-    if (r.codigo < 300) {
-      Logger.log("Clase de Wallet " + (existe ? "actualizada" : "creada") + " " + (variantes[i] ? "con" : "SIN") + " plantilla de filas. Código " + r.codigo + ".");
-      return;
-    }
-    Logger.log("Wallet rechazó la clase " + (variantes[i] ? "con" : "sin") + " plantilla: " + r.codigo + " " + r.texto.substring(0, 400));
-  }
-  Logger.log("No se pudo crear la clase de Wallet. Revise el ID de emisor, que la cuenta de servicio esté autorizada en la consola de Wallet y que la API esté habilitada.");
-}
-
-/** Genera en el registro un enlace de prueba con una reserva ficticia (sin datos personales). */
-function walletPrueba() {
-  requirePropietarioOAdmin_();
-  if (!walletHabilitado_()) { Logger.log("Wallet no está configurado."); return; }
-  var ini = new Date(), fin = new Date(ini.getTime() + 2 * 3600000);
-  var cat = leerCatalogoEquipos_();
-  var etiqueta = cat.length ? cat[0].etiqueta : "[UNAL-00] Equipo de prueba";
-  var url = walletEnlaceGuardar_(walletReservaDesdeDatos_("PRUEBA-" + ini.getTime(), etiqueta, "Docencia", ini, fin, true));
-  Logger.log(url ? "Abra este enlace en un celular Android con una cuenta de prueba:\n" + url : "No se pudo generar el enlace (revise el registro).");
-}
-
-/** Diagnóstico de Wallet (solo lectura): estado de la configuración sin mostrar secretos. */
-function pruebasWallet() {
-  var r = [];
-  function t(n, ok) { r.push((ok ? "OK    " : "FALLA ") + n); }
-  var ini = new Date(2031, 2, 3, 8, 0), fin = new Date(2031, 2, 3, 10, 0);
-  t("fecha en español", walletTextoFecha_(ini) === "lun 3 mar · 08:00");
-  t("JWT con tres partes y sin relleno", /^[\w-]+\.[\w-]+\.[\w-]*$/.test(walletBase64Url_("a") + "." + walletBase64Url_("b") + "." + walletBase64Url_("c")));
-  var cfg = walletConfig_();
-  Logger.log(r.join("\n") +
-    "\n\nWallet configurado: " + (cfg.ok ? "SÍ" : "NO") +
-    "\n  WALLET_ISSUER_ID: " + (cfg.issuerId ? "definido" : "falta") +
-    "\n  WALLET_SA_EMAIL: " + (cfg.saEmail ? "definido" : "falta") +
-    "\n  WALLET_SA_KEY: " + (cfg.saKey ? "definida (no se muestra)" : "falta") +
-    "\n  Logo: " + (cfg.logoUrl ? "definido" : "sin logo") + " | Banner: " + (cfg.heroUrl ? "definido" : "sin banner"));
 }
 
 // ============================================================================
@@ -2180,4 +2130,60 @@ function pruebasN1() {
   t("la ficha NO incluye correo ni nombre (salvo admin)", esAdminActual_() || (!ficha.admin && !(ficha.usoActual && ficha.usoActual.correo)));
 
   Logger.log(r.join("\n") + "\n\nIDs de equipo en el catálogo: " + cat.map(function (e) { return e.id; }).join(", "));
+}
+
+/**
+ * Pruebas puras de la política de reservas (D-02) y del soft-cancel (D-04).
+ * No escriben en hojas ni envían correos. Ejecutar desde el editor.
+ */
+function pruebasPolitica() {
+  var r = [];
+  function t(n, ok) { r.push((ok ? "OK    " : "FALLA ") + n); }
+  function horas(h) { return h * 3600000; }
+  function fecha(base, h) { return new Date(base.getTime() + horas(h)); }
+
+  var t0 = new Date(2031, 0, 6, 8, 0);
+
+  // --- Reserva base: 168 h ---
+  t("base de 1 h aceptada", validarPoliticaBase_(t0, fecha(t0, 1)).ok === true);
+  t("base de 168 h aceptada", validarPoliticaBase_(t0, fecha(t0, 168)).ok === true);
+  t("base de 168.01 h rechazada", validarPoliticaBase_(t0, fecha(t0, 168.01)).ok === false);
+  t("base de 169 h rechazada", validarPoliticaBase_(t0, fecha(t0, 169)).ok === false);
+  t("base con fin = inicio rechazada", validarPoliticaBase_(t0, t0).ok === false);
+  t("base con fin anterior rechazada", validarPoliticaBase_(t0, fecha(t0, -1)).ok === false);
+  t("base con fecha inválida rechazada", validarPoliticaBase_(t0, new Date("x")).ok === false);
+
+  // --- Extensión: una sola, máximo 24 h, total máximo 192 h ---
+  var fin168 = fecha(t0, 168);
+  t("extensión de 24 h sobre 168 h aceptada",
+    validarPoliticaExtension_(t0, fin168, fecha(fin168, 24), 0, false).ok === true);
+  t("extensión de 24.01 h rechazada",
+    validarPoliticaExtension_(t0, fin168, fecha(fin168, 24.01), 0, false).ok === false);
+  t("extensión que deja total 192.01 h rechazada",
+    validarPoliticaExtension_(t0, fin168, fecha(fin168, 24.01), 0, false).ok === false);
+  t("segunda extensión rechazada",
+    validarPoliticaExtension_(t0, fin168, fecha(fin168, 12), 1, false).ok === false);
+  t("extensión sin avanzar el fin rechazada",
+    validarPoliticaExtension_(t0, fin168, fin168, 0, false).ok === false);
+  t("extensión con fin anterior rechazada",
+    validarPoliticaExtension_(t0, fin168, fecha(fin168, -1), 0, false).ok === false);
+  t("el admin puede superar el tope (queda registrado)",
+    validarPoliticaExtension_(t0, fin168, fecha(fin168, 25), 1, true).ok === true);
+
+  var ext = validarPoliticaExtension_(t0, fecha(t0, 48), fecha(t0, 60), 0, false);
+  t("extensión reporta 12 h agregadas y 60 h totales", ext.ok && ext.horasAgregadas === 12 && ext.horasTotales === 60);
+
+  // --- Estado / soft-cancel ---
+  var filaActiva = new Array(COL_EXTENSIONES); filaActiva[COL_ESTADO - 1] = "Activa";
+  var filaVacia = new Array(COL_EXTENSIONES);
+  var filaCancelada = new Array(COL_EXTENSIONES); filaCancelada[COL_ESTADO - 1] = "Cancelada";
+  t("Estado Activa no es cancelada", esReservaCancelada_(filaActiva) === false);
+  t("Estado vacío se trata como Activa", estadoReserva_(filaVacia) === "Activa" && esReservaCancelada_(filaVacia) === false);
+  t("Estado Cancelada se detecta (sin distinguir mayúsculas)",
+    esReservaCancelada_(filaCancelada) === true &&
+    esReservaCancelada_((function () { var f = new Array(COL_EXTENSIONES); f[COL_ESTADO - 1] = "  CANCELADA "; return f; })()) === true);
+  t("slice H..V detecta Cancelada", esCanceladaEnSliceH_(filaCancelada.slice(7)) === true);
+  t("slice H..V no marca una activa", esCanceladaEnSliceH_(filaActiva.slice(7)) === false);
+
+  Logger.log(r.join("\n"));
 }

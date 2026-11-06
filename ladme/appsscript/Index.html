@@ -226,6 +226,14 @@
                         </div>
                       </div>
 
+                      <div class="col-md-12">
+                        <div class="form-text mt-1">
+                          <i class="fa-solid fa-circle-info me-1"></i>
+                          Duración máxima: <strong>168 horas (7 días)</strong>. Una vez iniciada la reserva puede
+                          solicitar <strong>una única extensión de hasta 24 horas</strong> desde la ficha del equipo.
+                        </div>
+                      </div>
+
                       <div class="col-md-12 mt-3">
                         <label class="form-label">Computador Disponible * <small class="text-muted fw-normal">(Solo se permite 1 por solicitud)</small></label>
                         <div id="equiposContainer" class="equipment-box">
@@ -447,6 +455,21 @@
     // (fallo de red, sin respuesta); así un reintento no duplica la reserva.
     let solicitudEnCurso = null;
 
+    // Política D-02: reserva base de hasta 168 h (7 días) + una extensión de hasta 24 h
+    // desde la ficha del equipo. Debe coincidir con DURACION_MAX_HORAS en Código.gs.
+    const MAX_HORAS_RESERVA = 168;
+    const MAX_HORAS_EXTENSION = 24;
+
+    function validarPoliticaHoras(reqInicio, reqFin) {
+      const horas = (reqFin.getTime() - reqInicio.getTime()) / 3600000;
+      if (horas > MAX_HORAS_RESERVA) {
+        return 'La reserva no puede superar ' + MAX_HORAS_RESERVA + ' horas (7 días). ' +
+          'Puede reservar hasta una semana y, una vez iniciada, extenderla una única vez por ' +
+          'un máximo de ' + MAX_HORAS_EXTENSION + ' horas desde la ficha del equipo.';
+      }
+      return '';
+    }
+
     function nuevoIdSolicitud() {
       if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
       return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -654,6 +677,12 @@
           return;
         }
 
+        const errorPolitica = validarPoliticaHoras(reqInicio, reqFin);
+        if (errorPolitica) {
+          container.innerHTML = '<span class="text-danger fw-bold"><i class="fa-solid fa-triangle-exclamation"></i> ' + esc(errorPolitica) + '</span>';
+          return;
+        }
+
         container.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> Consultando disponibilidad...</span>';
         google.script.run.withSuccessHandler(function(disponibles) {
           container.innerHTML = '';
@@ -687,11 +716,20 @@
       const ahora = new Date();
       const limitePermitido = new Date(ahora.getTime() - (5 * 60 * 1000));
       const reqInicio = new Date(fIn + "T" + hIn + ":00");
+      const reqFin = new Date(fFin + "T" + hFin + ":00");
 
       if (reqInicio < limitePermitido) {
         alert("La hora de inicio de la reserva no puede ser anterior a 5 minutos respecto a la hora actual.");
         return;
       }
+
+      if (reqInicio >= reqFin) {
+        alert("La fecha y hora de fin debe ser posterior a la de inicio.");
+        return;
+      }
+
+      const errorPolitica = validarPoliticaHoras(reqInicio, reqFin);
+      if (errorPolitica) { alert(errorPolitica); return; }
 
       const btn = document.getElementById('btnSubmit');
       btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Procesando...';
@@ -996,6 +1034,12 @@
         html += `<div class="alert alert-warning"><strong>Reservado ahora</strong> hasta <strong>${esc(fmtFicha(uso.fin))}</strong>.`;
         if (uso.desatendido) html += ` <span class="badge bg-dark ms-1">Proceso desatendido: no apagar ni usar</span>`;
         if (uso.mensaje) html += `<div class="mt-2"><i class="fa-solid fa-message me-1"></i> “${esc(uso.mensaje)}”</div>`;
+        if (uso.idReserva && uso.extensionesMax) {
+          html += `<div class="mt-2 small"><i class="fa-solid fa-clock-rotate-left me-1"></i>` +
+            `Extensiones usadas: <strong>${Number(uso.extensionesUsadas) || 0} de ${esc(uso.extensionesMax)}</strong>` +
+            ` · Duración total: <strong>${(Number(uso.horasTotales) || 0).toFixed(1)} h</strong> de ${esc(uso.horasMaxTotal)} h` +
+            `</div>`;
+        }
         html += `</div>`;
       } else if (eq.reservable && !f.bloqueoActual) {
         html += `<div class="alert alert-success">Libre ahora` +
@@ -1031,21 +1075,25 @@
       }
       if (uso && uso.idReserva) {
         acciones += `<button type="button" class="btn btn-outline-success me-2 mb-2" onclick="liberarFicha()"><i class="fa-solid fa-bolt me-1"></i> Liberar ahora</button>`;
-        acciones += `<button type="button" class="btn btn-outline-primary me-2 mb-2" onclick="mostrarExtender()"><i class="fa-solid fa-clock me-1"></i> Extender</button>`;
-        if (uso.walletUrl) {
-          acciones += `<a class="btn btn-dark me-2 mb-2" target="_blank" rel="noopener" href="${esc(uso.walletUrl)}"><i class="fa-brands fa-google-wallet me-1"></i> Agregar a Google Wallet</a>`;
+        if (uso.extensible) {
+          acciones += `<button type="button" class="btn btn-outline-primary me-2 mb-2" onclick="mostrarExtender()"><i class="fa-solid fa-clock me-1"></i> Extender</button>`;
         }
       }
       html += `<div>${acciones}</div>`;
 
-      if (uso && uso.idReserva) {
+      if (uso && uso.idReserva && uso.extensible) {
         html += `<div id="boxExtender" class="mt-2" style="display:none;">
-          <label class="form-label fw-bold small">Nuevo fin de la reserva</label>
+          <label class="form-label fw-bold small">Nuevo fin de la reserva <span class="text-muted fw-normal">(máx. +${esc(uso.horasMaxExtension)} h)</span></label>
           <div class="d-flex gap-2">
             <input type="datetime-local" id="nuevoFinFicha" class="form-control form-control-sm">
             <button type="button" class="btn btn-sm btn-purple" onclick="confirmarExtender()">Confirmar</button>
           </div>
         </div>`;
+      } else if (uso && uso.idReserva) {
+        const motivo = (Number(uso.extensionesUsadas) || 0) >= (Number(uso.extensionesMax) || 1)
+          ? 'Esta reserva ya usó su única extensión permitida.'
+          : 'Esta reserva alcanzó la duración máxima total de ' + esc(uso.horasMaxTotal) + ' h.';
+        html += `<div class="alert alert-secondary py-2 small mt-2"><i class="fa-solid fa-circle-info me-1"></i> ${motivo}</div>`;
       }
 
       if (eq.reservable && !uso && !f.bloqueoActual) {
@@ -1126,9 +1174,25 @@
         .liberarDesdeFicha(uso.idReserva);
     }
 
+    function aDatetimeLocal(fecha) {
+      const p = n => String(n).padStart(2, '0');
+      return fecha.getFullYear() + '-' + p(fecha.getMonth() + 1) + '-' + p(fecha.getDate()) +
+        'T' + p(fecha.getHours()) + ':' + p(fecha.getMinutes());
+    }
+
     function mostrarExtender() {
       const box = document.getElementById('boxExtender');
-      if (box) box.style.display = 'block';
+      if (!box) return;
+      const uso = fichaActual && fichaActual.usoActual;
+      const input = document.getElementById('nuevoFinFicha');
+      if (uso && input) {
+        const fin = new Date(uso.fin);
+        const max = new Date(fin.getTime() + (Number(uso.horasMaxExtension) || MAX_HORAS_EXTENSION) * 3600000);
+        input.min = aDatetimeLocal(new Date(fin.getTime() + 60000));
+        input.max = aDatetimeLocal(max);
+        if (!input.value) input.value = aDatetimeLocal(max);
+      }
+      box.style.display = 'block';
     }
 
     function confirmarExtender() {
@@ -1136,6 +1200,24 @@
       if (!uso || !uso.idReserva) return;
       const v = document.getElementById('nuevoFinFicha').value; // "YYYY-MM-DDTHH:MM"
       if (!v) { alert('Elija la nueva fecha y hora de fin.'); return; }
+      const nuevoFin = new Date(v + ':00');
+      const finActual = new Date(uso.fin);
+      if (isNaN(nuevoFin.getTime()) || nuevoFin <= finActual) {
+        alert('El nuevo fin debe ser posterior al fin actual.');
+        return;
+      }
+      const horasAgregadas = (nuevoFin.getTime() - finActual.getTime()) / 3600000;
+      const horasTotales = horasAgregadas + (Number(uso.horasTotales) || 0);
+      const maxExt = Number(uso.horasMaxExtension) || MAX_HORAS_EXTENSION;
+      const maxTotal = Number(uso.horasMaxTotal) || MAX_HORAS_RESERVA + MAX_HORAS_EXTENSION;
+      if (horasAgregadas > maxExt) {
+        alert('La extensión máxima es de ' + maxExt + ' horas.');
+        return;
+      }
+      if (horasTotales > maxTotal) {
+        alert('La reserva no puede superar ' + maxTotal + ' horas en total (168 h + 24 h).');
+        return;
+      }
       const partes = v.split('T');
       google.script.run
         .withSuccessHandler(function(r) {
