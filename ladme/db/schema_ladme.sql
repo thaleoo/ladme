@@ -64,10 +64,13 @@ create table politicas (
   descripcion text
 );
 insert into politicas (clave, valor, descripcion) values
-  ('duracion_max_horas',   '168', 'Duración máxima de una reserva de usuario (h). Valor inicial = uso actual (máx. observado 176 h). VALIDAR con el responsable.'),
-  ('anticipacion_max_dias', '30', 'Con cuántos días de anticipación se puede reservar. VALIDAR.'),
-  ('extension_max_horas',   '24', 'Máximo de horas que se pueden añadir en una extensión. VALIDAR.'),
-  ('tolerancia_llegada_min', '30', 'Minutos de tolerancia para registrar la llegada (para medir reservas no utilizadas). VALIDAR.');
+  ('duracion_max_horas',    '168', 'Duración máxima de una reserva base (7 días). Confirmado (D-02).'),
+  ('extension_max_horas',   '24',  'Máximo de horas que se pueden añadir en una extensión. Confirmado (D-02).'),
+  ('extensiones_max',       '1',   'Número máximo de extensiones por reserva. Confirmado (D-02).'),
+  ('duracion_max_total_horas', '192', 'Tope absoluto por reserva: 168 h base + 24 h de extensión. Confirmado (D-02).'),
+  ('anticipacion_max_dias', '30',  'Con cuántos días de anticipación se puede reservar. VALIDAR.'),
+  ('tolerancia_llegada_min', '30', 'Minutos de tolerancia para registrar la llegada (para medir reservas no utilizadas). VALIDAR.'),
+  ('reservas_activas_max',  '0',   'Máximo de reservas vigentes por usuario; 0 = sin límite (valor inicial).');
 
 create function politica_int(p_clave text) returns int
 language sql stable as $$ select (valor #>> '{}')::int from politicas where clave = p_clave $$;
@@ -89,6 +92,8 @@ create table reservas (
   desatendido     boolean not null default false,
   mensaje_llegada text check (char_length(mensaje_llegada) <= 140),
   motivo          text,                                         -- bloqueos y cancelaciones
+  cancelada_en    timestamptz,                                  -- soft-cancel (D-04): la fila nunca se borra
+  extensiones     int not null default 0 check (extensiones >= 0),  -- extensiones usadas (máx. según política)
   llegada_en      timestamptz,                                  -- check-in (permite medir "reservas no utilizadas")
   liberada_en     timestamptz,
   token_credencial text not null unique
@@ -134,7 +139,9 @@ create table cola_notificaciones (
 create function trg_historial() returns trigger language plpgsql security definer set search_path = public as $$
 declare v_accion text; begin
   if tg_op = 'INSERT' then v_accion := 'creada';
-  elsif new.estado = 'cancelada' and old.estado <> 'cancelada' then v_accion := 'cancelada';
+  elsif new.estado = 'cancelada' and old.estado <> 'cancelada' then
+    v_accion := 'cancelada';
+    new.cancelada_en := coalesce(new.cancelada_en, now());
   elsif new.liberada_en is not null and old.liberada_en is null then v_accion := 'liberada';
   elsif new.fin > old.fin then v_accion := 'extendida';
   else v_accion := 'modificada'; end if;
@@ -155,38 +162,62 @@ end $$;
 create trigger reservas_historial_t after insert or update on reservas for each row execute function trg_historial();
 
 -- ------------------------------------------------------------------ MANTENIMIENTO
+-- D-03: el rol laboratorista gestiona; el permiso fino "validar_mantenimiento"
+-- habilita la validación técnica. Los administradores pueden todo.
+alter table perfiles add column permisos text[] not null default '{}';
+
 create table mantenimientos (
   id              uuid primary key default gen_random_uuid(),
   equipo_id       uuid not null references equipos (id),
-  tipo            text not null check (tipo in ('preventivo', 'correctivo', 'calibracion', 'inspeccion', 'otro')),
-  descripcion     text not null,
-  fecha           date not null,
-  responsable     text,
-  frecuencia_dias int check (frecuencia_dias > 0),   -- solo si lo define el fabricante o el responsable técnico
+  tipo            text not null check (tipo in ('preventivo', 'correctivo', 'mejora')),
+  descripcion     text not null check (char_length(descripcion) between 3 and 500),
+  inicio          timestamptz not null,
+  fin             timestamptz not null,
+  responsable     text not null check (responsable = lower(responsable) and responsable like '%@unal.edu.co'),
+  estado          text not null default 'programado'
+                  check (estado in ('programado', 'en_curso', 'completado', 'validado', 'cancelado')),
+  periodicidad_dias int not null default 0 check (periodicidad_dias between 0 and 3650),
   proximo         date,
-  estado          text not null default 'realizado' check (estado in ('programado', 'realizado', 'cancelado')),
-  costo           numeric(12, 2),
-  enlace_evidencia text,
+  hallazgos       text check (char_length(hallazgos) <= 800),
+  validado_por    uuid references perfiles (id),
+  validado_en     timestamptz,
+  bloqueo_id      uuid references reservas (id),   -- fila tipo 'bloqueo' que impide reservar
   creado_por      uuid references perfiles (id),
-  creado_en       timestamptz not null default now()
+  creado_en       timestamptz not null default now(),
+  constraint mnt_fin_posterior check (fin > inicio)
 );
+create index mantenimientos_equipo_idx on mantenimientos (equipo_id, inicio desc);
+
+-- La cola de notificaciones también sirve a mantenimiento (avisos al personal).
+alter table cola_notificaciones alter column reserva_id drop not null;
+alter table cola_notificaciones add column mantenimiento_id uuid references mantenimientos (id);
+alter table cola_notificaciones add constraint cola_un_origen
+  check (num_nonnulls(reserva_id, mantenimiento_id) = 1);
 
 create view equipos_mantenimiento with (security_invoker = true) as
 select e.id as equipo_id, e.codigo,
-       u.fecha as ultimo,
-       coalesce(p.proximo, u.proximo) as proximo,
-       coalesce(coalesce(p.proximo, u.proximo) < current_date, false) as vencido
+       u.fin::date as ultimo,
+       coalesce(coalesce(u.proximo, p.proximo), u.fin::date + u.periodicidad_dias) as proximo,
+       coalesce(coalesce(u.proximo, p.proximo), u.fin::date + u.periodicidad_dias) < current_date as vencido
 from equipos e
-left join lateral (select fecha, proximo from mantenimientos
-                    where equipo_id = e.id and estado = 'realizado' order by fecha desc, creado_en desc limit 1) u on true
-left join lateral (select min(proximo) as proximo from mantenimientos
-                    where equipo_id = e.id and estado = 'programado' and proximo is not null) p on true;
+left join lateral (select fin, proximo, periodicidad_dias from mantenimientos
+                    where equipo_id = e.id and estado = 'validado' order by fin desc limit 1) u on true
+left join lateral (select min(inicio)::date as proximo from mantenimientos
+                    where equipo_id = e.id and estado in ('programado', 'en_curso') ) p on true;
 
 -- ------------------------------------------------------------------ SEGURIDAD
 create function es_staff() returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from perfiles where id = auth.uid() and activo and rol in ('laboratorista', 'administrador')) $$;
 create function es_admin() returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from perfiles where id = auth.uid() and activo and rol = 'administrador') $$;
+
+-- D-03: permiso fino además del rol (p. ej. validar_mantenimiento).
+create function tiene_permiso(p_permiso text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select es_admin() or exists (
+    select 1 from perfiles
+     where id = auth.uid() and activo and p_permiso = any (permisos)
+  ) $$;
 
 alter table perfiles            enable row level security;
 alter table equipos             enable row level security;
@@ -274,8 +305,17 @@ declare v uuid := _perfil_activo(); v_eq equipos; v_res reservas; v_staff boolea
   if p_inicio < now() - interval '5 minutes' then raise exception 'La hora de inicio no puede ser anterior a 5 minutos respecto a la actual.'; end if;
   if p_fin <= p_inicio then raise exception 'El fin debe ser posterior al inicio.'; end if;
   if not v_staff then
-    if p_fin - p_inicio > make_interval(hours => politica_int('duracion_max_horas')) then raise exception 'Supera la duración máxima permitida (% h).', politica_int('duracion_max_horas'); end if;
+    if p_fin - p_inicio > make_interval(hours => politica_int('duracion_max_horas')) then
+      raise exception 'Supera el máximo de % h (7 días). Puede solicitar una única extensión de hasta % h al iniciar la reserva.',
+        politica_int('duracion_max_horas'), politica_int('extension_max_horas');
+    end if;
     if p_inicio > now() + make_interval(days => politica_int('anticipacion_max_dias')) then raise exception 'Solo se puede reservar con % días de anticipación.', politica_int('anticipacion_max_dias'); end if;
+    if politica_int('reservas_activas_max') > 0
+       and (select count(*) from reservas r
+             where r.usuario_id = v and r.tipo = 'reserva' and r.estado = 'activa' and r.fin > now())
+           >= politica_int('reservas_activas_max') then
+      raise exception 'Ya tiene el máximo de reservas vigentes permitido (%).', politica_int('reservas_activas_max');
+    end if;
   end if;
   begin
     insert into reservas (tipo, equipo_id, usuario_id, inicio, fin, actividad, detalle, desatendido, mensaje_llegada, id_solicitud)
@@ -289,18 +329,32 @@ end $$;
 
 create function extender_reserva(p_reserva uuid, p_nuevo_fin timestamptz)
 returns reservas language plpgsql security definer set search_path = public as $$
-declare v uuid := _perfil_activo(); v_res reservas; begin
+declare
+  v uuid := _perfil_activo(); v_res reservas;
+  v_staff boolean := es_staff(); v_max_ext int := politica_int('extensiones_max');
+begin
   select * into v_res from reservas where id = p_reserva and tipo = 'reserva' for update;
-  if not found or (v_res.usuario_id <> v and not es_staff()) then raise exception 'Reserva no encontrada.'; end if;
+  if not found or (v_res.usuario_id <> v and not v_staff) then raise exception 'Reserva no encontrada.'; end if;
   if v_res.estado <> 'activa' then raise exception 'La reserva está cancelada.'; end if;
   if v_res.fin <= now() then raise exception 'La reserva ya terminó: haga una nueva.'; end if;
   if p_nuevo_fin <= v_res.fin then raise exception 'El nuevo fin debe ser posterior al actual.'; end if;
-  if not es_staff() and p_nuevo_fin - v_res.fin > make_interval(hours => politica_int('extension_max_horas')) then
-    raise exception 'Una extensión admite como máximo % h.', politica_int('extension_max_horas'); end if;
-  if not es_staff() and p_nuevo_fin - v_res.inicio > make_interval(hours => politica_int('duracion_max_horas')) then
-    raise exception 'Supera la duración máxima permitida (% h).', politica_int('duracion_max_horas'); end if;
+
+  if not v_staff then
+    -- D-02: una sola extensión de hasta 24 h y tope total de 192 h.
+    if v_res.extensiones >= v_max_ext then
+      raise exception 'Esta reserva ya usó su única extensión permitida.';
+    end if;
+    if p_nuevo_fin - v_res.fin > make_interval(hours => politica_int('extension_max_horas')) then
+      raise exception 'Una extensión admite como máximo % h.', politica_int('extension_max_horas');
+    end if;
+    if p_nuevo_fin - v_res.inicio > make_interval(hours => politica_int('duracion_max_total_horas')) then
+      raise exception 'La reserva no puede superar % h en total (168 h + 24 h).', politica_int('duracion_max_total_horas');
+    end if;
+  end if;
+
   begin
-    update reservas set fin = p_nuevo_fin where id = p_reserva returning * into v_res;
+    update reservas set fin = p_nuevo_fin, extensiones = extensiones + 1
+     where id = p_reserva returning * into v_res;
   exception when exclusion_violation then
     raise exception 'No se puede extender: el equipo tiene otra reserva o revisión en ese tramo.' using errcode = 'P0001';
   end;
@@ -359,6 +413,137 @@ declare v uuid := _perfil_activo(); v_eq equipos; v_n int; v_b reservas; begin
   return jsonb_build_object('bloqueo', v_b.id, 'canceladas', v_n);
 end $$;
 
+-- ------------------------------------------------------- RPC DE MANTENIMIENTO
+create function crear_mantenimiento(p_equipo text, p_tipo text, p_descripcion text,
+                                    p_inicio timestamptz, p_fin timestamptz, p_responsable text,
+                                    p_periodicidad_dias int default 0,
+                                    p_cancelar_conflictos boolean default false)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v uuid := _perfil_activo(); v_eq equipos; v_b reservas; v_m mantenimientos; v_n int;
+        v_motivo text; begin
+  if not es_staff() then raise exception 'Solo el personal del laboratorio puede registrar mantenimientos.' using errcode = '42501'; end if;
+  if p_tipo not in ('preventivo', 'correctivo', 'mejora') then raise exception 'Tipo de mantenimiento no válido.'; end if;
+  if char_length(trim(coalesce(p_descripcion, ''))) < 3 then raise exception 'Describa la intervención.'; end if;
+  if p_fin <= p_inicio then raise exception 'El fin debe ser posterior al inicio.'; end if;
+  if lower(trim(coalesce(p_responsable, ''))) not like '%@unal.edu.co' then
+    raise exception 'El responsable técnico debe tener un correo @unal.edu.co.';
+  end if;
+  if p_periodicidad_dias < 0 or p_periodicidad_dias > 3650 then raise exception 'Periodicidad inválida.'; end if;
+
+  select * into v_eq from equipos where codigo = upper(p_equipo) and not archivado;
+  if not found then raise exception 'Equipo no encontrado.'; end if;
+
+  v_motivo := 'Mantenimiento: ' || left(trim(p_descripcion), 120);
+  select count(*) into v_n from reservas
+   where equipo_id = v_eq.id and estado = 'activa' and periodo && tstzrange(p_inicio, p_fin, '[)');
+  if v_n > 0 and not p_cancelar_conflictos then
+    raise exception 'Hay % reserva(s) en ese intervalo. Cancélelas primero o repita con cancelar_conflictos.', v_n using errcode = 'P0001';
+  end if;
+  if v_n > 0 then
+    update reservas set estado = 'cancelada', motivo = v_motivo
+     where equipo_id = v_eq.id and estado = 'activa' and periodo && tstzrange(p_inicio, p_fin, '[)');
+  end if;
+
+  if p_fin > now() then
+    insert into reservas (tipo, equipo_id, usuario_id, inicio, fin, motivo)
+    values ('bloqueo', v_eq.id, v, p_inicio, p_fin, v_motivo)
+    returning * into v_b;
+  end if;
+
+  insert into mantenimientos (equipo_id, tipo, descripcion, inicio, fin, responsable,
+                              periodicidad_dias, bloqueo_id, creado_por)
+  values (v_eq.id, p_tipo, trim(p_descripcion), p_inicio, p_fin, lower(trim(p_responsable)),
+          p_periodicidad_dias, v_b.id, v)
+  returning * into v_m;
+
+  insert into cola_notificaciones (mantenimiento_id, tipo, usuario_id, dedupe_key)
+  values (v_m.id, 'mantenimiento_programado', v, 'mnt_prog:' || v_m.id)
+  on conflict (dedupe_key) do nothing;
+
+  return jsonb_build_object('mantenimiento', v_m.id, 'bloqueo', v_b.id, 'canceladas', v_n);
+end $$;
+
+create function iniciar_mantenimiento(p_id uuid) returns mantenimientos
+language plpgsql security definer set search_path = public as $$
+declare v_m mantenimientos; begin
+  perform _perfil_activo();
+  if not es_staff() then raise exception 'No autorizado.' using errcode = '42501'; end if;
+  update mantenimientos set estado = 'en_curso' where id = p_id and estado = 'programado' returning * into v_m;
+  if not found then raise exception 'El mantenimiento no existe o no está programado.'; end if;
+  return v_m;
+end $$;
+
+create function completar_mantenimiento(p_id uuid, p_hallazgos text) returns mantenimientos
+language plpgsql security definer set search_path = public as $$
+declare v_m mantenimientos; begin
+  perform _perfil_activo();
+  if not es_staff() then raise exception 'No autorizado.' using errcode = '42501'; end if;
+  if char_length(trim(coalesce(p_hallazgos, ''))) < 3 then raise exception 'Registre los hallazgos de la intervención.'; end if;
+  update mantenimientos set estado = 'completado', hallazgos = trim(p_hallazgos)
+   where id = p_id and estado in ('programado', 'en_curso') returning * into v_m;
+  if not found then raise exception 'El mantenimiento no existe o ya fue cerrado.'; end if;
+  insert into cola_notificaciones (mantenimiento_id, tipo, usuario_id, dedupe_key)
+  values (v_m.id, 'mantenimiento_por_validar', v_m.creado_por, 'mnt_validar:' || v_m.id)
+  on conflict (dedupe_key) do nothing;
+  return v_m;
+end $$;
+
+create function validar_mantenimiento(p_id uuid, p_hallazgos text default null) returns mantenimientos
+language plpgsql security definer set search_path = public as $$
+declare v_m mantenimientos; v_prox date; begin
+  perform _perfil_activo();
+  if not tiene_permiso('validar_mantenimiento') then
+    raise exception 'Solo el responsable técnico con permiso validar_mantenimiento puede validar.' using errcode = '42501';
+  end if;
+  select * into v_m from mantenimientos where id = p_id for update;
+  if not found then raise exception 'Mantenimiento no encontrado.'; end if;
+  if v_m.estado <> 'completado' then raise exception 'Solo se valida una intervención completada.'; end if;
+  v_prox := case when v_m.periodicidad_dias > 0 then (v_m.fin + make_interval(days => v_m.periodicidad_dias))::date end;
+  update mantenimientos
+     set estado = 'validado', validado_por = auth.uid(), validado_en = now(), proximo = v_prox,
+         hallazgos = coalesce(nullif(trim(coalesce(p_hallazgos, '')), ''), hallazgos)
+   where id = p_id returning * into v_m;
+  return v_m;
+end $$;
+
+create function cancelar_mantenimiento(p_id uuid, p_motivo text) returns mantenimientos
+language plpgsql security definer set search_path = public as $$
+declare v_m mantenimientos; begin
+  perform _perfil_activo();
+  if not es_staff() then raise exception 'No autorizado.' using errcode = '42501'; end if;
+  if char_length(trim(coalesce(p_motivo, ''))) < 3 then raise exception 'Escriba el motivo de la cancelación.'; end if;
+  select * into v_m from mantenimientos where id = p_id for update;
+  if not found then raise exception 'Mantenimiento no encontrado.'; end if;
+  if v_m.estado in ('validado', 'cancelado') then raise exception 'El mantenimiento ya está cerrado.'; end if;
+  update mantenimientos
+     set estado = 'cancelado',
+         hallazgos = left(concat_ws(' | ', hallazgos, 'Cancelado: ' || trim(p_motivo)), 800)
+   where id = p_id returning * into v_m;
+  if v_m.bloqueo_id is not null then
+    update reservas set estado = 'cancelada', motivo = 'Mantenimiento cancelado'
+     where id = v_m.bloqueo_id and estado = 'activa';
+  end if;
+  return v_m;
+end $$;
+
+-- Cron: encola avisos de mantenimiento próxima/vencido o pendiente de validar.
+create function encolar_recordatorios_mantenimiento() returns int
+language plpgsql security definer set search_path = public as $$
+declare v_n int; begin
+  with ins as (
+    insert into cola_notificaciones (mantenimiento_id, tipo, usuario_id, dedupe_key)
+    select m.id,
+           case when m.estado = 'completado' then 'mantenimiento_por_validar' else 'mantenimiento_proximo' end,
+           coalesce(m.creado_por, m.validado_por, (select id from perfiles where rol = 'administrador' limit 1)),
+           'mnt_aviso:' || m.id || ':' || current_date
+      from mantenimientos m
+     where m.estado in ('programado', 'en_curso', 'completado')
+       and (m.estado = 'completado' or m.fin <= now() + interval '7 days')
+    on conflict (dedupe_key) do nothing returning 1)
+  select count(*) into v_n from ins;
+  return v_n;
+end $$;
+
 -- Validación del QR (la usa el laboratorista; un usuario común solo recibe el veredicto, sin datos de nadie)
 create function validar_credencial(p_token text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_r reservas; v_e equipos; v_res text; v_staff boolean; begin
@@ -391,8 +576,11 @@ declare v_n int; begin
 end $$;
 
 revoke execute on all functions in schema public from public, anon, authenticated;
-grant execute on function es_staff, es_admin, politica_int to authenticated;                -- las usan las políticas y vistas
+grant execute on function es_staff, es_admin, politica_int, tiene_permiso to authenticated;   -- las usan las políticas y vistas
 grant execute on function crear_reserva, extender_reserva, cancelar_reserva, liberar_reserva, registrar_llegada,
-                          crear_bloqueo, validar_credencial, asignar_rol, activar_usuario to authenticated;
+                          crear_bloqueo, validar_credencial, asignar_rol, activar_usuario,
+                          crear_mantenimiento, iniciar_mantenimiento, completar_mantenimiento,
+                          validar_mantenimiento, cancelar_mantenimiento to authenticated;
 grant select on equipos_mantenimiento to authenticated;
--- encolar_recordatorios_fin: SOLO con la clave de servicio (cron / Edge Function), nunca desde el navegador.
+-- encolar_recordatorios_fin y encolar_recordatorios_mantenimiento: SOLO con la clave de servicio
+-- (cron / Edge Function), nunca desde el navegador.

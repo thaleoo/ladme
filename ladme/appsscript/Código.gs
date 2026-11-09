@@ -47,16 +47,34 @@ const HOJA_BLOQUEOS = "Bloqueos_LADME";
 const ENCABEZADOS_BLOQUEOS = ["ID Bloqueo", "Equipo", "Desde", "Hasta", "Motivo", "Creado por", "Fecha creación", "Estado", "Cancelado por", "Fecha cancelación"];
 const DURACIONES_RAPIDAS_MIN = [60, 120, 240, 480, 720, 1440]; // reserva rápida: 1, 2, 4, 8, 12 y 24 horas
 
-// Columnas nuevas de Reservas_LADME (S..V). Se crean solas en la primera reserva.
+// ============================================================================
+// MANTENIMIENTO
+// ============================================================================
+
+const HOJA_MANTENIMIENTOS = "Mantenimientos_LADME";
+const ENCABEZADOS_MANTENIMIENTOS = [
+  "ID Mantenimiento", "Equipo", "Tipo", "Descripción", "Fecha inicio", "Fecha fin",
+  "Responsable técnico", "Estado", "Periodicidad (días)", "Próximo mantenimiento",
+  "Validado por", "Fecha validación", "Hallazgos / Observaciones", "Creado por",
+  "Fecha creación", "ID Bloqueo", "Último aviso"
+];
+const TIPOS_MANTENIMIENTO = ["Preventivo", "Correctivo", "Mejora"];
+const ESTADOS_MANTENIMIENTO = ["Programado", "En curso", "Completado", "Validado", "Cancelado"];
+const DIAS_AVISO_MANTENIMIENTO = 7;
+const PERMISO_VALIDAR_MANTENIMIENTO = "validar_mantenimiento";
+
+// Columnas nuevas de Reservas_LADME (S..W). Se crean solas en la primera reserva.
 const COL_ESTADO = 19;                 // S: Activa | Cancelada | Finalizada
 const COL_FECHA_CANCELACION = 20;      // T
 const COL_MOTIVO_CANCELACION = 21;     // U
 const COL_EXTENSIONES = 22;            // V: contador de extensiones usadas
+const COL_RECORDATORIO_FIN = 23;       // W: fecha/hora en que se envió el recordatorio de fin
 const ENCABEZADOS_RESERVAS_EXTRA = [
   [COL_ESTADO, "Estado"],
   [COL_FECHA_CANCELACION, "Fecha cancelación"],
   [COL_MOTIVO_CANCELACION, "Motivo cancelación"],
-  [COL_EXTENSIONES, "Extensiones"]
+  [COL_EXTENSIONES, "Extensiones"],
+  [COL_RECORDATORIO_FIN, "Recordatorio fin enviado"]
 ];
 
 // Política de reservas (D-02 confirmada): base 168 h + una extensión de hasta 24 h.
@@ -405,6 +423,8 @@ function inicializarHojas_() {
     ];
     sheetEquipos.getRange(2, 1, mockData.length, 5).setValues(mockData);
   }
+
+  try { asegurarHojaMantenimientos_(); } catch (err) { Logger.log("No se pudo crear la hoja de mantenimientos: " + err.toString()); }
 }
 
 /** Cuenta con la que se está ejecutando la aplicación (la que envía los correos). */
@@ -1366,6 +1386,8 @@ function extenderDesdeFicha(idReserva, fechaFin, horaFin) {
     res.sheet.getRange(res.rowIndex, 10).setValue(fechaFin);
     res.sheet.getRange(res.rowIndex, 11).setValue(horaFin);
     res.sheet.getRange(res.rowIndex, COL_EXTENSIONES).setNumberFormat("@").setValue(String(extensiones + 1));
+    // Si se movió el fin, el recordatorio anterior ya no aplica: permitir uno nuevo.
+    res.sheet.getRange(res.rowIndex, COL_RECORDATORIO_FIN).clearContent();
     SpreadsheetApp.flush();
     return {
       exito: true,
@@ -1546,7 +1568,622 @@ function cancelarBloqueo(idBloqueo) {
   }
 }
 
-/** SOLO ADMIN. Estado de TODOS los equipos en este instante (para la ronda de gestión). */
+// ============================================================================
+// MANTENIMIENTO: HISTORIAL, VALIDACIÓN Y AVISOS
+// ============================================================================
+
+/**
+ * Crea la hoja de mantenimientos si no existe y devuelve su referencia.
+ * No valida permisos: cada función pública lo hace antes de llamarla.
+ */
+function asegurarHojaMantenimientos_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hoja = ss.getSheetByName(HOJA_MANTENIMIENTOS);
+  if (!hoja) {
+    hoja = ss.insertSheet(HOJA_MANTENIMIENTOS);
+    hoja.getRange(1, 1, 1, ENCABEZADOS_MANTENIMIENTOS.length)
+      .setValues([ENCABEZADOS_MANTENIMIENTOS])
+      .setFontWeight("bold").setBackground("#5b21b6").setFontColor("#FFFFFF");
+    hoja.setFrozenRows(1);
+    hoja.setColumnWidth(4, 260);
+    hoja.setColumnWidth(13, 260);
+  }
+  return hoja;
+}
+
+/** Índices de columna (base 0) de Mantenimientos_LADME, para no usar números sueltos. */
+const MNT = {
+  ID: 0, EQUIPO: 1, TIPO: 2, DESCRIPCION: 3, INICIO: 4, FIN: 5, RESPONSABLE: 6,
+  ESTADO: 7, PERIODICIDAD: 8, PROXIMO: 9, VALIDADO_POR: 10, FECHA_VALIDACION: 11,
+  HALLAZGOS: 12, CREADO_POR: 13, FECHA_CREACION: 14, ID_BLOQUEO: 15, ULTIMO_AVISO: 16
+};
+
+/** Normaliza "YYYY-MM-DDTHH:mm" o "YYYY-MM-DD HH:mm" a Date. Devuelve null si no es válida. */
+function fechaHoraDesdeTexto_(valor) {
+  var t = String(valor === null || valor === undefined ? "" : valor).trim().replace("T", " ");
+  var m = /^(\d{4})-(\d{2})-(\d{2})[ ](\d{2}):(\d{2})$/.exec(t);
+  if (m) {
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), 0, 0);
+    if (isNaN(d.getTime())) return null;
+    return d;
+  }
+  m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
+  return null;
+}
+
+/** Valida y normaliza los datos de un mantenimiento. Función pura (no toca hojas). */
+function validarDatosMantenimiento_(datos, ahora) {
+  function fallo(m) { return { ok: false, mensaje: m }; }
+  if (!datos || typeof datos !== "object") return fallo("Solicitud inválida.");
+  ahora = ahora instanceof Date ? ahora : new Date();
+
+  var equipo = String(datos.equipo || "").trim();
+  if (obtenerListaEquipos().indexOf(equipo) === -1) return fallo("Equipo no válido.");
+
+  var tipo = String(datos.tipo || "").trim();
+  if (TIPOS_MANTENIMIENTO.indexOf(tipo) === -1) return fallo("Tipo de mantenimiento no válido.");
+
+  var descripcion = String(datos.descripcion || "").replace(/[\r\n\t]+/g, " ").trim();
+  if (descripcion.length < 3) return fallo("Describa la intervención (mínimo 3 caracteres).");
+  if (descripcion.length > 500) return fallo("La descripción admite máximo 500 caracteres.");
+
+  var inicio = fechaHoraDesdeTexto_(datos.fechaInicio);
+  var fin = fechaHoraDesdeTexto_(datos.fechaFin);
+  if (!inicio || !fin) return fallo("Fechas de inicio y fin inválidas.");
+  if (fin <= inicio) return fallo("El fin de la intervención debe ser posterior al inicio.");
+
+  var responsable = String(datos.responsable || "").trim().toLowerCase();
+  if (!/^[^\s@]+@unal\.edu\.co$/.test(responsable)) return fallo("El responsable técnico debe tener un correo @unal.edu.co.");
+
+  var periodicidad = Number(datos.periodicidadDias);
+  if (!isFinite(periodicidad) || periodicidad < 0 || periodicidad > 3650) {
+    return fallo("La periodicidad debe estar entre 0 y 3650 días (0 = única).");
+  }
+
+  var hallazgos = String(datos.hallazgos || "").replace(/[\r\n\t]+/g, " ").trim();
+  if (hallazgos.length > 800) return fallo("Los hallazgos admiten máximo 800 caracteres.");
+
+  return {
+    ok: true,
+    datos: {
+      equipo: equipo, tipo: tipo, descripcion: descripcion,
+      inicio: inicio, fin: fin, responsable: responsable,
+      periodicidad: Math.round(periodicidad), hallazgos: hallazgos
+    }
+  };
+}
+
+/** Inserta un bloqueo de disponibilidad sin comprobar permisos. Devuelve { exito, id }. */
+function insertarBloqueo_(equipo, desde, hasta, motivo, actor) {
+  var hoja = asegurarHojaBloqueos_();
+  var id = "BLQ-" + new Date().getTime();
+  var fila = [id, equipo, fechaTexto_(desde), fechaTexto_(hasta), motivo,
+    actor || "", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
+    "Activo", "", ""];
+  var destino = hoja.getLastRow() + 1;
+  var rango = hoja.getRange(destino, 1, 1, fila.length);
+  rango.setNumberFormat("@");
+  rango.setValues([fila]);
+  SpreadsheetApp.flush();
+  if (String(hoja.getRange(destino, 1).getValue()).trim() !== id) return { exito: false, id: "" };
+  return { exito: true, id: id };
+}
+
+/** Busca una fila de Mantenimientos_LADME por ID. Devuelve { hoja, fila, datos } o null. */
+function buscarMantenimientoPorId_(id) {
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MANTENIMIENTOS);
+  if (!hoja || hoja.getLastRow() < 2) return null;
+  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, ENCABEZADOS_MANTENIMIENTOS.length).getValues();
+  for (var i = 0; i < datos.length; i++) {
+    if (String(datos[i][MNT.ID]).trim() === String(id)) {
+      return { hoja: hoja, fila: i + 2, datos: datos[i] };
+    }
+  }
+  return null;
+}
+
+/**
+ * SOLO PERSONAL DEL LABORATORIO. Registra una intervención y bloquea el equipo
+ * en ese intervalo (si todavía no ha terminado).
+ */
+function crearMantenimiento(datos) {
+  var lock = null;
+  var tieneLock = false;
+  try {
+    if (!esLaboratoristaActual_()) return { exito: false, mensaje: "Solo el personal del laboratorio puede registrar mantenimientos." };
+    var ahora = new Date();
+    var v = validarDatosMantenimiento_(datos, ahora);
+    if (!v.ok) return { exito: false, mensaje: v.mensaje };
+
+    lock = LockService.getScriptLock();
+    tieneLock = lock.tryLock(LOCK_ESPERA_MS);
+    if (!tieneLock) return { exito: false, mensaje: "El sistema está procesando otras solicitudes. Intente de nuevo en unos segundos." };
+
+    var hoja = asegurarHojaMantenimientos_();
+    var id = "MNT-" + ahora.getTime();
+    var actor = obtenerEmailActivo_() || "";
+    var d = v.datos;
+
+    var idBloqueo = "";
+    if (d.fin > ahora) {
+      var bloqueo = insertarBloqueo_(d.equipo, d.inicio, d.fin,
+        "Mantenimiento " + d.tipo.toLowerCase() + ": " + d.descripcion.slice(0, 120), actor);
+      if (!bloqueo.exito) return { exito: false, mensaje: "No se pudo bloquear el equipo para la intervención. No se registró nada." };
+      idBloqueo = bloqueo.id;
+    }
+
+    var fila = [
+      id, d.equipo, d.tipo, d.descripcion,
+      fechaTexto_(d.inicio), fechaTexto_(d.fin), d.responsable, "Programado",
+      d.periodicidad, "", "", "", d.hallazgos, actor,
+      Utilities.formatDate(ahora, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
+      idBloqueo, ""
+    ];
+    var destino = hoja.getLastRow() + 1;
+    var rango = hoja.getRange(destino, 1, 1, fila.length);
+    rango.setNumberFormat("@");
+    rango.setValues([fila]);
+    SpreadsheetApp.flush();
+    if (String(hoja.getRange(destino, 1).getValue()).trim() !== id) {
+      return { exito: false, mensaje: "No se pudo confirmar el registro. Revise la lista antes de reintentar." };
+    }
+  } catch (err) {
+    Logger.log("Error en crearMantenimiento: " + err.toString());
+    return { exito: false, mensaje: "Error al registrar el mantenimiento. Intente de nuevo." };
+  } finally {
+    if (tieneLock) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
+  }
+
+  // Aviso al responsable y al personal, fuera del bloqueo (su fallo no revierte nada).
+  try {
+    var asunto = "LADME · Mantenimiento programado: " + v.datos.equipo;
+    var cuerpo = "<p>Se programó un mantenimiento en LADME.</p>" +
+      "<ul><li><strong>Equipo:</strong> " + escHtml_(v.datos.equipo) + "</li>" +
+      "<li><strong>Tipo:</strong> " + escHtml_(v.datos.tipo) + "</li>" +
+      "<li><strong>Desde:</strong> " + escHtml_(fechaTexto_(v.datos.inicio)) + "</li>" +
+      "<li><strong>Hasta:</strong> " + escHtml_(fechaTexto_(v.datos.fin)) + "</li>" +
+      "<li><strong>Descripción:</strong> " + escHtml_(v.datos.descripcion) + "</li></ul>";
+    var destinatarios = [v.datos.responsable].concat(LAB_EMAILS);
+    enviarCorreoLab_(asunto, cuerpo, destinatarios);
+  } catch (err) { Logger.log("Aviso de mantenimiento no enviado: " + err.toString()); }
+
+  return { exito: true, id: id, mensaje: "Mantenimiento registrado y equipo bloqueado en ese intervalo." };
+}
+
+/**
+ * PERSONAL DEL LABORATORIO. Historial de mantenimientos con estado y avisos.
+ * Devuelve además el permiso de validación para que la interfaz muestre u oculte acciones.
+ */
+function listarMantenimientos(equipoFiltro, estadoFiltro) {
+  if (!esLaboratoristaActual_()) throw new Error("No autorizado.");
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MANTENIMIENTOS);
+  if (!hoja || hoja.getLastRow() < 2) return { ok: true, permisos: { validar: tienePermiso_(PERMISO_VALIDAR_MANTENIMIENTO) }, items: [] };
+
+  var ahora = new Date();
+  var eq = String(equipoFiltro || "").trim();
+  var es = String(estadoFiltro || "").trim();
+  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, ENCABEZADOS_MANTENIMIENTOS.length).getValues();
+  var items = [];
+
+  datos.forEach(function (r) {
+    var estado = String(r[MNT.ESTADO] || "").trim();
+    if (eq && eq !== "TODOS" && String(r[MNT.EQUIPO]).trim() !== eq) return;
+    if (es && es !== "TODOS" && estado !== es) return;
+    var fin = fechaHoraDesdeTexto_(r[MNT.FIN]);
+    var proximo = fechaHoraDesdeTexto_(r[MNT.PROXIMO]);
+    var vencido = !!fin && fin < ahora && estado !== "Validado" && estado !== "Cancelado";
+    items.push({
+      id: String(r[MNT.ID] || ""),
+      equipo: String(r[MNT.EQUIPO] || ""),
+      tipo: String(r[MNT.TIPO] || ""),
+      descripcion: String(r[MNT.DESCRIPCION] || ""),
+      fechaInicio: String(r[MNT.INICIO] || ""),
+      fechaFin: String(r[MNT.FIN] || ""),
+      responsable: String(r[MNT.RESPONSABLE] || ""),
+      estado: estado,
+      periodicidadDias: Number(r[MNT.PERIODICIDAD]) || 0,
+      proximo: proximo ? fechaTexto_(proximo) : "",
+      validadoPor: String(r[MNT.VALIDADO_POR] || ""),
+      fechaValidacion: String(r[MNT.FECHA_VALIDACION] || ""),
+      hallazgos: String(r[MNT.HALLAZGOS] || ""),
+      creadoPor: String(r[MNT.CREADO_POR] || ""),
+      fechaCreacion: String(r[MNT.FECHA_CREACION] || ""),
+      vencido: vencido,
+      diasParaVencer: fin ? Math.ceil((fin.getTime() - ahora.getTime()) / 86400000) : null,
+      diasParaProximo: proximo ? Math.ceil((proximo.getTime() - ahora.getTime()) / 86400000) : null
+    });
+  });
+
+  items.sort(function (a, b) {
+    if (a.estado === "Completado" && b.estado !== "Completado") return -1;
+    if (b.estado === "Completado" && a.estado !== "Completado") return 1;
+    return String(b.fechaInicio).localeCompare(String(a.fechaInicio));
+  });
+
+  return { ok: true, permisos: { validar: tienePermiso_(PERMISO_VALIDAR_MANTENIMIENTO) }, items: items };
+}
+
+/** PERSONAL DEL LAB. Resumen para el aviso/banner del panel. */
+function obtenerResumenMantenimiento() {
+  if (!esLaboratoristaActual_()) return { ok: false };
+  var lista = listarMantenimientos();
+  var items = lista.items || [];
+  var resumen = { pendientesValidar: 0, vencidos: 0, proximos7: 0 };
+  items.forEach(function (m) {
+    if (m.estado === "Completado") resumen.pendientesValidar++;
+    if (m.vencido) resumen.vencidos++;
+    if (m.proximo && m.diasParaProximo !== null && m.diasParaProximo >= 0 && m.diasParaProximo <= DIAS_AVISO_MANTENIMIENTO) {
+      resumen.proximos7++;
+    }
+  });
+  resumen.puedeValidar = !!lista.permisos.validar;
+  resumen.total = items.length;
+  return { ok: true, resumen: resumen };
+}
+
+/** PERSONAL DEL LAB. Marca una intervención como en curso. */
+function iniciarMantenimiento(id) {
+  return cambiarEstadoMantenimiento_(id, "En curso", null, false);
+}
+
+/** PERSONAL DEL LAB. Registra el cierre técnico de la intervención (queda pendiente de validación). */
+function completarMantenimiento(id, hallazgos) {
+  return cambiarEstadoMantenimiento_(id, "Completado", hallazgos, false);
+}
+
+/**
+ * PERMISO validar_mantenimiento. El responsable técnico da por válida la intervención
+ * y, si tiene periodicidad, se calcula la fecha del próximo mantenimiento.
+ */
+function validarMantenimiento(id, hallazgos) {
+  return cambiarEstadoMantenimiento_(id, "Validado", hallazgos, true);
+}
+
+/** PERSONAL DEL LAB. Cancela una intervención (no se borra: queda en el historial). */
+function cancelarMantenimiento(id, motivo) {
+  var lock = null;
+  var tieneLock = false;
+  try {
+    if (!esLaboratoristaActual_()) return { exito: false, mensaje: "No autorizado." };
+    var motivoLimpio = String(motivo || "").replace(/[\r\n\t]+/g, " ").trim();
+    if (motivoLimpio.length < 3) return { exito: false, mensaje: "Escriba el motivo de la cancelación (mínimo 3 caracteres)." };
+
+    lock = LockService.getScriptLock();
+    tieneLock = lock.tryLock(LOCK_ESPERA_MS);
+    if (!tieneLock) return { exito: false, mensaje: "El sistema está ocupado. Intente de nuevo." };
+
+    var res = buscarMantenimientoPorId_(id);
+    if (!res) return { exito: false, mensaje: "No se encontró el mantenimiento." };
+    var estado = String(res.datos[MNT.ESTADO] || "").trim();
+    if (estado === "Validado") return { exito: false, mensaje: "Un mantenimiento ya validado no se puede cancelar." };
+    if (estado === "Cancelado") return { exito: false, mensaje: "Ese mantenimiento ya estaba cancelado." };
+
+    var detalle = (String(res.datos[MNT.HALLAZGOS] || "") + " | Cancelado: " + motivoLimpio).slice(0, 800);
+    res.hoja.getRange(res.fila, MNT.ESTADO + 1).setValue("Cancelado");
+    res.hoja.getRange(res.fila, MNT.HALLAZGOS + 1).setValue(detalle);
+
+    // Quitar el bloqueo asociado, si sigue activo.
+    var idBloqueo = String(res.datos[MNT.ID_BLOQUEO] || "").trim();
+    if (idBloqueo) {
+      var hojaB = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_BLOQUEOS);
+      if (hojaB && hojaB.getLastRow() >= 2) {
+        var ids = hojaB.getRange(2, 1, hojaB.getLastRow() - 1, 1).getValues();
+        for (var i = 0; i < ids.length; i++) {
+          if (String(ids[i][0]).trim() === idBloqueo && String(hojaB.getRange(i + 2, 8).getValue()).trim() === "Activo") {
+            hojaB.getRange(i + 2, 8, 1, 3).setNumberFormat("@")
+              .setValues([["Cancelado", obtenerEmailActivo_(), Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss")]]);
+            break;
+          }
+        }
+      }
+    }
+    SpreadsheetApp.flush();
+    return { exito: true, mensaje: "Mantenimiento cancelado y bloqueo liberado." };
+  } catch (err) {
+    Logger.log("Error en cancelarMantenimiento: " + err.toString());
+    return { exito: false, mensaje: "Error al cancelar el mantenimiento." };
+  } finally {
+    if (tieneLock) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
+  }
+}
+
+/** Núcleo de las transiciones de estado. No permite saltos arbitrarios. */
+function cambiarEstadoMantenimiento_(id, nuevoEstado, hallazgos, exigePermisoValidar) {
+  var lock = null;
+  var tieneLock = false;
+  try {
+    if (!esLaboratoristaActual_()) return { exito: false, mensaje: "No autorizado." };
+    if (exigePermisoValidar && !tienePermiso_(PERMISO_VALIDAR_MANTENIMIENTO)) {
+      return { exito: false, mensaje: "Solo el responsable técnico con permiso «validar_mantenimiento» puede validar intervenciones." };
+    }
+    if (ESTADOS_MANTENIMIENTO.indexOf(nuevoEstado) === -1) return { exito: false, mensaje: "Estado no válido." };
+
+    lock = LockService.getScriptLock();
+    tieneLock = lock.tryLock(LOCK_ESPERA_MS);
+    if (!tieneLock) return { exito: false, mensaje: "El sistema está ocupado. Intente de nuevo." };
+
+    var res = buscarMantenimientoPorId_(id);
+    if (!res) return { exito: false, mensaje: "No se encontró el mantenimiento." };
+    var actual = String(res.datos[MNT.ESTADO] || "").trim();
+    if (actual === "Cancelado") return { exito: false, mensaje: "El mantenimiento está cancelado." };
+    if (actual === "Validado") return { exito: false, mensaje: "El mantenimiento ya fue validado." };
+
+    var permitidos = { "En curso": ["Programado"], "Completado": ["Programado", "En curso"], "Validado": ["Completado"] };
+    if ((permitidos[nuevoEstado] || []).indexOf(actual) === -1) {
+      return { exito: false, mensaje: "No se puede pasar de «" + actual + "» a «" + nuevoEstado + "»." };
+    }
+
+    var texto = String(hallazgos === null || hallazgos === undefined ? "" : hallazgos).replace(/[\r\n\t]+/g, " ").trim();
+    if (texto.length > 800) return { exito: false, mensaje: "Los hallazgos admiten máximo 800 caracteres." };
+    if (nuevoEstado === "Completado" && texto.length < 3) {
+      return { exito: false, mensaje: "Registre los hallazgos de la intervención (mínimo 3 caracteres)." };
+    }
+
+    var ahora = new Date();
+    var zona = Session.getScriptTimeZone();
+    res.hoja.getRange(res.fila, MNT.ESTADO + 1).setValue(nuevoEstado);
+    if (texto) res.hoja.getRange(res.fila, MNT.HALLAZGOS + 1).setValue(texto);
+
+    var mensaje = "Estado actualizado a " + nuevoEstado + ".";
+    if (nuevoEstado === "Validado") {
+      var actor = obtenerEmailActivo_() || "";
+      res.hoja.getRange(res.fila, MNT.VALIDADO_POR + 1).setValue(actor);
+      res.hoja.getRange(res.fila, MNT.FECHA_VALIDACION + 1)
+        .setValue(Utilities.formatDate(ahora, zona, "yyyy-MM-dd HH:mm:ss"));
+
+      var periodicidad = Number(res.datos[MNT.PERIODICIDAD]) || 0;
+      if (periodicidad > 0) {
+        var fin = fechaHoraDesdeTexto_(res.datos[MNT.FIN]) || ahora;
+        var proximo = new Date(fin.getTime() + periodicidad * 86400000);
+        res.hoja.getRange(res.fila, MNT.PROXIMO + 1).setValue(fechaTexto_(proximo));
+        mensaje += " Próximo mantenimiento: " + fechaTexto_(proximo) + ".";
+      }
+    }
+    SpreadsheetApp.flush();
+    return { exito: true, mensaje: mensaje };
+  } catch (err) {
+    Logger.log("Error en cambiarEstadoMantenimiento_: " + err.toString());
+    return { exito: false, mensaje: "No se pudo actualizar el mantenimiento." };
+  } finally {
+    if (tieneLock) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
+  }
+}
+
+/** Personas que deben recibir avisos de mantenimiento: personal del lab + administración. */
+function destinatariosLab_() {
+  var set = {};
+  LAB_EMAILS.concat(ADMIN_EMAILS).forEach(function (c) {
+    var k = String(c || "").toLowerCase().trim();
+    if (k) set[k] = true;
+  });
+  return Object.keys(set);
+}
+
+/** Envía un correo al personal del laboratorio. No lanza: devuelve {exito, mensaje}. */
+function enviarCorreoLab_(asunto, cuerpoHtml, destinatarios) {
+  try {
+    var para = (destinatarios && destinatarios.length ? destinatarios : destinatariosLab_())
+      .map(function (c) { return String(c || "").toLowerCase().trim(); })
+      .filter(function (c, i, arr) { return c && arr.indexOf(c) === i; });
+    if (!para.length) return { exito: false, mensaje: "Sin destinatarios." };
+    MailApp.sendEmail({
+      to: para.join(","),
+      subject: asunto,
+      htmlBody: '<div style="font-family: Arial, sans-serif; max-width: 640px;">' +
+        '<div style="background:#6d28d9;color:#fff;padding:14px 18px;border-radius:6px 6px 0 0;">' +
+        '<strong>LADME · Laboratorio de Datos UNAL</strong></div>' +
+        '<div style="border:1px solid #e5e7eb;border-top:none;padding:18px;">' + cuerpoHtml + '</div></div>'
+    });
+    return { exito: true };
+  } catch (err) {
+    Logger.log("Correo al laboratorio no enviado: " + err.toString());
+    return { exito: false, mensaje: "No se pudo enviar el correo." };
+  }
+}
+
+/**
+ * DISPARADOR DIARIO. Avisa al personal del laboratorio de:
+ *  - mantenimientos programados o en curso que vencen en <= 7 días o ya vencieron,
+ *  - intervenciones completadas pendientes de validación,
+ *  - próximos mantenimientos (calculados al validar) dentro de <= 7 días.
+ * No repite el aviso el mismo día (columna «Último aviso»).
+ */
+function revisarMantenimientos_() {
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MANTENIMIENTOS);
+  if (!hoja || hoja.getLastRow() < 2) return { revisados: 0, avisos: 0 };
+
+  var lock = LockService.getScriptLock();
+  var tiene = false;
+  try {
+    tiene = lock.tryLock(30000);
+    if (!tiene) return { revisados: 0, avisos: 0, mensaje: "Bloqueo ocupado." };
+
+    var ahora = new Date();
+    var hoy = Utilities.formatDate(ahora, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, ENCABEZADOS_MANTENIMIENTOS.length).getValues();
+    var pendientes = [];
+
+    datos.forEach(function (r, i) {
+      var estado = String(r[MNT.ESTADO] || "").trim();
+      if (estado === "Cancelado") return;
+      var fin = fechaHoraDesdeTexto_(r[MNT.FIN]);
+      var inicio = fechaHoraDesdeTexto_(r[MNT.INICIO]);
+      var proximo = fechaHoraDesdeTexto_(r[MNT.PROXIMO]);
+      var motivo = "";
+
+      if (estado === "Completado") {
+        motivo = "Intervención completada y pendiente de validación técnica";
+      } else if (estado !== "Validado" && fin && fin < ahora) {
+        motivo = "Intervención vencida sin cerrar";
+      } else if (estado !== "Validado" && fin && (fin.getTime() - ahora.getTime()) <= DIAS_AVISO_MANTENIMIENTO * 86400000) {
+        motivo = "Intervención programada en los próximos " + DIAS_AVISO_MANTENIMIENTO + " días";
+      }
+
+      if (!motivo && proximo && proximo >= ahora && (proximo.getTime() - ahora.getTime()) <= DIAS_AVISO_MANTENIMIENTO * 86400000) {
+        motivo = "Próximo mantenimiento programado por periodicidad";
+      }
+      if (!motivo) return;
+
+      var ultimo = String(r[MNT.ULTIMO_AVISO] || "").trim();
+      if (ultimo === hoy) return; // ya se avisó hoy
+
+      pendientes.push({
+        fila: i + 2,
+        id: String(r[MNT.ID] || ""),
+        equipo: String(r[MNT.EQUIPO] || ""),
+        tipo: String(r[MNT.TIPO] || ""),
+        estado: estado,
+        inicio: inicio ? fechaTexto_(inicio) : String(r[MNT.INICIO] || ""),
+        fin: fin ? fechaTexto_(fin) : String(r[MNT.FIN] || ""),
+        responsable: String(r[MNT.RESPONSABLE] || ""),
+        motivo: motivo
+      });
+    });
+
+    if (!pendientes.length) return { revisados: datos.length, avisos: 0 };
+
+    var filas = pendientes.map(function (p) {
+      return "<tr>" +
+        "<td style='padding:6px;border-bottom:1px solid #eee;'>" + escHtml_(p.equipo) + "</td>" +
+        "<td style='padding:6px;border-bottom:1px solid #eee;'>" + escHtml_(p.tipo) + "</td>" +
+        "<td style='padding:6px;border-bottom:1px solid #eee;'>" + escHtml_(p.estado) + "</td>" +
+        "<td style='padding:6px;border-bottom:1px solid #eee;'>" + escHtml_(p.inicio) + " → " + escHtml_(p.fin) + "</td>" +
+        "<td style='padding:6px;border-bottom:1px solid #eee;'>" + escHtml_(p.responsable) + "</td>" +
+        "<td style='padding:6px;border-bottom:1px solid #eee;'>" + escHtml_(p.motivo) + "</td>" +
+        "</tr>";
+    }).join("");
+
+    var envio = enviarCorreoLab_(
+      "LADME · " + pendientes.length + " mantenimiento(s) requieren atención",
+      "<p>Estos mantenimientos requieren gestión:</p>" +
+      "<table style='border-collapse:collapse;width:100%;font-size:13px;'>" +
+      "<thead><tr style='background:#f3e8ff;'>" +
+      "<th style='padding:6px;text-align:left;'>Equipo</th><th style='padding:6px;text-align:left;'>Tipo</th>" +
+      "<th style='padding:6px;text-align:left;'>Estado</th><th style='padding:6px;text-align:left;'>Intervalo</th>" +
+      "<th style='padding:6px;text-align:left;'>Responsable</th><th style='padding:6px;text-align:left;'>Motivo del aviso</th>" +
+      "</tr></thead><tbody>" + filas + "</tbody></table>" +
+      "<p style='font-size:12px;color:#64748b;'>Aviso automático. No se repite el mismo día.</p>"
+    );
+
+    if (envio.exito) {
+      pendientes.forEach(function (p) {
+        hoja.getRange(p.fila, MNT.ULTIMO_AVISO + 1).setValue(hoy);
+      });
+      SpreadsheetApp.flush();
+    }
+    return { revisados: datos.length, avisos: envio.exito ? pendientes.length : 0, correo: envio.exito };
+  } catch (err) {
+    Logger.log("Error en revisarMantenimientos_: " + err.toString());
+    return { revisados: 0, avisos: 0, error: err.toString() };
+  } finally {
+    if (tiene) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
+  }
+}
+
+/**
+ * DISPARADOR CADA 30 MINUTOS. Recuerda por correo al titular de cada reserva que
+ * termina en la próxima hora. Marca la columna «Recordatorio fin enviado» para no
+ * repetir el aviso. Los avisos en la PWA se alimentan de la misma tabla.
+ */
+function recordarFinReservas_() {
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_RESERVAS);
+  if (!hoja || hoja.getLastRow() < 2) return { enviados: 0 };
+
+  var lock = LockService.getScriptLock();
+  var tiene = false;
+  try {
+    tiene = lock.tryLock(30000);
+    if (!tiene) return { enviados: 0, mensaje: "Bloqueo ocupado." };
+
+    asegurarColumnasExtra_(hoja);
+    var ancho = Math.min(COL_RECORDATORIO_FIN, hoja.getMaxColumns());
+    var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, ancho).getValues();
+    var ahora = new Date();
+    var limite = new Date(ahora.getTime() + 60 * 60000);
+    var zona = Session.getScriptTimeZone();
+    var enviados = 0;
+
+    datos.forEach(function (r, i) {
+      if (esReservaCancelada_(r)) return;
+      if (String(r[COL_RECORDATORIO_FIN - 1] || "").trim()) return;
+      var fin = new Date(Utilities.formatDate(new Date(r[9]), zona, "yyyy-MM-dd") + "T" + formatHoraStr(r[10]) + ":00");
+      if (isNaN(fin.getTime()) || fin <= ahora || fin > limite) return;
+
+      var correo = r[4] ? r[4].toString().trim() : "";
+      if (!correo) return;
+
+      var inicio = new Date(Utilities.formatDate(new Date(r[7]), zona, "yyyy-MM-dd") + "T" + formatHoraStr(r[8]) + ":00");
+      var ok = enviarRecordatorioFin_({
+        nombre: r[2], correo: correo, equipos: r[11],
+        inicio: inicio, fin: fin, idReserva: idDeFila_(r)
+      });
+      if (ok) {
+        hoja.getRange(i + 2, COL_RECORDATORIO_FIN)
+          .setNumberFormat("@")
+          .setValue(Utilities.formatDate(ahora, zona, "yyyy-MM-dd HH:mm:ss"));
+        enviados++;
+      }
+    });
+    if (enviados) SpreadsheetApp.flush();
+    return { enviados: enviados };
+  } catch (err) {
+    Logger.log("Error en recordarFinReservas_: " + err.toString());
+    return { enviados: 0, error: err.toString() };
+  } finally {
+    if (tiene) { try { lock.releaseLock(); } catch (e) { Logger.log("No se pudo liberar el lock: " + e); } }
+  }
+}
+
+function enviarRecordatorioFin_(r) {
+  try {
+    var asunto = "LADME · Su reserva termina pronto (" + fechaTexto_(r.fin) + ")";
+    var urlBase = ScriptApp.getService().getUrl();
+    var mId = /^\[([^\]]+)\]/.exec(String(r.equipos || ""));
+    var linkFicha = mId
+      ? " Si necesita más tiempo, recuerde que puede solicitar una única extensión de hasta 24 horas desde la " +
+        "<a href='" + escHtml_(urlBase + "?asset=" + encodeURIComponent(mId[1])) + "'>ficha del equipo</a>."
+      : "";
+    var html = "<p>Hola " + escHtml_(r.nombre || "usuario") + ",</p>" +
+      "<p>Su reserva del equipo <strong>" + escHtml_(r.equipos || "") + "</strong> termina el <strong>" +
+      escHtml_(fechaTexto_(r.fin)) + "</strong>.</p>" +
+      "<p>Si ya terminó, libere el equipo para que otra persona pueda usarlo:</p>" +
+      "<p><a href='" + escHtml_(urlBase + "?action=liberar&id=" + encodeURIComponent(r.idReserva)) +
+      "' style='background:#059669;color:#fff;padding:9px 15px;border-radius:5px;text-decoration:none;font-weight:bold;'>Liberar equipo ahora</a></p>" +
+      "<p>" + linkFicha + "</p>" +
+      "<p style='font-size:12px;color:#64748b;'>Aviso automático de LADME.</p>";
+    MailApp.sendEmail({ to: r.correo, subject: asunto, htmlBody: html });
+    return true;
+  } catch (err) {
+    Logger.log("Recordatorio de fin no enviado a " + r.correo + ": " + err.toString());
+    return false;
+  }
+}
+
+/**
+ * Instala (o reinstala) los disparadores del sistema. Ejecutar UNA vez desde el editor.
+ * Es idempotente: borra los disparadores previos de estas mismas funciones.
+ */
+function instalarDisparadores() {
+  var handlers = ["revisarMantenimientos_", "recordarFinReservas_"];
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (handlers.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("revisarMantenimientos_").timeBased().everyDays(1).atHour(7).create();
+  ScriptApp.newTrigger("recordarFinReservas_").timeBased().everyMinutes(30).create();
+  return { ok: true, mensaje: "Disparadores instalados: revisión diaria de mantenimientos (07:00) y recordatorios de fin cada 30 min." };
+}
+
+/** Diagnóstico de disparadores (para el editor). */
+function estadoDisparadores() {
+  var lista = ScriptApp.getProjectTriggers().map(function (t) {
+    return { funcion: t.getHandlerFunction(), tipo: String(t.getEventType()), id: t.getUniqueId() };
+  });
+  Logger.log(JSON.stringify(lista, null, 2));
+  return lista;
+}
+
+
 function obtenerVistaRondaAdmin() {
   requireAdmin_();
   var ahora = new Date();
@@ -1968,10 +2605,10 @@ function archivarReserva_(sheetReservas, rowIndex, accion, actor, motivo) {
   }
 }
 
-/** Garantiza las columnas extra de Reservas_LADME (P..V) y sus encabezados. Llamar dentro del bloqueo. */
+/** Garantiza las columnas extra de Reservas_LADME (P..W) y sus encabezados. Llamar dentro del bloqueo. */
 function asegurarColumnasExtra_(sheet) {
-  if (sheet.getMaxColumns() < COL_EXTENSIONES) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_EXTENSIONES - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < COL_RECORDATORIO_FIN) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL_RECORDATORIO_FIN - sheet.getMaxColumns());
   }
   [
     [COL_ID_SOLICITUD, "ID Solicitud"],
@@ -1990,7 +2627,7 @@ function asegurarColumnasExtra_(sheet) {
  * Fechas y horas se siguen escribiendo como siempre (Sheets las reconoce).
  */
 function escribirFilaReserva_(sheet, fila, valores) {
-  [3, 4, 6, 7, 14, COL_MENSAJE, COL_ESTADO, COL_FECHA_CANCELACION, COL_MOTIVO_CANCELACION, COL_EXTENSIONES].forEach(function (c) {
+  [3, 4, 6, 7, 14, COL_MENSAJE, COL_ESTADO, COL_FECHA_CANCELACION, COL_MOTIVO_CANCELACION, COL_EXTENSIONES, COL_RECORDATORIO_FIN].forEach(function (c) {
     sheet.getRange(fila, c).setNumberFormat("@");
   });
   sheet.getRange(fila, 1, 1, valores.length).setValues([valores]);
@@ -2184,6 +2821,48 @@ function pruebasPolitica() {
     esReservaCancelada_((function () { var f = new Array(COL_EXTENSIONES); f[COL_ESTADO - 1] = "  CANCELADA "; return f; })()) === true);
   t("slice H..V detecta Cancelada", esCanceladaEnSliceH_(filaCancelada.slice(7)) === true);
   t("slice H..V no marca una activa", esCanceladaEnSliceH_(filaActiva.slice(7)) === false);
+
+  Logger.log(r.join("\n"));
+}
+
+/**
+ * Pruebas puras de mantenimiento (parseo de fechas y validación de datos).
+ * No escriben en hojas ni envían correos. Ejecutar desde el editor.
+ */
+function pruebasMantenimiento() {
+  var r = [];
+  function t(n, ok) { r.push((ok ? "OK    " : "FALLA ") + n); }
+
+  var a = fechaHoraDesdeTexto_("2031-03-03T08:30");
+  var b = fechaHoraDesdeTexto_("2031-03-03 08:30");
+  t("fecha ISO con T se parsea", !!a && a.getHours() === 8 && a.getMinutes() === 30);
+  t("fecha con espacio se parsea igual", !!b && a.getTime() === b.getTime());
+  t("fecha basura devuelve null", fechaHoraDesdeTexto_("03/03/2031") === null);
+  t("fecha vacía devuelve null", fechaHoraDesdeTexto_("") === null);
+
+  var eqs = obtenerListaEquipos();
+  if (!eqs.length) {
+    r.push("OMITE pruebas con catálogo vacío");
+  } else {
+    var base = {
+      equipo: eqs[0], tipo: "Preventivo", descripcion: "Limpieza interna y revisión de discos",
+      fechaInicio: "2031-03-03T08:00", fechaFin: "2031-03-03T10:00",
+      responsable: "tecnico@unal.edu.co", periodicidadDias: 180, hallazgos: ""
+    };
+    function con(c) { var o = JSON.parse(JSON.stringify(base)); for (var k in c) o[k] = c[k]; return o; }
+
+    t("mantenimiento válido aceptado", validarDatosMantenimiento_(base, new Date(2031, 0, 1)).ok === true);
+    t("tipo inventado rechazado", validarDatosMantenimiento_(con({ tipo: "Otro" })).ok === false);
+    t("fin anterior al inicio rechazado", validarDatosMantenimiento_(con({ fechaFin: "2031-03-03T07:00" })).ok === false);
+    t("fin igual al inicio rechazado", validarDatosMantenimiento_(con({ fechaFin: "2031-03-03T08:00" })).ok === false);
+    t("responsable externo rechazado", validarDatosMantenimiento_(con({ responsable: "x@gmail.com" })).ok === false);
+    t("periodicidad negativa rechazada", validarDatosMantenimiento_(con({ periodicidadDias: -1 })).ok === false);
+    t("periodicidad absurda rechazada", validarDatosMantenimiento_(con({ periodicidadDias: 4000 })).ok === false);
+    t("descripción muy corta rechazada", validarDatosMantenimiento_(con({ descripcion: "ok" })).ok === false);
+    t("equipo inexistente rechazado", validarDatosMantenimiento_(con({ equipo: "NO-EXISTE" })).ok === false);
+    t("los saltos de línea se aplanan",
+      validarDatosMantenimiento_(con({ descripcion: "Limpieza\ninterna\tde equipos" })).datos.descripcion === "Limpieza interna de equipos");
+  }
 
   Logger.log(r.join("\n"));
 }
