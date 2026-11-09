@@ -18,18 +18,18 @@ create type estado_reserva as enum ('activa', 'cancelada');
 -- ---------------------------------------------------------------- USUARIOS
 create table perfiles (
   id        uuid primary key references auth.users (id) on delete cascade,
-  correo    text not null unique check (correo = lower(correo) and correo like '%@unal.edu.co'),
+  correo    text not null unique check (correo = lower(correo) and split_part(correo, '@', 2) = 'unal.edu.co'),
   nombre    text not null check (char_length(nombre) between 1 and 120),
   programa  text,
   rol       rol_usuario not null default 'usuario',
-  activo    boolean not null default true,
+  activo    boolean not null default false,   -- la administración habilita cada cuenta
   creado_en timestamptz not null default now()
   -- No se guarda la cédula: minimización de datos (Ley 1581). Añadir solo si la administración lo justifica.
 );
 
 create function crear_perfil_al_registrarse() returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if lower(coalesce(new.email, '')) not like '%@unal.edu.co' then
+  if split_part(lower(coalesce(new.email, '')), '@', 2) <> 'unal.edu.co' then
     raise exception 'Solo se permiten cuentas institucionales @unal.edu.co.' using errcode = '42501';
   end if;
   insert into perfiles (id, correo, nombre)
@@ -126,6 +126,23 @@ create table reservas_historial (
   creado_en  timestamptz not null default now()
 );
 
+-- Respaldo de la migración desde Google Sheets. No tiene FK a perfiles: conserva
+-- el correo y el nombre originales aunque la persona aún no tenga cuenta.
+create table reservas_importadas (
+  id              bigint generated always as identity primary key,
+  origen          text not null default 'google_sheets',
+  codigo_equipo   text,
+  correo_titular  text,
+  nombre_titular  text,
+  inicio          timestamptz,
+  fin             timestamptz,
+  estado          text,
+  actividad       text,
+  detalle         text,
+  datos           jsonb not null,
+  importado_en    timestamptz not null default now()
+);
+
 create table cola_notificaciones (
   id          bigint generated always as identity primary key,
   reserva_id  uuid not null,
@@ -173,7 +190,7 @@ create table mantenimientos (
   descripcion     text not null check (char_length(descripcion) between 3 and 500),
   inicio          timestamptz not null,
   fin             timestamptz not null,
-  responsable     text not null check (responsable = lower(responsable) and responsable like '%@unal.edu.co'),
+  responsable     text not null check (responsable = lower(responsable) and split_part(responsable, '@', 2) = 'unal.edu.co'),
   estado          text not null default 'programado'
                   check (estado in ('programado', 'en_curso', 'completado', 'validado', 'cancelado')),
   periodicidad_dias int not null default 0 check (periodicidad_dias between 0 and 3650),
@@ -193,6 +210,23 @@ alter table cola_notificaciones alter column reserva_id drop not null;
 alter table cola_notificaciones add column mantenimiento_id uuid references mantenimientos (id);
 alter table cola_notificaciones add constraint cola_un_origen
   check (num_nonnulls(reserva_id, mantenimiento_id) = 1);
+-- Seguimiento separado del envío por correo (enviado_en) y por Web Push.
+alter table cola_notificaciones add column push_enviado_en timestamptz;
+alter table cola_notificaciones add column push_intentos int not null default 0;
+
+-- Suscripciones Web Push del navegador/PWA. Cada dispositivo es una fila.
+create table push_suscripciones (
+  id           uuid primary key default gen_random_uuid(),
+  usuario_id   uuid not null references perfiles (id) on delete cascade,
+  endpoint     text not null unique,
+  p256dh       text not null,
+  auth         text not null,
+  user_agent   text,
+  creado_en    timestamptz not null default now(),
+  actualizado_en timestamptz not null default now()
+);
+create index push_usuario_idx on push_suscripciones (usuario_id);
+create trigger push_tocar before update on push_suscripciones for each row execute function trg_tocar();
 
 create view equipos_mantenimiento with (security_invoker = true) as
 select e.id as equipo_id, e.codigo,
@@ -224,13 +258,15 @@ alter table equipos             enable row level security;
 alter table politicas           enable row level security;
 alter table reservas            enable row level security;
 alter table reservas_historial  enable row level security;
+alter table reservas_importadas enable row level security;
 alter table cola_notificaciones enable row level security;
 alter table mantenimientos      enable row level security;
+alter table push_suscripciones  enable row level security;
 
 create policy perfiles_ver  on perfiles for select to authenticated using (id = auth.uid() or es_staff());
 create policy perfiles_edit on perfiles for update to authenticated
   using (id = auth.uid())
-  with check (id = auth.uid() and rol = (select p.rol from perfiles p where p.id = auth.uid()) and activo);   -- nadie se asciende solo
+  with check (id = auth.uid());   -- el cambio de rol/estado está bloqueado por privilegios de columna y RPC
 
 create policy equipos_ver   on equipos for select to authenticated using (not archivado or es_staff());
 create policy equipos_staff on equipos for all to authenticated using (es_staff()) with check (es_staff());
@@ -241,11 +277,18 @@ create policy reservas_ver  on reservas for select to authenticated using (usuar
 -- (sin políticas de insert/update/delete: los clientes NO escriben reservas directamente; solo las funciones de abajo)
 create policy historial_ver on reservas_historial for select to authenticated
   using (es_staff() or exists (select 1 from reservas r where r.id = reserva_id and r.usuario_id = auth.uid()));
+create policy importadas_ver on reservas_importadas for select to authenticated using (es_staff());
 create policy mant_ver      on mantenimientos for select to authenticated using (es_staff());
 create policy mant_staff    on mantenimientos for all to authenticated using (es_staff()) with check (es_staff());
+create policy cola_ver      on cola_notificaciones for select to authenticated using (usuario_id = auth.uid());
+create policy push_propias  on push_suscripciones for all to authenticated
+  using (usuario_id = auth.uid()) with check (usuario_id = auth.uid());
 
 revoke all on all tables in schema public from anon, authenticated;
 grant select on perfiles, equipos, politicas, reservas, reservas_historial, mantenimientos to authenticated;
+grant select on reservas_importadas to authenticated;
+grant select on cola_notificaciones to authenticated;
+grant select, insert, update, delete on push_suscripciones to authenticated;
 grant update (nombre, programa) on perfiles to authenticated;
 grant insert, update, delete on equipos, mantenimientos to authenticated;      -- filtrado por RLS (solo staff)
 grant update, insert, delete on politicas to authenticated;                    -- filtrado por RLS (solo administrador)
@@ -283,12 +326,39 @@ begin
   update perfiles set activo = p_activo where id = p_usuario;
 end $$;
 
+-- D-03: permiso fino independiente del rol. Solo administración lo concede.
+create function otorgar_permiso(p_usuario uuid, p_permiso text, p_activo boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not es_admin() then raise exception 'Solo un administrador puede otorgar permisos.' using errcode = '42501'; end if;
+  if char_length(trim(coalesce(p_permiso, ''))) < 3 then raise exception 'Permiso inválido.'; end if;
+  update perfiles
+     set permisos = case
+       when p_activo then (select array_agg(distinct x) from unnest(permisos || p_permiso) as x)
+       else array_remove(permisos, p_permiso)
+     end
+   where id = p_usuario;
+end $$;
+
 create function _perfil_activo() returns uuid language plpgsql stable security definer set search_path = public as $$
 declare v uuid := auth.uid(); begin
   if v is null then raise exception 'Debe iniciar sesión.' using errcode = '28000'; end if;
   if not exists (select 1 from perfiles where id = v and activo) then raise exception 'Su cuenta no está habilitada.' using errcode = '42501'; end if;
   return v;
 end $$;
+
+create function equipos_disponibles(p_inicio timestamptz, p_fin timestamptz)
+returns table (codigo text, nombre text)
+language sql stable security definer set search_path = public as $$
+  select e.codigo, e.nombre
+    from equipos e
+   where p_fin > p_inicio
+     and not e.archivado and e.estado = 'activo'
+     and not exists (
+       select 1 from reservas r
+        where r.equipo_id = e.id and r.estado = 'activa'
+          and r.periodo && tstzrange(p_inicio, p_fin, '[)'))
+   order by e.codigo $$;
 
 create function crear_reserva(p_equipo text, p_inicio timestamptz, p_fin timestamptz, p_actividad text default null,
                               p_detalle text default null, p_desatendido boolean default false,
@@ -425,7 +495,7 @@ declare v uuid := _perfil_activo(); v_eq equipos; v_b reservas; v_m mantenimient
   if p_tipo not in ('preventivo', 'correctivo', 'mejora') then raise exception 'Tipo de mantenimiento no válido.'; end if;
   if char_length(trim(coalesce(p_descripcion, ''))) < 3 then raise exception 'Describa la intervención.'; end if;
   if p_fin <= p_inicio then raise exception 'El fin debe ser posterior al inicio.'; end if;
-  if lower(trim(coalesce(p_responsable, ''))) not like '%@unal.edu.co' then
+  if split_part(lower(trim(coalesce(p_responsable, ''))), '@', 2) <> 'unal.edu.co' then
     raise exception 'El responsable técnico debe tener un correo @unal.edu.co.';
   end if;
   if p_periodicidad_dias < 0 or p_periodicidad_dias > 3650 then raise exception 'Periodicidad inválida.'; end if;
@@ -575,12 +645,18 @@ declare v_n int; begin
   return v_n;
 end $$;
 
+-- La usa la Edge Function de Web Push cuando un envío falla (reintento acotado).
+create function incrementar_push_intentos(p_id bigint) returns void
+language sql security definer set search_path = public as $$
+  update cola_notificaciones set push_intentos = push_intentos + 1 where id = p_id $$;
+
 revoke execute on all functions in schema public from public, anon, authenticated;
 grant execute on function es_staff, es_admin, politica_int, tiene_permiso to authenticated;   -- las usan las políticas y vistas
 grant execute on function crear_reserva, extender_reserva, cancelar_reserva, liberar_reserva, registrar_llegada,
-                          crear_bloqueo, validar_credencial, asignar_rol, activar_usuario,
+                          equipos_disponibles, crear_bloqueo, validar_credencial, asignar_rol, activar_usuario, otorgar_permiso,
                           crear_mantenimiento, iniciar_mantenimiento, completar_mantenimiento,
                           validar_mantenimiento, cancelar_mantenimiento to authenticated;
 grant select on equipos_mantenimiento to authenticated;
+grant execute on function incrementar_push_intentos to service_role;
 -- encolar_recordatorios_fin y encolar_recordatorios_mantenimiento: SOLO con la clave de servicio
 -- (cron / Edge Function), nunca desde el navegador.

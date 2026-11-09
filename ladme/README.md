@@ -12,8 +12,11 @@ Hoy funciona como **web app de Google Apps Script + Google Sheets**. La hoja de 
 |---|---|
 | Web app de reservas | **En producción** (Apps Script) |
 | Datos | Google Sheets (`Reservas_LADME`, `Computadores_LADME`, historial, contactos, bloqueos) |
-| Google Wallet | **Se retira**; el código aún lo contiene (Fase 1) |
-| PWA + Supabase | **En diseño**; esquema SQL listo, sin frontend todavía |
+| Google Wallet | **Retirado** del código; queda como registro en `legacy/wallet/` |
+| Política de reservas | 168 h + una extensión de 24 h, máximo 192 h; soft-cancel |
+| Roles y permisos | usuario, laboratorista, administrador + `validar_mantenimiento` |
+| Mantenimiento | Registro, bloqueo, historial, validación y avisos |
+| PWA + Supabase | **Código completo** en `pwa/` y `db/`; pendiente conectar el proyecto real y migrar datos |
 | Repo | Organizado; código de Apps Script como copia exacta de lo desplegado |
 
 Web app:
@@ -40,7 +43,8 @@ ladme/
 ├── db/             Esquema PostgreSQL/Supabase y migraciones
 ├── docs/           Hoja de ruta, contexto, auditoría de datos
 ├── legacy/wallet/  Artefactos obsoletos de Google Wallet
-├── pwa/            Frontend de la nueva PWA (aún sin código)
+├── pwa/            PWA en React + Vite + TypeScript (ver pwa/README.md)
+├── supabase/       Edge Functions (envío de Web Push)
 ├── scripts/        Utilidades locales (QR, auditoría de hojas)
 ├── sheets/         Exportaciones de hojas — NO se versiona
 └── README.md
@@ -147,9 +151,9 @@ Lee **`docs/ROADMAP.md`**. Resumen:
 | 6 | PWA real con Supabase |
 | 7 | Migración y cierre |
 
-Decisiones ya confirmadas: **solo Supabase, sin Google Cloud**; Wallet se retira; URL y etiquetas se conservan.
+Decisiones ya confirmadas: **solo Supabase, sin Google Cloud**; Wallet retirado; URL y etiquetas se conservan; política 168 h + 24 h (máximo 192 h); soft-cancel; tres roles + `validar_mantenimiento`; se conservan las reservas activas mayores de 168 h hasta su fin y se renegocian las futuras.
 
-Decisiones pendientes: tope total (168 o 192 h), roles, soft-cancel, no-show, máximo de reservas activas, auth por magic link, tratamiento de las reservas existentes de más de 168 h. Ver `docs/ROADMAP.md`, sección 2.
+Pendientes operativos: crear el proyecto Supabase, migrar los datos, publicar la PWA, configurar SMTP para los enlaces de acceso y VAPID para Web Push. Ver **`docs/DESPLIEGUE.md`**.
 
 ---
 

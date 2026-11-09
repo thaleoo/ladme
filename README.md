@@ -1,17 +1,50 @@
-# thaleo — repositorio de trabajo
+# LADME — repositorio de trabajo
 
-Este repositorio contiene el proyecto **LADME** (Laboratorio de Datos, UNAL Sede La Paz).
+Sistema de reservas de los equipos del **Laboratorio de Aprendizaje de Datos y Modelado Estadístico (LADME)**, Facultad de Ingeniería, Universidad Nacional de Colombia — Sede La Paz.
 
-- [`ladme/`](ladme/) — código, documentación, base de datos y scripts del sistema de reservas.
-- [`ladme/README.md`](ladme/README.md) — puerta de entrada: estado, estructura y cómo desplegar.
-- [`ladme/docs/ROADMAP.md`](ladme/docs/ROADMAP.md) — hoja de ruta: retirar Google Wallet y construir la PWA con Supabase.
+Este repositorio contiene:
 
-## Reglas rápidas
+- [`ladme/appsscript/`](ladme/appsscript/) — copia exacta del código que hoy corre en Google Apps Script.
+- [`ladme/db/`](ladme/db/) — esquema PostgreSQL/Supabase (tablas, RLS, RPC, mantenimiento, notificaciones).
+- [`ladme/pwa/`](ladme/pwa/) — PWA instalable en React + Vite + TypeScript, respaldada por Supabase.
+- [`ladme/docs/`](ladme/docs/) — hoja de ruta, auditoría de datos y guía de despliegue.
+- [`ladme/legacy/wallet/`](ladme/legacy/wallet/) — registro histórico de Google Wallet (retirado).
+- [`ladme/scripts/`](ladme/scripts/) — utilidades locales (auditoría, QR, iconos).
 
-1. El código real vive en **Google Apps Script**; `ladme/appsscript/` es su copia exacta.
+## Estado
+
+| Pieza | Estado |
+|---|---|
+| Apps Script + Google Sheets | En producción; se mantiene como respaldo y worker de correo durante la transición |
+| Política de reservas | 168 h + una extensión de 24 h, máximo absoluto 192 h |
+| Cancelaciones | Soft-cancel: la fila se conserva con `Estado = Cancelada` |
+| Roles | usuario, laboratorista, administrador + permiso `validar_mantenimiento` |
+| Mantenimiento | Registro, bloqueo del equipo, historial, validación técnica y avisos |
+| PWA | Código completo; pendiente de conectar al proyecto Supabase real y publicar |
+| Google Wallet | Retirado; solo queda como registro histórico |
+
+## Inicio rápido
+
+```bash
+# PWA
+cd ladme/pwa
+cp .env.example .env.local   # complete las claves de Supabase
+npm install
+npm run dev
+
+# Verificación de tipos y build de producción
+npm run build
+```
+
+Guía completa, plataforma por plataforma: **[`ladme/docs/DESPLIEGUE.md`](ladme/docs/DESPLIEGUE.md)**.
+
+## Reglas del repositorio
+
+1. El código real de Apps Script vive en Google Apps Script; `ladme/appsscript/` es su copia exacta.
 2. Las hojas exportadas contienen datos personales y **no se versionan** (ver `.gitignore`).
 3. No se usa Google Cloud: la arquitectura objetivo es **solo Supabase**.
-4. Antes de tocar producción, lee las advertencias de `ladme/README.md`.
+4. Nunca suba `.env.local`, claves de servicio, `service_role` ni credenciales SMTP.
+5. Antes de tocar producción, lea las advertencias de [`ladme/README.md`](ladme/README.md).
 
 ## Estructura
 
@@ -22,9 +55,10 @@ Este repositorio contiene el proyecto **LADME** (Laboratorio de Datos, UNAL Sede
 └── ladme/
     ├── appsscript/   # Código de Apps Script (copia de lo desplegado)
     ├── db/           # Esquema Supabase y migraciones
-    ├── docs/         # Hoja de ruta, contexto y auditoría
+    ├── docs/         # Hoja de ruta, contexto, auditoría y despliegue
     ├── legacy/       # Artefactos obsoletos (Wallet)
-    ├── pwa/          # Frontend de la PWA
+    ├── pwa/          # Frontend React + Vite + TypeScript
     ├── scripts/      # Utilidades locales
-    └── sheets/       # Exportaciones de hojas (no versionadas)
+    ├── sheets/       # Exportaciones de hojas (no versionadas)
+    └── supabase/     # Edge Functions
 ```
