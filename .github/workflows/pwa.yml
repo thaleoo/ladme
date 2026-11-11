@@ -1,0 +1,27 @@
+name: PWA
+
+on:
+  push:
+    paths:
+      - "ladme/pwa/**"
+      - ".github/workflows/pwa.yml"
+  pull_request:
+    paths:
+      - "ladme/pwa/**"
+      - ".github/workflows/pwa.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ladme/pwa
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ladme/pwa/package-lock.json
+      - run: npm ci
+      - run: npm run build
