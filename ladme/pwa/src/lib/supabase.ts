@@ -13,7 +13,12 @@ export const supabase = createClient(url ?? '', anonKey ?? '', {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce'
+    // `implicit` en lugar de `pkce`: con PKCE el enlace mágico solo funciona en
+    // el mismo navegador donde se solicitó (el verificador queda en
+    // localStorage). Los usuarios piden el enlace en el computador y lo abren
+    // en el celular, o abren el correo en el navegador y no dentro de la PWA
+    // instalada. Con implicit el enlace sirve en cualquier dispositivo.
+    flowType: 'implicit'
   }
 })
 

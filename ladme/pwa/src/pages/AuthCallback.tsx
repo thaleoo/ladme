@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { mensajeError } from '../lib/errores'
 
 export default function AuthCallback() {
   const navigate = useNavigate()
@@ -22,7 +23,7 @@ export default function AuthCallback() {
 
     supabase.auth.getSession().then(({ data, error: err }) => {
       if (!vivo) return
-      if (err) setError(err.message)
+      if (err) setError(mensajeError(err, 'No pudimos validar su enlace de acceso.'))
       else if (data.session) navigate('/', { replace: true })
     })
 

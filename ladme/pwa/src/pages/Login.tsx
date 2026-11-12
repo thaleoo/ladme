@@ -68,8 +68,9 @@ export default function Login() {
         <div className="card">
           <h4>¿Primera vez?</h4>
           <p className="small muted">
-            Al ingresar se crea su perfil automáticamente. La administración del laboratorio debe
-            habilitarlo antes de que pueda reservar. Si su cuenta no aparece habilitada, escriba a
+            Al ingresar se crea su perfil automáticamente y la cuenta queda habilitada, porque solo
+            se admiten correos <strong>@unal.edu.co</strong>. Si su cuenta aparece bloqueada o
+            necesita permisos especiales, escriba a
             <strong> labdatos_paz@unal.edu.co</strong>.
           </p>
         </div>

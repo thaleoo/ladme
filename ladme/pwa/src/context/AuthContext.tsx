@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { obtenerPerfil } from '../lib/api'
+import { mensajeError } from '../lib/errores'
 import type { Perfil } from '../lib/types'
 
 interface AuthState {
@@ -29,7 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(p && !p.activo ? 'Su cuenta institucional aún no está habilitada por la administración.' : null)
     } catch (e) {
       setPerfil(null)
-      setError(e instanceof Error ? e.message : 'No se pudo cargar el perfil.')
+      setError(mensajeError(e, 'No se pudo cargar el perfil.'))
     }
   }, [])
 
@@ -64,15 +65,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!/^[^\s@]+@unal\.edu\.co$/.test(limpio)) {
       return { ok: false, mensaje: 'Use su correo institucional @unal.edu.co.' }
     }
-    const { error: err } = await supabase.auth.signInWithOtp({
-      email: limpio,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: `${window.location.origin}/auth/callback`
+    try {
+      const { error: err } = await supabase.auth.signInWithOtp({
+        email: limpio,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}/auth/callback`
+        }
+      })
+      if (err) {
+        // Se conserva el objeto completo en la consola: el texto que ve el
+        // usuario es amable, pero el diagnóstico técnico no debe perderse.
+        console.error('Supabase Auth (signInWithOtp):', err)
+        return { ok: false, mensaje: mensajeError(err, 'No se pudo enviar el enlace de acceso.') }
       }
-    })
-    if (err) return { ok: false, mensaje: err.message }
-    return { ok: true, mensaje: 'Le enviamos un enlace de acceso a su correo institucional.' }
+      return { ok: true, mensaje: 'Le enviamos un enlace de acceso a su correo institucional.' }
+    } catch (e) {
+      console.error('Supabase Auth (signInWithOtp):', e)
+      return { ok: false, mensaje: mensajeError(e, 'No se pudo enviar el enlace de acceso.') }
+    }
   }, [])
 
   const salir = useCallback(async () => {
