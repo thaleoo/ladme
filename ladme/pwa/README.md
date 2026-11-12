@@ -41,7 +41,7 @@ Abre `http://localhost:5173`. El service worker está desactivado en desarrollo;
 | Variable | Uso |
 |---|---|
 | `VITE_SUPABASE_URL` | URL del proyecto (`https://<ref>.supabase.co`) |
-| `VITE_SUPABASE_ANON_KEY` | clave pública `anon` (nunca la `service_role`) |
+| `VITE_SUPABASE_ANON_KEY` | clave pública del cliente: **Publishable key** (`sb_publishable_...`) o, en proyectos legacy, `anon public` (`eyJ...`). Nunca la secret/`service_role` |
 | `VITE_PUBLIC_URL` | URL pública de la PWA; se usa en el QR de la credencial y en enlaces |
 | `VITE_VAPID_PUBLIC_KEY` | clave pública VAPID para Web Push; vacía si aún no configura push |
 
@@ -89,7 +89,7 @@ La PWA **debe vivir en su propio dominio HTTPS**. No puede servirse dentro de un
 
 ## Notas de seguridad
 
-- El cliente solo usa la clave `anon`. Toda la lógica sensible vive en RPC `security definer` y RLS.
+- El cliente solo usa la clave pública. Toda la lógica sensible vive en RPC `security definer` y RLS.
 - Las respuestas de Supabase no se cachean en el service worker.
 - El token del QR es aleatorio y no contiene datos personales.
 - La sesión se guarda con la persistencia estándar de Supabase Auth.

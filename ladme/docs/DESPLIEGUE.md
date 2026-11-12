@@ -20,8 +20,8 @@ Esta guía lleva el repositorio a producción en este orden:
 |---|---|
 | Cuenta de GitHub con acceso a `thaleoo/ladme` | github.com |
 | Proyecto Supabase | supabase.com |
-| `SUPABASE_URL` y `anon key` | Supabase → Project Settings → API |
-| `service_role key` | Supabase → Project Settings → API (secreta) |
+| `SUPABASE_URL` y clave pública | Supabase → Settings → API Keys. La **Publishable key** (`sb_publishable_...`) reemplaza a la antigua `anon public`; en proyectos viejos sigue disponible en **Legacy API keys** |
+| Clave secreta | La **Secret key** (`sb_secret_...`) reemplaza a `service_role`. Solo para Edge Functions y cron; nunca en la PWA |
 | Dominio o subdominio para la PWA | p. ej. `ladme.unal.edu.co` |
 | SMTP institucional o proveedor transaccional | para los enlaces mágicos de acceso |
 | Cuenta de Apps Script y hoja de cálculo | la que ya usa el laboratorio |
@@ -62,18 +62,28 @@ Notas:
 1. Entre a <https://supabase.com> y cree un proyecto.
 2. Elija la región más cercana (por ejemplo, São Paulo).
 3. Guarde la contraseña de la base de datos.
-4. En **Project Settings → API** copie:
+4. En **Project Settings → API** (o **Settings → API Keys**) copie:
    - `Project URL` → `VITE_SUPABASE_URL`
-   - `anon public` → `VITE_SUPABASE_ANON_KEY`
-   - `service_role` → solo para cron/Edge Functions; **nunca** en el frontend.
+   - **Publishable key** (`sb_publishable_...`) → `VITE_SUPABASE_ANON_KEY`. Es la sustituta de la antigua `anon public`; si su proyecto conserva las claves legacy, también sirve la `anon` (empieza por `eyJ...`).
+   - **Secret key** (`sb_secret_...`, antes `service_role`) → solo para cron/Edge Functions; **nunca** en el frontend.
 
 ### 2.1 Aplicar el esquema
 
-Abra **SQL Editor** y ejecute el contenido completo de:
+Abra **SQL Editor → New query**, pegue el contenido completo de:
 
 ```text
 ladme/db/schema_ladme.sql
 ```
+
+y pulse **Run**. Debe terminar con `Success. No rows returned`. Se aplica **una sola vez** sobre un proyecto vacío. Si ya ejecutó una versión anterior, no lo vuelva a correr completo: cree una migración incremental en `db/migrations/`.
+
+Después, en la misma ventana, ejecute:
+
+```text
+ladme/db/seed_equipos.sql
+```
+
+Ese archivo carga los 16 equipos y es idempotente. La verificación completa está en `ladme/db/verificar.sql`.
 
 El esquema crea:
 
@@ -82,8 +92,6 @@ El esquema crea:
 - RPC de reservas, extensiones, cancelaciones, bloqueos, mantenimiento, roles y permisos.
 - Cola de notificaciones y suscripciones Web Push.
 - Tabla de respaldo `reservas_importadas` para la migración.
-
-Se aplica **una sola vez** sobre un proyecto vacío. Si ya ejecutó una versión anterior, no lo vuelva a correr completo: cree una migración incremental en `db/migrations/`.
 
 ### 2.2 Crear el primer administrador
 
@@ -383,18 +391,13 @@ Guarde los CSV fuera del repositorio.
 
 ### 7.2 Importar equipos
 
-Primero los equipos, porque todo lo demás depende de `equipos.id`:
+Primero los equipos, porque todo lo demás depende de `equipos.id`. El catálogo ya está preparado en:
 
-```sql
-insert into equipos (codigo, nombre, marca, modelo, ubicacion, estado)
-values
-  ('UNAL-01', '<nombre>', '<marca>', '<modelo>', 'Sala LADME', 'activo'),
-  ('UNAL-02', '<nombre>', '<marca>', '<modelo>', 'Sala LADME', 'activo')
-  -- ... los 16 equipos
-on conflict (codigo) do nothing;
+```text
+ladme/db/seed_equipos.sql
 ```
 
-Use exactamente los códigos `UNAL-XX` de las etiquetas NFC/QR. No invente códigos nuevos.
+Ejecútelo una vez en el SQL Editor. Es idempotente y no sobrescribe el `estado` si el laboratorio ya lo cambió. Use exactamente los códigos `UNAL-XX` de las etiquetas NFC/QR. No invente códigos nuevos.
 
 ### 7.3 Importar reservas históricas
 
@@ -552,7 +555,7 @@ La PWA ya entiende `?asset=` y redirige a `/equipo/:codigo`. Conservar la URL de
 
 ## 10. Seguridad y privacidad
 
-- La `service_role` solo se usa en el SQL Editor, Edge Functions y cron. Nunca en la PWA.
+- La clave secreta (`sb_secret_...` / `service_role`) solo se usa en el SQL Editor, Edge Functions y cron. Nunca en la PWA.
 - No se guardan cédulas en la PWA; el esquema solo conserva nombre y programa.
 - Las hojas exportadas no se versionan.
 - Los enlaces de validación usan tokens aleatorios sin datos personales.
@@ -575,7 +578,7 @@ La PWA ya entiende `?asset=` y redirige a `/equipo/:codigo`. Conservar la URL de
 
 | Tema | Qué se necesita |
 |---|---|
-| Proyecto Supabase | URL, `anon key`, `service_role`, región |
+| Proyecto Supabase | URL, clave pública (Publishable/anon), clave secreta (Secret/service_role), región |
 | SMTP | host, puerto, usuario, contraseña de aplicación y remitente |
 | Dominio PWA | subdominio y acceso al DNS |
 | VAPID | par de claves generado |
