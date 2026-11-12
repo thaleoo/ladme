@@ -173,6 +173,8 @@ En **Authentication → URL Configuration**:
 
 El frontend construye el enlace con `emailRedirectTo: `${window.location.origin}/auth/callback``.
 
+El cliente usa `flowType: 'implicit'` (ver `pwa/src/lib/supabase.ts`). Con PKCE el enlace mágico solo se puede abrir en el mismo navegador donde se solicitó, porque el verificador queda en `localStorage`. En un laboratorio la gente pide el enlace en el computador y lo abre en el celular, así que se eligió el flujo que funciona en cualquier dispositivo.
+
 ### 3.2 SMTP propio
 
 El correo por defecto de Supabase tiene límites bajos y puede no entregar a `@unal.edu.co`. Configure **Authentication → SMTP Settings** con el servidor institucional o un proveedor transaccional:
@@ -200,6 +202,19 @@ En **Authentication → Email Templates → Magic Link**, traduzca el mensaje y 
 ```
 
 El trigger de base de datos rechaza correos que no terminen exactamente en `@unal.edu.co`.
+
+### 3.4 Diagnóstico de fallos al enviar el enlace
+
+La PWA muestra un mensaje legible, pero la causa real está en el servidor. En **Logs → Auth Logs** (o Logs Explorer, filtrando `event = 'send_email'`) aparece el error del SMTP.
+
+| Síntoma | Significado |
+|---|---|
+| `{}` o “No se pudo enviar el enlace de acceso” | La API de Auth respondió **HTTP 500** al enviar el correo. Es el SMTP, no la cuenta del usuario. |
+| `over_email_send_rate_limit` | Límite de correos alcanzado (típico del SMTP por defecto de Supabase). |
+| El enlace abre `localhost` | **Site URL** o **Redirect URLs** mal configuradas en Authentication → URL Configuration. |
+| “Email link is invalid or has expired” | El enlace ya se usó, expiró o se abrió en otro navegador con flujo PKCE. |
+
+Causas habituales del 500: contraseña SMTP vencida, remitente no verificado en el proveedor, puerto bloqueado o usuario SMTP mal escrito. Use **Authentication → SMTP Settings → Send test email** para aislar el problema sin pasar por la PWA.
 
 ---
 
