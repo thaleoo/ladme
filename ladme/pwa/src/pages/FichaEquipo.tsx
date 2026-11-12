@@ -3,7 +3,9 @@ import { Link, useParams } from 'react-router-dom'
 import { obtenerEquipo, ocupacionPublica, mantenimientoDelEquipo, type EstadoMantenimientoEquipo } from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
 import type { Equipo, Ocupacion } from '../lib/types'
-import { fecha, fechaLarga, finDia, hora, inicioDia, sumarDias } from '../lib/format'
+import { dia, diaCorto, fecha, finDia, hora, inicioDia, sumarDias } from '../lib/format'
+import PageHeader, { Cargando } from '../components/PageHeader'
+import Icon from '../components/Icon'
 
 function proximaLibertad(ocupacion: Ocupacion[]): Date {
   const ahora = new Date()
@@ -62,115 +64,168 @@ export default function FichaEquipo() {
   const proximoLibre = useMemo(() => (enCurso ? proximaLibertad(ocupacion) : new Date()), [ocupacion, enCurso])
   const dias = useMemo(() => Array.from({ length: 7 }, (_, i) => sumarDias(inicioDia(ahora), i)), []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (cargando) return <div className="card center muted">Cargando ficha del equipo…</div>
-  if (error || !equipo) return <div className="alert danger">{error ?? 'Equipo no encontrado.'}</div>
+  if (cargando) return <Cargando texto="Cargando ficha del equipo…" />
+
+  if (error || !equipo) {
+    return (
+      <>
+        <PageHeader titulo="Equipo" volver={{ a: '/', texto: 'Disponibilidad' }} />
+        <div className="alert danger">
+          <Icon nombre="alerta" />
+          <div className="alert__body">{error ?? 'Equipo no encontrado.'}</div>
+        </div>
+      </>
+    )
+  }
 
   const especificaciones = Object.entries(equipo.especificaciones ?? {})
 
   return (
     <>
-      <div className={`card ${libre ? 'ok' : 'warn'}`}>
-        <div className="row between">
-          <div>
-            <h2>{equipo.codigo}</h2>
-            <p className="mb-0">{equipo.nombre} {equipo.marca ? `· ${equipo.marca}` : ''} {equipo.modelo ?? ''}</p>
-            <p className="small muted mb-0">{equipo.ubicacion || 'LADME'}</p>
-          </div>
-          <span className={`badge ${libre ? 'ok' : 'danger'}`}>
-            {equipo.estado !== 'activo' ? equipo.estado.replace('_', ' ') : libre ? 'Libre ahora' : `Ocupado hasta ${hora(enCurso!.fin)}`}
-          </span>
-        </div>
-
-        <div className="grid cols-3 mt">
-          <div className="card mb-0">
-            <div className="tiny muted">Próxima disponibilidad</div>
-            <strong>{enCurso ? fecha(proximoLibre.toISOString()) : 'Ahora'}</strong>
-          </div>
-          <div className="card mb-0">
-            <div className="tiny muted">Reservas activas</div>
-            <strong>{ocupacion.filter((o) => o.tipo === 'reserva').length}</strong>
-          </div>
-          <div className="card mb-0">
-            <div className="tiny muted">Bloqueos de gestión</div>
-            <strong>{ocupacion.filter((o) => o.tipo === 'bloqueo').length}</strong>
-          </div>
-        </div>
-
-        <div className="row mt">
-          {equipo.estado === 'activo' ? (
-            <Link className="btn" to={`/reservar?equipo=${encodeURIComponent(equipo.codigo)}`}>Reservar este equipo</Link>
+      <PageHeader
+        eyebrow="Equipo"
+        titulo={equipo.codigo}
+        sub={
+          <>
+            {equipo.nombre}
+            {equipo.marca ? ` · ${equipo.marca}` : ''} {equipo.modelo ?? ''}
+            {equipo.ubicacion ? ` · ${equipo.ubicacion}` : ''}
+          </>
+        }
+        volver={{ a: '/', texto: 'Disponibilidad' }}
+        acciones={
+          equipo.estado === 'activo' ? (
+            <Link className="btn" to={`/reservar?equipo=${encodeURIComponent(equipo.codigo)}`}>
+              <Icon nombre="reservar" /> Reservar
+            </Link>
           ) : (
-            <span className="alert warn mb-0">El equipo no está operativo; no admite reservas.</span>
-          )}
-          <Link className="btn ghost" to="/">Volver a disponibilidad</Link>
+            <span className="badge gray">{equipo.estado.replace('_', ' ')}</span>
+          )
+        }
+      />
+
+      <div className="stats">
+        <div className={`stat ${libre ? 'ok' : 'warn'}`}>
+          <div className="stat__label">
+            <Icon nombre="monitor" width={14} height={14} /> Estado actual
+          </div>
+          <div className="stat__value" style={{ fontSize: '1.1rem' }}>
+            {equipo.estado !== 'activo'
+              ? equipo.estado.replace('_', ' ')
+              : libre
+                ? 'Libre'
+                : 'Ocupado'}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat__label">
+            <Icon nombre="reloj" width={14} height={14} /> Próxima disponibilidad
+          </div>
+          <div className="stat__value" style={{ fontSize: '1rem' }}>
+            {enCurso ? (
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span>{dia(proximoLibre.toISOString())}</span>
+                <span className="muted" style={{ fontSize: 'var(--text-sm)', fontWeight: 550 }}>
+                  desde las {hora(proximoLibre.toISOString())}
+                </span>
+              </span>
+            ) : (
+              'Ahora'
+            )}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat__label">
+            <Icon nombre="ticket" width={14} height={14} /> Reservas
+          </div>
+          <div className="stat__value">{ocupacion.filter((o) => o.tipo === 'reserva').length}</div>
+        </div>
+        <div className="stat">
+          <div className="stat__label">
+            <Icon nombre="llave" width={14} height={14} /> Bloqueos
+          </div>
+          <div className="stat__value">{ocupacion.filter((o) => o.tipo === 'bloqueo').length}</div>
         </div>
       </div>
 
       {mantenimiento && (
-        <div className={`card ${mantenimiento.vencido ? 'warn' : ''}`}>
-          <h4>Mantenimiento</h4>
-          <p className="small mb-0">
-            Última intervención validada: <strong>{mantenimiento.ultimo ?? 'sin registro'}</strong>
-            <br />
-            Próxima: <strong>{mantenimiento.proximo ?? 'sin programar'}</strong>
-            {mantenimiento.vencido && <span className="badge danger" style={{ marginLeft: 8 }}>vencido</span>}
-          </p>
-        </div>
+        <section className={`card ${mantenimiento.vencido ? 'warn' : ''}`}>
+          <div className="row between">
+            <h3 style={{ fontSize: 'var(--text-base)', margin: 0 }}>
+              <Icon nombre="llave" width={16} height={16} /> Mantenimiento
+            </h3>
+            {mantenimiento.vencido && <span className="badge danger">Vencido</span>}
+          </div>
+          <div className="datos mt">
+            <div className="datos__fila">
+              <span className="datos__clave">Última intervención validada</span>
+              <span className="datos__valor">
+                {mantenimiento.ultimo ? fecha(mantenimiento.ultimo) : 'Sin registro'}
+              </span>
+            </div>
+            <div className="datos__fila">
+              <span className="datos__clave">Próxima</span>
+              <span className="datos__valor">
+                {mantenimiento.proximo ? fecha(mantenimiento.proximo) : 'Sin programar'}
+              </span>
+            </div>
+          </div>
+        </section>
       )}
 
-      <div className="card">
-        <h3>Agenda de los próximos 7 días</h3>
-        {dias.map((d) => {
-          const tramos = ocupacion
-            .filter((o) => new Date(o.fin) > inicioDia(d) && new Date(o.inicio) < finDia(d))
-            .sort((a, b) => a.inicio.localeCompare(b.inicio))
-          return (
-            <div key={d.toISOString()} className="mt">
-              <div className="row between">
-                <strong className="small">{fechaLarga(d)}</strong>
-                {tramos.length === 0 ? <span className="badge ok">Libre</span> : <span className="badge warn">{tramos.length} ocupación(es)</span>}
-              </div>
-              {tramos.length > 0 && (
-                <ul className="list">
-                  {tramos.map((o, i) => (
-                    <li key={`${o.inicio}-${i}`}>
-                      <span>
-                        <span className={`badge ${o.tipo === 'bloqueo' ? 'gray' : 'warn'}`}>
-                          {o.tipo === 'bloqueo' ? 'Bloqueo' : 'Reserva'}
-                        </span>{' '}
+      <section className="card">
+        <div className="section-title" style={{ marginTop: 0 }}>
+          <h2>Agenda de los próximos 7 días</h2>
+          <span className="section-title__count">
+            {ocupacion.filter((o) => new Date(o.fin) > ahora).length} ocupaciones
+          </span>
+        </div>
+
+        <div className="agenda">
+          {dias.map((d) => {
+            const tramos = ocupacion
+              .filter((o) => new Date(o.fin) > inicioDia(d) && new Date(o.inicio) < finDia(d))
+              .sort((a, b) => a.inicio.localeCompare(b.inicio))
+            return (
+              <div key={d.toISOString()} className="agenda__dia">
+                <div className="agenda__fecha">{diaCorto(d)}</div>
+                <div className="agenda__tramos">
+                  {tramos.length === 0 ? (
+                    <span className="agenda__libre">
+                      <Icon nombre="check" width={13} height={13} /> Día libre
+                    </span>
+                  ) : (
+                    tramos.map((o, i) => (
+                      <span key={`${o.inicio}-${i}`} className={`badge ${o.tipo === 'bloqueo' ? 'gray' : 'warn'}`}>
                         {hora(o.inicio)}–{hora(o.fin)}
-                        {o.motivo && <span className="tiny muted"> · {o.motivo}</span>}
+                        {o.tipo === 'bloqueo' ? ' · bloqueo' : ''}
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {(especificaciones.length > 0 || equipo.especificaciones) && (
-        <div className="card">
-          <h4>Especificaciones</h4>
-          {especificaciones.length === 0 ? (
-            <p className="muted small mb-0">Sin especificaciones registradas.</p>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <tbody>
-                  {especificaciones.map(([k, v]) => (
-                    <tr key={k}>
-                      <th>{k.replace(/_/g, ' ')}</th>
-                      <td>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                    ))
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
-      )}
+      </section>
+
+      <section className="card">
+        <h2 style={{ fontSize: 'var(--text-lg)' }}>Especificaciones</h2>
+        {especificaciones.length === 0 ? (
+          <p className="muted small" style={{ marginBottom: 0 }}>
+            Sin especificaciones registradas.
+          </p>
+        ) : (
+          <div className="datos">
+            {especificaciones.map(([k, v]) => (
+              <div key={k} className="datos__fila">
+                <span className="datos__clave">{k.replace(/_/g, ' ')}</span>
+                <span className="datos__valor">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </>
   )
 }

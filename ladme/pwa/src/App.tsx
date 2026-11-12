@@ -4,6 +4,7 @@ import Shell from './components/Shell'
 import { esAdmin, esStaff, useAuth } from './context/AuthContext'
 import AuthCallback from './pages/AuthCallback'
 import Credencial from './pages/Credencial'
+import Cuenta from './pages/Cuenta'
 import Disponibilidad from './pages/Disponibilidad'
 import FichaEquipo from './pages/FichaEquipo'
 import Login from './pages/Login'
@@ -16,9 +17,31 @@ import Validar from './pages/Validar'
 
 function Cargando() {
   return (
-    <div className="container">
-      <div className="card center">
-        <p className="muted">Cargando LADME…</p>
+    <div className="acceso">
+      <div className="acceso__panel">
+        <div className="acceso__caja center">
+          <div className="cargando" style={{ justifyContent: 'center' }}>
+            <span className="spinner" aria-hidden="true" />
+            <span>Cargando LADME…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <div className="acceso">
+      <div className="acceso__panel">
+        <div className="acceso__caja">
+          <div className="card warn">
+            <h2 style={{ fontSize: 'var(--text-xl)' }}>{titulo}</h2>
+            <p className="small muted" style={{ marginBottom: 0 }}>
+              {children}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -30,22 +53,18 @@ function SoloAutenticado({ children }: { children: ReactNode }) {
   if (!session) return <Navigate to="/login" replace />
   if (!perfil) {
     return (
-      <div className="container">
-        <div className="card warn">
-          <h3>Cuenta sin perfil</h3>
-          <p>Su sesión existe pero no tiene perfil en LADME. Pida a la administración que habilite su cuenta.</p>
-        </div>
-      </div>
+      <Aviso titulo="Cuenta sin perfil">
+        Su sesión existe, pero no tiene perfil en LADME. Escriba a labdatos_paz@unal.edu.co para que la
+        administración revise su cuenta.
+      </Aviso>
     )
   }
   if (!perfil.activo) {
     return (
-      <div className="container">
-        <div className="card warn">
-          <h3>Cuenta pendiente de habilitación</h3>
-          <p>Su correo institucional está registrado, pero la administración aún no habilitó su cuenta.</p>
-        </div>
-      </div>
+      <Aviso titulo="Cuenta inhabilitada">
+        Su correo institucional está registrado, pero la administración inhabilitó su cuenta. Escriba a
+        labdatos_paz@unal.edu.co si cree que es un error.
+      </Aviso>
     )
   }
   return <>{children}</>
@@ -88,6 +107,7 @@ export default function App() {
         <Route path="mis-reservas" element={<MisReservas />} />
         <Route path="credencial/:id" element={<Credencial />} />
         <Route path="equipo/:codigo" element={<FichaEquipo />} />
+        <Route path="cuenta" element={<Cuenta />} />
         <Route path="validar" element={<Validar />} />
         <Route path="validar/:token" element={<Validar />} />
         <Route

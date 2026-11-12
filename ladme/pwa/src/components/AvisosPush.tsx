@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { activarAvisos, estadoAvisos } from '../lib/push'
+import Icon from './Icon'
 
 const CLAVE_DESCARTE = 'ladme-avisos-descartados'
 
@@ -12,7 +13,12 @@ export default function AvisosPush() {
 
   if (!inicial.soportado || !inicial.configurado) return null
   if (permiso === 'granted') {
-    return mensaje ? <div className="alert ok">{mensaje}</div> : null
+    return mensaje ? (
+      <div className="alert ok">
+        <Icon nombre="check-circulo" />
+        <div className="alert__body">{mensaje}</div>
+      </div>
+    ) : null
   }
   if (permiso === 'denied' || (descartado && !mensaje)) return null
 
@@ -31,19 +37,35 @@ export default function AvisosPush() {
 
   return (
     <div className="alert info">
-      <div className="row between">
-        <span>
-          <strong>Active los avisos de LADME</strong> para recibir recordatorios del fin de sus reservas
-          y novedades de mantenimiento, incluso con la aplicación cerrada.
-        </span>
-        <span className="row">
-          <button className="btn sm" disabled={ocupado} onClick={activar}>
-            {ocupado ? 'Activando…' : 'Activar avisos'}
+      <Icon nombre="campana" />
+      <div className="alert__body">
+        <strong>Active los avisos de LADME</strong>
+        <p className="small" style={{ margin: '4px 0 0' }}>
+          Reciba el recordatorio antes de que termine su reserva y las novedades de mantenimiento,
+          incluso con la aplicación cerrada.
+        </p>
+        {mensaje && (
+          <p className="tiny" style={{ margin: '6px 0 0' }}>
+            {mensaje}
+          </p>
+        )}
+        <div className="alert__actions">
+          <button className="btn sm" disabled={ocupado} onClick={activar} type="button">
+            {ocupado ? (
+              <>
+                <span className="spinner" aria-hidden="true" /> Activando…
+              </>
+            ) : (
+              <>
+                <Icon nombre="campana" /> Activar avisos
+              </>
+            )}
           </button>
-          <button className="btn gray sm" disabled={ocupado} onClick={ahoraNo}>Ahora no</button>
-        </span>
+          <button className="btn gray sm" disabled={ocupado} onClick={ahoraNo} type="button">
+            Ahora no
+          </button>
+        </div>
       </div>
-      {mensaje && <div className="tiny mt">{mensaje}</div>}
     </div>
   )
 }

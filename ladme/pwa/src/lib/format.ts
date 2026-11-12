@@ -13,6 +13,12 @@ const fmt = new Intl.DateTimeFormat('es-CO', {
 
 const fmtDia = new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: '2-digit', month: 'short' })
 
+/** "jue 12 nov": forma compacta para columnas estrechas. */
+export function diaCorto(valor: string | Date): string {
+  const d = typeof valor === 'string' ? new Date(valor) : valor
+  return fmtDia.format(d).replace(/,/g, '').replace(/ de /g, ' ').replace(/\.$/, '')
+}
+
 export function fecha(iso: string): string {
   return fmt.format(new Date(iso))
 }

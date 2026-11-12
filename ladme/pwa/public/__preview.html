@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vista previa LADME</title>
+    <style>
+      html, body { margin: 0; background: #0b0a12; }
+      body { display: flex; align-items: flex-start; justify-content: center; padding: 0; }
+      iframe { border: 0; background: #000; display: block; }
+    </style>
+    <script>
+      // Sesión de vista previa (servidor falso en :5199). Archivo temporal.
+      if (!localStorage.getItem('sb-localhost-auth-token')) {
+        const session = {
+          access_token: 'fake-access-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+          expires_at: Math.floor(Date.now() / 1000) + 3 * 86400,
+          refresh_token: 'fake-refresh-token',
+          user: {
+            id: '11111111-1111-4111-8111-111111111111',
+            aud: 'authenticated',
+            role: 'authenticated',
+            email: 'josoriodi@unal.edu.co',
+            email_confirmed_at: new Date().toISOString(),
+            phone: '',
+            confirmed_at: new Date().toISOString(),
+            last_sign_in_at: new Date().toISOString(),
+            app_metadata: { provider: 'email', providers: ['email'] },
+            user_metadata: {},
+            identities: [],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            is_anonymous: false
+          }
+        }
+        localStorage.setItem('sb-localhost-auth-token', JSON.stringify(session))
+      }
+
+      const params = new URLSearchParams(location.search)
+      const w = params.get('w') ?? '390'
+      const h = params.get('h') ?? '844'
+      const ruta = params.get('ruta') ?? '/'
+      document.addEventListener('DOMContentLoaded', () => {
+        const frame = document.createElement('iframe')
+        frame.width = w
+        frame.height = h
+        frame.style.width = w + 'px'
+        frame.style.height = h + 'px'
+        frame.src = ruta
+        document.body.appendChild(frame)
+      })
+    </script>
+  </head>
+  <body></body>
+</html>

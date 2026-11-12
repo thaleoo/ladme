@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { mensajeError } from '../lib/errores'
+import Icon from '../components/Icon'
+import Logo from '../components/Logo'
 
 export default function AuthCallback() {
   const navigate = useNavigate()
@@ -40,22 +42,34 @@ export default function AuthCallback() {
   }, [navigate])
 
   return (
-    <div className="container">
-      <div className="login-card">
-        <div className="card center">
-          {error ? (
-            <>
-              <h3>No se pudo ingresar</h3>
-              <p className="error">{error}</p>
-              <Link className="btn" to="/login">Volver al ingreso</Link>
-            </>
-          ) : (
-            <>
-              <h3>Verificando su enlace…</h3>
-              <p className="muted">Esto toma solo un momento.</p>
-            </>
-          )}
+    <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'var(--s4)' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 420, textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--s4)' }}>
+          <Logo size={48} />
         </div>
+
+        {error ? (
+          <>
+            <span className="veredicto__icono" style={{ margin: '0 auto var(--s3)', background: 'var(--danger-bg)', color: 'var(--danger-fg)' }}>
+              <Icon nombre="alerta" />
+            </span>
+            <h2 style={{ fontSize: 'var(--text-xl)' }}>No se pudo ingresar</h2>
+            <p className="small muted">{error}</p>
+            <Link className="btn block" to="/login" style={{ marginTop: 'var(--s4)' }}>
+              <Icon nombre="flecha-izq" /> Volver al ingreso
+            </Link>
+          </>
+        ) : (
+          <>
+            <div className="cargando" style={{ justifyContent: 'center' }}>
+              <span className="spinner" aria-hidden="true" />
+              <span>Verificando su enlace…</span>
+            </div>
+            <p className="tiny muted" style={{ marginTop: 'var(--s4)', marginBottom: 0 }}>
+              Esto toma solo un momento.
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { registerSW } from 'virtual:pwa-register'
 import App from './App'
 import { AuthProvider } from './context/AuthContext'
+import { ToastProvider } from './components/Toast'
 import './index.css'
 
 const actualizarSW = registerSW({
@@ -21,9 +22,11 @@ const actualizarSW = registerSW({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ToastProvider>
     </BrowserRouter>
   </StrictMode>
 )
