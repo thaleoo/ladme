@@ -95,7 +95,7 @@ El esquema crea:
 
 ### 2.2 Crear el primer administrador
 
-El trigger crea todos los perfiles con `activo = false`. La primera persona debe iniciar sesión al menos una vez y luego la administración la habilita desde SQL:
+Por defecto, cualquier cuenta `@unal.edu.co` queda **activa** al registrarse (alta automática). El trigger solo crea el perfil con rol `usuario`. La primera persona debe iniciar sesión al menos una vez y luego se promueve desde SQL:
 
 ```sql
 -- Ejecutar en SQL Editor después del primer ingreso de esa cuenta
@@ -108,10 +108,16 @@ update perfiles
  where correo = 'labdatos_paz@unal.edu.co';
 ```
 
-Después, los demás usuarios se habilitan desde **Usuarios** en la PWA o con:
+La administración conserva el control: puede **inhabilitar** a una persona desde **Usuarios** en la PWA o con:
 
 ```sql
-update perfiles set activo = true where correo = 'persona@unal.edu.co';
+update perfiles set activo = false where correo = 'persona@unal.edu.co';
+```
+
+Si el proyecto se creó con una versión anterior del esquema (alta manual), aplique antes:
+
+```text
+ladme/db/migrations/0001_activacion_automatica.sql
 ```
 
 Para dar el permiso fino de validación técnica:

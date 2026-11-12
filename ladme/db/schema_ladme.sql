@@ -22,7 +22,7 @@ create table perfiles (
   nombre    text not null check (char_length(nombre) between 1 and 120),
   programa  text,
   rol       rol_usuario not null default 'usuario',
-  activo    boolean not null default false,   -- la administración habilita cada cuenta
+  activo    boolean not null default true,    -- alta automática para @unal.edu.co; la administración puede inhabilitar
   creado_en timestamptz not null default now()
   -- No se guarda la cédula: minimización de datos (Ley 1581). Añadir solo si la administración lo justifica.
 );

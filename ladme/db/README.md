@@ -9,6 +9,7 @@ Contiene el esquema base de la PWA y, a futuro, las migraciones incrementales.
 | `schema_ladme.sql` | Esquema completo: tipos, tablas, RLS, RPC, exclusión de solapamientos, historial, soft-cancel, mantenimiento, notificaciones y Web Push |
 | `seed_equipos.sql` | Catálogo inicial de los 16 equipos (`UNAL-01`..`UNAL-16`). Idempotente |
 | `verificar.sql` | Consultas de verificación: RLS, políticas, políticas de negocio, equipos, RPC y permisos |
+| `migrations/0001_activacion_automatica.sql` | Alta automática de cuentas `@unal.edu.co`; la administración conserva la opción de inhabilitar |
 
 ## Qué garantiza el esquema
 
