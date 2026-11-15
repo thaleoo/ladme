@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
-import { validarCredencial } from '../lib/api'
+import { registrarLlegada, validarCredencial } from '../lib/api'
 import type { ResultadoValidacion } from '../lib/types'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { fecha } from '../lib/format'
+import { fecha, hace } from '../lib/format'
+import Escaner from '../components/Escaner'
+import { useToast } from '../components/Toast'
 import PageHeader from '../components/PageHeader'
 import Icon, { type NombreIcono } from '../components/Icon'
 
@@ -58,6 +60,9 @@ export default function Validar() {
   const [resultado, setResultado] = useState<ResultadoValidacion | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
+  const [camara, setCamara] = useState(false)
+  const [registrando, setRegistrando] = useState(false)
+  const toast = useToast()
 
   const validar = useCallback(async (valor: string) => {
     const limpio = normalizarToken(valor)
@@ -81,6 +86,26 @@ export default function Validar() {
     if (token) void validar(token)
   }, [token, validar])
 
+  function leido(texto: string) {
+    setCamara(false)
+    setEntrada(normalizarToken(texto))
+    void validar(texto)
+  }
+
+  async function llegada() {
+    if (!resultado?.reserva) return
+    setRegistrando(true)
+    try {
+      await registrarLlegada(resultado.reserva)
+      setResultado({ ...resultado, llegada: new Date().toISOString() })
+      toast.mostrar('Llegada registrada.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo registrar la llegada.')
+    } finally {
+      setRegistrando(false)
+    }
+  }
+
   function enviar(e: FormEvent) {
     e.preventDefault()
     void validar(entrada)
@@ -103,10 +128,20 @@ export default function Validar() {
       />
 
       <section className="card">
+        {camara ? (
+          <Escaner alLeer={leido} alCerrar={() => setCamara(false)} />
+        ) : (
+          <button className="btn lg block" type="button" onClick={() => { limpiar(); setCamara(true) }}>
+            <Icon nombre="qr" /> Escanear con la cámara
+          </button>
+        )}
+      </section>
+
+      <section className="card">
         <form onSubmit={enviar} className="stack">
           <div className="field">
             <label className="field__label" htmlFor="token">
-              Token o enlace de la credencial
+              O pegue el enlace de la credencial
             </label>
             <input
               id="token"
@@ -185,7 +220,26 @@ export default function Validar() {
                     <span className="datos__valor">{resultado.titular}</span>
                   </div>
                 )}
+                {resultado.codigo && (
+                  <div className="datos__fila">
+                    <span className="datos__clave">Reserva</span>
+                    <span className="datos__valor">{resultado.codigo}</span>
+                  </div>
+                )}
+                {resultado.resultado === 'valida' && (
+                  <div className="datos__fila">
+                    <span className="datos__clave">Llegada</span>
+                    <span className="datos__valor">
+                      {resultado.llegada ? `Registrada ${hace(resultado.llegada)}` : 'Sin registrar'}
+                    </span>
+                  </div>
+                )}
               </div>
+              {resultado.resultado === 'valida' && !resultado.llegada && resultado.reserva && (
+                <button className="btn ok block mt" type="button" onClick={llegada} disabled={registrando}>
+                  <Icon nombre="check" /> {registrando ? 'Registrando…' : 'Registrar llegada'}
+                </button>
+              )}
             </div>
           )}
 

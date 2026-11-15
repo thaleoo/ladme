@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { obtenerEquipo, ocupacionPublica, mantenimientoDelEquipo, type EstadoMantenimientoEquipo } from '../lib/api'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  contactarTitular, crearReserva, obtenerEquipo, ocupacionPublica, mantenimientoDelEquipo, registrarLlegada,
+  type EstadoMantenimientoEquipo
+} from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
-import type { Equipo, Ocupacion } from '../lib/types'
-import { dia, diaCorto, fecha, finDia, hora, inicioDia, sumarDias } from '../lib/format'
+import { ACTIVIDADES, perfilCompleto, type Equipo, type Ocupacion } from '../lib/types'
+import { dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
+import Modal from '../components/Modal'
+import { useToast } from '../components/Toast'
+
+const RAPIDAS = [1, 2, 4, 8, 12, 24]
+const CLAVE_ACTIVIDAD = 'ladme-ultima-actividad'
 
 function proximaLibertad(ocupacion: Ocupacion[]): Date {
   const ahora = new Date()
@@ -31,6 +39,61 @@ export default function FichaEquipo() {
   const [mantenimiento, setMantenimiento] = useState<EstadoMantenimientoEquipo | null>(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const toast = useToast()
+  const [dialogo, setDialogo] = useState<'rapida' | 'contacto' | null>(null)
+  const [horasRapida, setHorasRapida] = useState(2)
+  const [actividad, setActividad] = useState(() => localStorage.getItem(CLAVE_ACTIVIDAD) ?? '')
+  const [desatendido, setDesatendido] = useState(false)
+  const [mensaje, setMensaje] = useState('')
+  const [texto, setTexto] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+  const [errorDialogo, setErrorDialogo] = useState<string | null>(null)
+  const [idSolicitud, setIdSolicitud] = useState(() => nuevoIdSolicitud())
+
+  async function reservarYa() {
+    if (!equipo) return
+    if (!actividad) return setErrorDialogo('Seleccione el tipo de actividad.')
+    setOcupado(true)
+    setErrorDialogo(null)
+    try {
+      const ini = new Date()
+      const r = await crearReserva({
+        equipo: equipo.codigo,
+        inicio: ini.toISOString(),
+        fin: new Date(ini.getTime() + horasRapida * 3600000).toISOString(),
+        actividad,
+        desatendido,
+        mensaje: desatendido ? mensaje.trim() || undefined : undefined,
+        idSolicitud
+      })
+      // Está frente al equipo: la llegada queda registrada de una vez.
+      await registrarLlegada(r.id).catch(() => undefined)
+      localStorage.setItem(CLAVE_ACTIVIDAD, actividad)
+      setIdSolicitud(nuevoIdSolicitud())
+      navigate(`/credencial/${r.id}`, { state: { recienCreada: true } })
+    } catch (e) {
+      setErrorDialogo(e instanceof Error ? e.message : 'No se pudo crear la reserva.')
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  async function enviarContacto() {
+    if (!equipo) return
+    setOcupado(true)
+    setErrorDialogo(null)
+    try {
+      await contactarTitular(equipo.codigo, texto.trim())
+      setDialogo(null)
+      setTexto('')
+      toast.mostrar('Mensaje enviado. Quien tiene el equipo podrá responderle a su correo.')
+    } catch (e) {
+      setErrorDialogo(e instanceof Error ? e.message : 'No se pudo enviar el mensaje.')
+    } finally {
+      setOcupado(false)
+    }
+  }
 
   useEffect(() => {
     let vivo = true
@@ -79,6 +142,11 @@ export default function FichaEquipo() {
   }
 
   const especificaciones = Object.entries(equipo.especificaciones ?? {})
+  const siguiente = ocupacion
+    .filter((o) => new Date(o.inicio) > ahora)
+    .sort((a, b) => a.inicio.localeCompare(b.inicio))[0]
+  const horasLibres = siguiente ? (new Date(siguiente.inicio).getTime() - ahora.getTime()) / 3600000 : Infinity
+  const rapidas = RAPIDAS.filter((h) => h <= horasLibres)
 
   return (
     <>
@@ -147,6 +215,74 @@ export default function FichaEquipo() {
           <div className="stat__value">{ocupacion.filter((o) => o.tipo === 'bloqueo').length}</div>
         </div>
       </div>
+
+      {libre && (
+        <section className="card accent">
+          <div className="row between" style={{ gap: 'var(--s3)' }}>
+            <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+              <h3 style={{ fontSize: 'var(--text-base)', margin: 0 }}>
+                <Icon nombre="chispa" width={16} height={16} /> ¿Está frente al equipo?
+              </h3>
+              <p className="small muted" style={{ margin: '2px 0 0' }}>
+                {rapidas.length
+                  ? `Resérvelo desde ya, sin llenar el formulario.${siguiente ? ` Libre hasta ${fecha(siguiente.inicio)}.` : ''}`
+                  : `Hay otra reserva a las ${hora(siguiente!.inicio)}: no alcanza para una reserva rápida.`}
+              </p>
+            </div>
+            {rapidas.length > 0 && (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setErrorDialogo(null)
+                  setHorasRapida(rapidas.includes(2) ? 2 : rapidas[0])
+                  setDialogo('rapida')
+                }}
+              >
+                <Icon nombre="reproducir" /> Usar ahora
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {enCurso && enCurso.tipo === 'reserva' && (
+        <section className="card">
+          <div className="row between" style={{ gap: 'var(--s3)' }}>
+            <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+              <h3 style={{ fontSize: 'var(--text-base)', margin: 0 }}>Reservado hasta {fecha(enCurso.fin)}</h3>
+              {enCurso.desatendido && (
+                <p className="small" style={{ margin: '4px 0 0' }}>
+                  <span className="badge warn">Proceso desatendido</span>{' '}
+                  {enCurso.mensaje_llegada || 'Hay algo ejecutándose: no apague ni cierre sesión.'}
+                </p>
+              )}
+              <p className="tiny muted" style={{ margin: '4px 0 0' }}>
+                Por privacidad no se muestra quién lo reservó, pero puede escribirle por aquí.
+              </p>
+            </div>
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={() => {
+                setErrorDialogo(null)
+                setDialogo('contacto')
+              }}
+            >
+              <Icon nombre="campana" /> Preguntar si lo libera
+            </button>
+          </div>
+        </section>
+      )}
+
+      {enCurso && enCurso.tipo === 'bloqueo' && (
+        <div className="alert warn">
+          <Icon nombre="llave" />
+          <div className="alert__body">
+            <strong>Equipo bloqueado hasta {fecha(enCurso.fin)}.</strong> {enCurso.motivo}
+          </div>
+        </div>
+      )}
 
       {mantenimiento && (
         <section className={`card ${mantenimiento.vencido ? 'warn' : ''}`}>
@@ -226,6 +362,116 @@ export default function FichaEquipo() {
           </div>
         )}
       </section>
+
+      <Modal
+        abierto={dialogo === 'rapida'}
+        titulo={`Usar ${equipo.codigo} ahora`}
+        descripcion="La reserva empieza en este momento y su llegada queda registrada."
+        onCerrar={() => setDialogo(null)}
+        pie={
+          <>
+            <button className="btn gray" type="button" onClick={() => setDialogo(null)} disabled={ocupado}>
+              Volver
+            </button>
+            <button className="btn" type="button" onClick={reservarYa} disabled={ocupado || !perfilCompleto(perfil)}>
+              {ocupado ? 'Reservando…' : `Reservar ${horasRapida} h`}
+            </button>
+          </>
+        }
+      >
+        {!perfilCompleto(perfil) ? (
+          <div className="alert warn">
+            <Icon nombre="alerta" />
+            <div className="alert__body">
+              Complete primero sus datos académicos en <Link to="/cuenta">Mi cuenta</Link>. Solo se piden una vez.
+            </div>
+          </div>
+        ) : (
+          <div className="stack">
+            <div>
+              <span className="field__label">Duración</span>
+              <div className="chips">
+                {rapidas.map((h) => (
+                  <button key={h} type="button" className="chip" aria-pressed={h === horasRapida} onClick={() => setHorasRapida(h)}>
+                    {h} h
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label className="field__label" htmlFor="rapida-actividad">
+                Tipo de actividad
+              </label>
+              <select id="rapida-actividad" value={actividad} onChange={(e) => setActividad(e.target.value)}>
+                <option value="" disabled>
+                  Seleccione
+                </option>
+                {ACTIVIDADES.map((a) => (
+                  <option key={a}>{a}</option>
+                ))}
+              </select>
+            </div>
+            <label className="check-row">
+              <input type="checkbox" checked={desatendido} onChange={(e) => setDesatendido(e.target.checked)} />
+              <span>
+                <strong>Proceso desatendido</strong>
+                Dejaré algo ejecutándose sin estar presente.
+              </span>
+            </label>
+            {desatendido && (
+              <div className="field">
+                <label className="field__label" htmlFor="rapida-mensaje">
+                  Mensaje para quien llegue
+                </label>
+                <input id="rapida-mensaje" value={mensaje} maxLength={140} onChange={(e) => setMensaje(e.target.value)} placeholder="Ej. No cerrar el navegador." />
+              </div>
+            )}
+          </div>
+        )}
+        {errorDialogo && (
+          <div className="alert danger mt">
+            <Icon nombre="alerta" />
+            <div className="alert__body">{errorDialogo}</div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        abierto={dialogo === 'contacto'}
+        titulo="Preguntar por el equipo"
+        descripcion="Le llega un aviso a quien lo tiene reservado. Esa persona verá su correo para poder responderle; usted no verá el suyo."
+        onCerrar={() => setDialogo(null)}
+        pie={
+          <>
+            <button className="btn gray" type="button" onClick={() => setDialogo(null)} disabled={ocupado}>
+              Volver
+            </button>
+            <button className="btn" type="button" onClick={enviarContacto} disabled={ocupado}>
+              {ocupado ? 'Enviando…' : 'Enviar mensaje'}
+            </button>
+          </>
+        }
+      >
+        <div className="field">
+          <label className="field__label" htmlFor="contacto-texto">
+            Mensaje <span className="muted" style={{ fontWeight: 500 }}>(opcional)</span>
+          </label>
+          <textarea
+            id="contacto-texto"
+            rows={3}
+            maxLength={300}
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            placeholder="Ej. ¿Le falta mucho? Necesito el equipo una hora."
+          />
+        </div>
+        {errorDialogo && (
+          <div className="alert danger mt">
+            <Icon nombre="alerta" />
+            <div className="alert__body">{errorDialogo}</div>
+          </div>
+        )}
+      </Modal>
     </>
   )
 }

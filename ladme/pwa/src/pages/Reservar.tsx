@@ -1,37 +1,26 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { crearReserva, equiposDisponibles, listarEquipos } from '../lib/api'
-import type { Equipo } from '../lib/types'
-import {
-  MAX_HORAS_EXTENSION,
-  MAX_HORAS_RESERVA,
-  MAX_HORAS_TOTAL,
-  aIso,
-  aInputLocal,
-  fecha,
-  horasEntre,
-  nuevoIdSolicitud,
-  sumarHoras
-} from '../lib/format'
+import { crearReserva, equiposDisponibles, listarEquipos, solicitarExcepcion } from '../lib/api'
+import { ACTIVIDADES, perfilCompleto, type Equipo } from '../lib/types'
+import { aIso, aInputLocal, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
+import { useLimites } from '../lib/politicas'
+import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
+import PerfilForm from '../components/PerfilForm'
 import Icon from '../components/Icon'
+import { useToast } from '../components/Toast'
 
 function redondear(d: Date, minutos: number): Date {
   const ms = minutos * 60000
   return new Date(Math.ceil(d.getTime() / ms) * ms)
 }
 
-const PRESETS: Array<{ etiqueta: string; horas: number }> = [
-  { etiqueta: '2 h', horas: 2 },
-  { etiqueta: '4 h', horas: 4 },
-  { etiqueta: '8 h', horas: 8 },
-  { etiqueta: '1 día', horas: 24 },
-  { etiqueta: '3 días', horas: 72 },
-  { etiqueta: '7 días', horas: MAX_HORAS_RESERVA }
-]
-
 export default function Reservar() {
   const navigate = useNavigate()
+  const toast = useToast()
+  const { perfil } = useAuth()
+  const lim = useLimites()
+  const admin = esAdmin(perfil)
   const [params] = useSearchParams()
   const [equipos, setEquipos] = useState<Equipo[]>([])
   const [equipo, setEquipo] = useState(params.get('equipo')?.toUpperCase() ?? '')
@@ -42,6 +31,7 @@ export default function Reservar() {
   const [detalle, setDetalle] = useState('')
   const [desatendido, setDesatendido] = useState(false)
   const [mensaje, setMensaje] = useState('')
+  const [justificacion, setJustificacion] = useState('')
   const [idSolicitud, setIdSolicitud] = useState(() => nuevoIdSolicitud())
   const [cargando, setCargando] = useState(true)
   const [enviando, setEnviando] = useState(false)
@@ -54,8 +44,9 @@ export default function Reservar() {
     listarEquipos()
       .then((lista) => {
         if (!vivo) return
-        setEquipos(lista)
-        setEquipo((prev) => prev || lista[0]?.codigo || '')
+        const reservables = lista.filter((e) => e.estado === 'activo')
+        setEquipos(reservables)
+        setEquipo((prev) => (prev && reservables.some((e) => e.codigo === prev) ? prev : reservables[0]?.codigo || ''))
       })
       .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudieron cargar los equipos.'))
       .finally(() => vivo && setCargando(false))
@@ -63,6 +54,14 @@ export default function Reservar() {
       vivo = false
     }
   }, [])
+
+  const presets = useMemo(() => {
+    const base = [2, 4, 8, 24, 72].filter((h) => h < lim.maxHoras)
+    return [...base, lim.maxHoras].map((h) => ({
+      horas: h,
+      etiqueta: h < 24 ? `${h} h` : h % 24 === 0 ? `${h / 24} ${h === 24 ? 'día' : 'días'}` : `${h} h`
+    }))
+  }, [lim.maxHoras])
 
   const duracion = useMemo(() => {
     try {
@@ -72,15 +71,21 @@ export default function Reservar() {
     }
   }, [inicio, fin])
 
+  // Más de lo permitido: en vez de bloquear, se ofrece pedir una excepción.
+  const esLarga = !admin && Number.isFinite(duracion) && duracion > lim.maxHoras
+
   const problema = useMemo(() => {
     if (!inicio || !fin) return 'Indique el inicio y el fin de la reserva.'
     if (Number.isNaN(duracion) || duracion <= 0) return 'El fin debe ser posterior al inicio.'
-    if (duracion > MAX_HORAS_RESERVA) {
-      return `La reserva base no puede superar ${MAX_HORAS_RESERVA} h (7 días). Después podrá solicitar una única extensión de hasta ${MAX_HORAS_EXTENSION} h (máximo total ${MAX_HORAS_TOTAL} h).`
-    }
     if (new Date(inicio).getTime() < Date.now() - 5 * 60000) return 'La hora de inicio no puede estar en el pasado.'
+    if (esLarga && duracion > lim.excepcionMaxHoras) {
+      return `Ni siquiera con solicitud se puede superar ${lim.excepcionMaxHoras} h (${Math.round(lim.excepcionMaxHoras / 24)} días).`
+    }
+    if (!admin && new Date(inicio).getTime() > Date.now() + lim.anticipacionDias * 86400000) {
+      return `Solo se puede reservar con ${lim.anticipacionDias} días de anticipación.`
+    }
     return null
-  }, [inicio, fin, duracion])
+  }, [inicio, fin, duracion, esLarga, admin, lim])
 
   function aplicarDuracion(horas: number) {
     if (!inicio) return
@@ -105,31 +110,39 @@ export default function Reservar() {
     e.preventDefault()
     setError(null)
     setAviso(null)
-    if (problema) {
-      setError(problema)
-      return
-    }
-    if (!equipo) {
-      setError('Seleccione un equipo.')
-      return
+    if (problema) return setError(problema)
+    if (!equipo) return setError('Seleccione un equipo.')
+    if (!actividad) return setError('Seleccione el tipo de actividad.')
+    if (esLarga && justificacion.trim().length < 10) {
+      return setError('Explique por qué necesita más tiempo (mínimo 10 caracteres).')
     }
     setEnviando(true)
     try {
+      if (esLarga) {
+        await solicitarExcepcion({
+          equipo,
+          inicio: aIso(inicio),
+          fin: aIso(fin),
+          actividad,
+          detalle: detalle.trim() || undefined,
+          justificacion: justificacion.trim()
+        })
+        toast.mostrar('Solicitud enviada. La administración le responderá por aquí y por correo.')
+        navigate('/mis-reservas', { replace: true })
+        return
+      }
       const reserva = await crearReserva({
         equipo,
         inicio: aIso(inicio),
         fin: aIso(fin),
-        actividad: actividad.trim() || undefined,
+        actividad,
         detalle: detalle.trim() || undefined,
         desatendido,
         mensaje: mensaje.trim() || undefined,
         idSolicitud
       })
       setIdSolicitud(nuevoIdSolicitud())
-      navigate(`/credencial/${reserva.id}`, {
-        replace: true,
-        state: { recienCreada: true }
-      })
+      navigate(`/credencial/${reserva.id}`, { replace: true, state: { recienCreada: true } })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo crear la reserva.')
     } finally {
@@ -137,9 +150,24 @@ export default function Reservar() {
     }
   }
 
+  if (!perfilCompleto(perfil)) {
+    return (
+      <>
+        <PageHeader
+          eyebrow="Operación"
+          titulo="Antes de reservar"
+          sub="Necesitamos sus datos académicos. Se piden una sola vez y luego reservar toma unos segundos."
+          volver={{ a: '/', texto: 'Volver a disponibilidad' }}
+        />
+        <section className="card">
+          <PerfilForm />
+        </section>
+      </>
+    )
+  }
+
   const equipoActual = equipos.find((e) => e.codigo === equipo)
-  const porcentaje = Number.isFinite(duracion) && duracion > 0 ? Math.min(100, (duracion / MAX_HORAS_TOTAL) * 100) : 0
-  const excede = Number.isFinite(duracion) && duracion > MAX_HORAS_RESERVA
+  const porcentaje = Number.isFinite(duracion) && duracion > 0 ? Math.min(100, (duracion / lim.maxTotal) * 100) : 0
 
   return (
     <>
@@ -148,9 +176,8 @@ export default function Reservar() {
         titulo="Nueva reserva"
         sub={
           <>
-            Hasta <strong>{MAX_HORAS_RESERVA} h</strong> por reserva. Al iniciar puede pedir una única
-            extensión de <strong>{MAX_HORAS_EXTENSION} h</strong>, sin pasar de{' '}
-            <strong>{MAX_HORAS_TOTAL} h</strong> en total.
+            Hasta <strong>{lim.maxHoras} h</strong> por reserva y una extensión de{' '}
+            <strong>{lim.maxExtension} h</strong>. Para más tiempo, se envía una solicitud.
           </>
         }
         volver={{ a: '/', texto: 'Volver a disponibilidad' }}
@@ -180,28 +207,23 @@ export default function Reservar() {
 
             <div className="field">
               <label className="field__label" htmlFor="actividad">
-                Actividad <span className="muted" style={{ fontWeight: 500 }}>(opcional)</span>
+                Tipo de actividad
               </label>
-              <input
-                id="actividad"
-                value={actividad}
-                onChange={(e) => setActividad(e.target.value)}
-                maxLength={120}
-                placeholder="Ej. Entrenamiento de modelos, clase, práctica"
-              />
+              <select id="actividad" value={actividad} onChange={(e) => setActividad(e.target.value)}>
+                <option value="" disabled>
+                  Seleccione
+                </option>
+                {ACTIVIDADES.map((a) => (
+                  <option key={a}>{a}</option>
+                ))}
+              </select>
             </div>
 
             <div className="field">
               <label className="field__label" htmlFor="inicio">
                 Inicio
               </label>
-              <input
-                id="inicio"
-                type="datetime-local"
-                value={inicio}
-                onChange={(e) => setInicio(e.target.value)}
-                required
-              />
+              <input id="inicio" type="datetime-local" value={inicio} onChange={(e) => setInicio(e.target.value)} required />
             </div>
 
             <div className="field">
@@ -217,7 +239,7 @@ export default function Reservar() {
               Duración rápida desde el inicio
             </div>
             <div className="chips">
-              {PRESETS.map((p) => (
+              {presets.map((p) => (
                 <button
                   key={p.horas}
                   type="button"
@@ -233,18 +255,19 @@ export default function Reservar() {
 
           <div>
             <div className="row between" style={{ marginBottom: 6 }}>
-              <span className={`badge ${excede ? 'danger' : 'ok'}`}>
+              <span className={`badge ${esLarga ? 'warn' : 'ok'}`}>
                 <Icon nombre="reloj" /> {Number.isFinite(duracion) ? `${duracion.toFixed(1)} h` : '—'}
               </span>
               <span className="tiny muted">
-                {MAX_HORAS_RESERVA} h base + {MAX_HORAS_EXTENSION} h extensión
+                {lim.maxHoras} h base + {lim.maxExtension} h extensión
               </span>
             </div>
-            <div className="medidor" role="img" aria-label={`Duración ${Number.isFinite(duracion) ? duracion.toFixed(1) : 0} de ${MAX_HORAS_TOTAL} horas`}>
-              <div
-                className={`medidor__relleno${excede ? ' alerta' : ''}`}
-                style={{ width: `${Math.max(2, porcentaje)}%` }}
-              />
+            <div
+              className="medidor"
+              role="img"
+              aria-label={`Duración ${Number.isFinite(duracion) ? duracion.toFixed(1) : 0} de ${lim.maxTotal} horas`}
+            >
+              <div className={`medidor__relleno${esLarga ? ' alerta' : ''}`} style={{ width: `${Math.max(2, porcentaje)}%` }} />
             </div>
             {fin && !Number.isNaN(duracion) && duracion > 0 && (
               <p className="help" style={{ marginBottom: 0 }}>
@@ -260,9 +283,32 @@ export default function Reservar() {
             </div>
           )}
 
+          {esLarga && !problema && (
+            <div className="alert info">
+              <Icon nombre="info" />
+              <div className="alert__body">
+                <strong>Esto supera las {lim.maxHoras} h.</strong> No se reserva de inmediato: se envía una
+                solicitud y un administrador la aprueba o la rechaza. El equipo no queda apartado mientras tanto.
+                <div className="field" style={{ marginTop: 'var(--s3)' }}>
+                  <label className="field__label" htmlFor="justificacion">
+                    ¿Por qué necesita más tiempo?
+                  </label>
+                  <textarea
+                    id="justificacion"
+                    rows={3}
+                    maxLength={800}
+                    value={justificacion}
+                    onChange={(e) => setJustificacion(e.target.value)}
+                    placeholder="Ej. Entrenamiento de un modelo para el trabajo de grado que tarda 12 días continuos."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="field">
             <label className="field__label" htmlFor="detalle">
-              Detalle <span className="muted" style={{ fontWeight: 500 }}>(opcional)</span>
+              Detalle, tutor o descripción <span className="muted" style={{ fontWeight: 500 }}>(opcional)</span>
             </label>
             <textarea
               id="detalle"
@@ -270,22 +316,24 @@ export default function Reservar() {
               maxLength={800}
               value={detalle}
               onChange={(e) => setDetalle(e.target.value)}
-              placeholder="Software, accesorios o condiciones especiales que necesita."
+              placeholder="Nombre del proyecto, tutor, software que va a usar."
             />
           </div>
 
-          <label className="check-row">
-            <input type="checkbox" checked={desatendido} onChange={(e) => setDesatendido(e.target.checked)} />
-            <span>
-              <strong>Trabajo desatendido</strong>
-              Cálculos largos sin presencia continua. Quien pase por el equipo verá su mensaje.
-            </span>
-          </label>
+          {!esLarga && (
+            <label className="check-row">
+              <input type="checkbox" checked={desatendido} onChange={(e) => setDesatendido(e.target.checked)} />
+              <span>
+                <strong>Proceso desatendido</strong>
+                Dejará algo ejecutándose sin estar presente. Quien pase por el equipo verá su mensaje.
+              </span>
+            </label>
+          )}
 
-          {desatendido && (
+          {desatendido && !esLarga && (
             <div className="field">
               <label className="field__label" htmlFor="mensaje">
-                Mensaje para quien vea el equipo
+                Mensaje para quien llegue al equipo
               </label>
               <input
                 id="mensaje"
@@ -301,7 +349,11 @@ export default function Reservar() {
             <button type="submit" disabled={enviando || cargando || !!problema}>
               {enviando ? (
                 <>
-                  <span className="spinner" aria-hidden="true" /> Creando…
+                  <span className="spinner" aria-hidden="true" /> Enviando…
+                </>
+              ) : esLarga ? (
+                <>
+                  <Icon nombre="flecha" /> Enviar solicitud
                 </>
               ) : (
                 <>
@@ -344,8 +396,8 @@ export default function Reservar() {
           <section className="card">
             <h3 style={{ fontSize: 'var(--text-base)' }}>Antes de reservar</h3>
             <ul className="small muted" style={{ paddingLeft: '1.05rem', margin: 0 }}>
-              <li>La reserva queda a su nombre institucional y genera una credencial con QR.</li>
-              <li>Registre su llegada al comenzar; si no usa el equipo, cancélelo para liberarlo.</li>
+              <li>La reserva queda a su nombre y genera una credencial con QR.</li>
+              <li>Registre su llegada al comenzar; si no va a usar el equipo, cancele para liberarlo.</li>
               <li>Al terminar, use «Liberar equipo» para que otra persona pueda reservar antes.</li>
               <li>Las cancelaciones conservan el historial: no se borran.</li>
             </ul>
@@ -356,15 +408,19 @@ export default function Reservar() {
             <div className="stack" style={{ marginTop: 'var(--s3)' }}>
               <div className="row between small">
                 <span className="muted">Reserva base</span>
-                <strong className="num">{MAX_HORAS_RESERVA} h</strong>
+                <strong className="num">{lim.maxHoras} h</strong>
               </div>
               <div className="row between small">
-                <span className="muted">Extensión única</span>
-                <strong className="num">+{MAX_HORAS_EXTENSION} h</strong>
+                <span className="muted">Extensión</span>
+                <strong className="num">+{lim.maxExtension} h</strong>
               </div>
               <div className="row between small">
-                <span className="muted">Tope absoluto</span>
-                <strong className="num">{MAX_HORAS_TOTAL} h</strong>
+                <span className="muted">Tope sin solicitud</span>
+                <strong className="num">{lim.maxTotal} h</strong>
+              </div>
+              <div className="row between small">
+                <span className="muted">Con solicitud aprobada</span>
+                <strong className="num">hasta {Math.round(lim.excepcionMaxHoras / 24)} días</strong>
               </div>
             </div>
           </section>

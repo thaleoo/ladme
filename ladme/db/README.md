@@ -51,3 +51,17 @@ psql "$DATABASE_URL" -f ladme/db/schema_ladme.sql
 3. No se guardan contraseñas, claves ni cadenas de conexión en el repo.
 4. Los clientes solo reciben `GRANT` mínimos; las escrituras sensibles son RPC.
 5. Los datos personales se minimizan: no se almacena cédula en la PWA.
+
+## Migración 0002 — PWA completa
+
+`migrations/0002_pwa_completa.sql` se aplica **una vez**, después del esquema (y de 0001 si aplica).
+Agrega el perfil académico, los avisos con texto (centro de avisos, push y correo), el contacto al
+titular, las solicitudes de reserva larga, las estadísticas, la importación desde Sheets y corrige
+que el laboratorista pudiera saltarse los límites (ahora solo el administrador).
+
+Pasos completos de activación: [`../docs/PWA_COMPLETA.md`](../docs/PWA_COMPLETA.md).
+
+## Pruebas
+
+`tests/ejecutar.sh` monta una base desechable en un PostgreSQL local (con un sustituto mínimo de
+`auth` de Supabase), aplica esquema + migraciones y ejecuta `tests/pruebas.sql`.

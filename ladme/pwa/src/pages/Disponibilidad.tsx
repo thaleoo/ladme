@@ -37,6 +37,56 @@ function etiquetaDia(d: Date, hoy: Date): string {
   return new Intl.DateTimeFormat('es-CO', { weekday: 'short' }).format(d).replace('.', '')
 }
 
+/** Vista de línea de tiempo: un equipo por fila y siete días de corrido. */
+function LineaTiempo({ equipos, porEquipo, dias }: { equipos: Equipo[]; porEquipo: Map<string, Ocupacion[]>; dias: Date[] }) {
+  const desde = dias[0].getTime()
+  const total = dias.length * 86400000
+  const ahoraPct = ((Date.now() - desde) / total) * 100
+  return (
+    <section className="card">
+      <div className="linea" role="table" aria-label="Ocupación de los próximos 7 días">
+        <div className="linea__fila linea__fila--cabecera" role="row">
+          <span className="linea__equipo" />
+          <div className="linea__dias">
+            {dias.map((d) => (
+              <span key={d.toISOString()}>
+                {etiquetaDia(d, dias[0])} {d.getDate()}
+              </span>
+            ))}
+          </div>
+        </div>
+        {equipos.map((e) => (
+          <div key={e.id} className="linea__fila" role="row">
+            <Link className="linea__equipo" to={`/equipo/${e.codigo}`} title={e.nombre}>
+              {e.codigo}
+            </Link>
+            <div className={`linea__pista${e.estado !== 'activo' ? ' linea__pista--inactiva' : ''}`}>
+              {(porEquipo.get(e.codigo) ?? []).map((o, i) => {
+                const ini = Math.max(new Date(o.inicio).getTime(), desde)
+                const fin = Math.min(new Date(o.fin).getTime(), desde + total)
+                if (fin <= ini) return null
+                return (
+                  <span
+                    key={i}
+                    className={`linea__tramo${o.tipo === 'bloqueo' ? ' linea__tramo--bloqueo' : ''}`}
+                    style={{ left: `${((ini - desde) / total) * 100}%`, width: `${Math.max(0.6, ((fin - ini) / total) * 100)}%` }}
+                    title={`${fecha(o.inicio)} → ${fecha(o.fin)}${o.tipo === 'bloqueo' ? ' · bloqueo' : ''}`}
+                  />
+                )
+              })}
+              {ahoraPct >= 0 && ahoraPct <= 100 && <span className="linea__ahora" style={{ left: `${ahoraPct}%` }} />}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="tiny muted" style={{ margin: 'var(--s3) 0 0' }}>
+        <span className="linea__leyenda" /> Reservado <span className="linea__leyenda linea__leyenda--bloqueo" /> Bloqueo o
+        mantenimiento · La línea vertical es este momento. Toque un equipo para ver su ficha.
+      </p>
+    </section>
+  )
+}
+
 export default function Disponibilidad() {
   const { perfil } = useAuth()
   const [equipos, setEquipos] = useState<Equipo[]>([])
@@ -44,21 +94,30 @@ export default function Disponibilidad() {
   const [fechaSel, setFechaSel] = useState(aInputFecha(new Date()))
   const [equipoSel, setEquipoSel] = useState('TODOS')
   const [filtro, setFiltro] = useState<Filtro>('TODOS')
+  const [vista, setVista] = useState<'tarjetas' | 'linea'>(() =>
+    localStorage.getItem('ladme-vista') === 'linea' ? 'linea' : 'tarjetas'
+  )
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let vivo = true
-    Promise.all([listarEquipos(), listarOcupacion()])
-      .then(([eqs, ocs]) => {
-        if (!vivo) return
-        setEquipos(eqs)
-        setOcupacion(ocs)
-      })
-      .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudo cargar la disponibilidad.'))
-      .finally(() => vivo && setCargando(false))
+    const cargar = () =>
+      Promise.all([listarEquipos(), listarOcupacion()])
+        .then(([eqs, ocs]) => {
+          if (!vivo) return
+          setEquipos(eqs)
+          setOcupacion(ocs)
+          setError(null)
+        })
+        .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudo cargar la disponibilidad.'))
+        .finally(() => vivo && setCargando(false))
+    void cargar()
+    // La disponibilidad cambia mientras se mira: se refresca cada minuto.
+    const t = window.setInterval(() => document.visibilityState === 'visible' && void cargar(), 60000)
     return () => {
       vivo = false
+      window.clearInterval(t)
     }
   }, [])
 
@@ -227,6 +286,22 @@ export default function Disponibilidad() {
             </button>
           </div>
 
+          <div className="segmented" role="group" aria-label="Tipo de vista">
+            {(['tarjetas', 'linea'] as const).map((v) => (
+              <button
+                key={v}
+                className={vista === v ? 'activo' : ''}
+                type="button"
+                onClick={() => {
+                  setVista(v)
+                  localStorage.setItem('ladme-vista', v)
+                }}
+              >
+                {v === 'tarjetas' ? 'Tarjetas' : 'Línea de tiempo'}
+              </button>
+            ))}
+          </div>
+
           <div className="field" style={{ minWidth: 200, flex: '1 1 200px', maxWidth: 320 }}>
             <label className="solo-lector" htmlFor="equipo-filtro">
               Filtrar por equipo
@@ -273,7 +348,11 @@ export default function Disponibilidad() {
         </div>
       )}
 
-      {!cargando && !error && visibles.length > 0 && (
+      {!cargando && !error && visibles.length > 0 && vista === 'linea' && (
+        <LineaTiempo equipos={visibles} porEquipo={porEquipo} dias={dias} />
+      )}
+
+      {!cargando && !error && visibles.length > 0 && vista === 'tarjetas' && (
         <div className="grid cols-2">
           {visibles.map((e) => {
             const intervalos = porEquipo.get(e.codigo) ?? []

@@ -1,5 +1,13 @@
 # Hoja de ruta — LADME: retirar Google Wallet, ordenar Apps Script y construir la PWA
 
+> **Estado a noviembre de 2026 (rama `pwa-completa`).** La PWA ya cubre lo que hacía Apps Script
+> y varios puntos de este documento quedaron resueltos: panel de administración (ronda, reservas,
+> bloqueos, equipos, estadísticas, políticas), credencial tipo pase que se actualiza sola, ingreso
+> con Google o código, datos académicos, contacto al titular, reserva rápida, solicitudes de reserva
+> larga, avisos por correo/push/en la app, escáner QR y migración desde Sheets. Google Wallet ya no
+> está en el código. La única excepción a «sin Google Cloud» es un cliente OAuth para el ingreso
+> (no aloja datos ni lógica). Pasos de activación: [`PWA_COMPLETA.md`](PWA_COMPLETA.md).
+
 **Versión:** 0.2 · **Fecha:** 2026-11-06 · **Estado:** decisiones de arquitectura confirmadas; repo reorganizado. No se ha modificado el código de la aplicación.
 
 > **Cambio de esta versión:** se confirma **solo Supabase, sin Google Cloud**; se documenta la configuración real del deployment; se incorpora la auditoría de las hojas reales (131 reservas, 16 equipos, 9 reservas de más de 168 h); y se fija el repo en `appsscript/`, `db/`, `docs/`, `legacy/`, `pwa/`, `scripts/` y `sheets/`.

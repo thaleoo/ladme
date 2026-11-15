@@ -7,11 +7,12 @@ import Logo from '../components/Logo'
 const ESPERA_SEGUNDOS = 60
 
 export default function Login() {
-  const { session, cargando, enviarEnlace } = useAuth()
+  const { session, cargando, enviarEnlace, verificarCodigo, entrarConGoogle } = useAuth()
   const [correo, setCorreo] = useState('')
+  const [codigo, setCodigo] = useState('')
+  const [paso, setPaso] = useState<'inicio' | 'correo' | 'codigo'>('inicio')
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
   const [espera, setEspera] = useState(0)
   const location = useLocation()
 
@@ -41,20 +42,40 @@ export default function Login() {
     return <Navigate to={destino} replace />
   }
 
-  async function enviar(e: FormEvent) {
-    e.preventDefault()
+  async function google() {
+    setError(null)
+    setEnviando(true)
+    const r = await entrarConGoogle()
+    if (!r.ok) {
+      setEnviando(false)
+      setError(r.mensaje)
+    }
+  }
+
+  async function pedirCodigo(e?: FormEvent) {
+    e?.preventDefault()
     if (enviando || espera > 0) return
     setError(null)
-    setOk(null)
     setEnviando(true)
     const r = await enviarEnlace(correo)
     setEnviando(false)
     if (r.ok) {
-      setOk(r.mensaje)
+      setPaso('codigo')
+      setCodigo('')
       setEspera(ESPERA_SEGUNDOS)
     } else {
       setError(r.mensaje)
     }
+  }
+
+  async function verificar(e: FormEvent) {
+    e.preventDefault()
+    if (enviando) return
+    setError(null)
+    setEnviando(true)
+    const r = await verificarCodigo(correo, codigo)
+    setEnviando(false)
+    if (!r.ok) setError(r.mensaje)
   }
 
   return (
@@ -81,7 +102,7 @@ export default function Login() {
             </li>
             <li>
               <Icon nombre="check-circulo" />
-              Reciba el recordatorio antes de que termine su turno.
+              Reciba avisos antes de que termine su reserva.
             </li>
             <li>
               <Icon nombre="check-circulo" />
@@ -101,58 +122,113 @@ export default function Login() {
 
           <h1 style={{ fontSize: 'var(--text-2xl)' }}>Ingresar</h1>
           <p className="small muted" style={{ marginBottom: 'var(--s5)' }}>
-            Use su correo institucional <strong>@unal.edu.co</strong>. Le enviamos un enlace de acceso:
-            no necesita contraseña.
+            Use su cuenta institucional <strong>@unal.edu.co</strong>. No necesita crear una contraseña.
           </p>
 
-          <form onSubmit={enviar} className="stack">
-            <div className="field">
-              <label className="field__label" htmlFor="correo">
-                Correo institucional
-              </label>
-              <input
-                id="correo"
-                type="email"
-                autoComplete="email"
-                inputMode="email"
-                placeholder="nombre.apellido@unal.edu.co"
-                value={correo}
-                onChange={(e) => setCorreo(e.target.value)}
-                required
-                autoFocus
-                aria-describedby="ayuda-correo"
-              />
-              <p className="help" id="ayuda-correo">
-                Solo se admiten cuentas del dominio <code>unal.edu.co</code>.
-              </p>
-            </div>
-
-            <button className="btn lg block" type="submit" disabled={enviando || espera > 0}>
-              {enviando ? (
-                <>
-                  <span className="spinner" aria-hidden="true" /> Enviando…
-                </>
-              ) : espera > 0 ? (
-                `Podrá reintentar en ${espera} s`
-              ) : (
-                <>
-                  <Icon nombre="flecha" /> Enviarme el enlace
-                </>
-              )}
-            </button>
-          </form>
-
-          {ok && (
-            <div className="alert ok" style={{ marginTop: 'var(--s4)' }}>
-              <Icon nombre="check-circulo" />
-              <div className="alert__body">
-                <strong>{ok}</strong>
-                <p className="small" style={{ margin: '4px 0 0' }}>
-                  Revise también la carpeta de spam. El enlace caduca en pocos minutos y sirve en
-                  cualquier dispositivo.
-                </p>
+          {paso === 'inicio' && (
+            <div className="stack">
+              <button className="btn lg block" type="button" onClick={google} disabled={enviando}>
+                <Icon nombre="usuario" />
+                {enviando ? 'Abriendo Google…' : 'Continuar con Google'}
+              </button>
+              <div className="separador">
+                <span>o</span>
               </div>
+              <button className="btn ghost block" type="button" onClick={() => { setError(null); setPaso('correo') }}>
+                <Icon nombre="clave" /> Recibir un código en mi correo
+              </button>
             </div>
+          )}
+
+          {paso === 'correo' && (
+            <form onSubmit={pedirCodigo} className="stack">
+              <div className="field">
+                <label className="field__label" htmlFor="correo">
+                  Correo institucional
+                </label>
+                <input
+                  id="correo"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="nombre.apellido@unal.edu.co"
+                  value={correo}
+                  onChange={(e) => setCorreo(e.target.value)}
+                  required
+                  autoFocus
+                />
+                <p className="help">Le enviaremos un código de 6 dígitos. Sirve una sola vez.</p>
+              </div>
+              <button className="btn lg block" type="submit" disabled={enviando || espera > 0}>
+                {enviando ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" /> Enviando…
+                  </>
+                ) : espera > 0 ? (
+                  `Podrá reintentar en ${espera} s`
+                ) : (
+                  <>
+                    <Icon nombre="flecha" /> Enviarme el código
+                  </>
+                )}
+              </button>
+              <button className="btn gray block" type="button" onClick={() => { setError(null); setPaso('inicio') }}>
+                Volver
+              </button>
+            </form>
+          )}
+
+          {paso === 'codigo' && (
+            <form onSubmit={verificar} className="stack">
+              <div className="alert ok">
+                <Icon nombre="check-circulo" />
+                <div className="alert__body">
+                  <strong>Código enviado a {correo.trim().toLowerCase()}</strong>
+                  <p className="small" style={{ margin: '4px 0 0' }}>
+                    Revise también la carpeta de spam. El código vence en pocos minutos.
+                  </p>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor="codigo">
+                  Código de acceso
+                </label>
+                <input
+                  id="codigo"
+                  className="codigo-otp"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  placeholder="000000"
+                  value={codigo}
+                  onChange={(e) => setCodigo(e.target.value.replace(/\D/g, ''))}
+                  autoFocus
+                />
+              </div>
+              <button className="btn lg block" type="submit" disabled={enviando || codigo.length < 6}>
+                {enviando ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" /> Verificando…
+                  </>
+                ) : (
+                  <>
+                    <Icon nombre="check" /> Ingresar
+                  </>
+                )}
+              </button>
+              <button
+                className="btn gray block"
+                type="button"
+                disabled={enviando || espera > 0}
+                onClick={() => void pedirCodigo()}
+              >
+                {espera > 0 ? `Pedir otro código en ${espera} s` : 'Pedir otro código'}
+              </button>
+              <button className="btn ghost block" type="button" onClick={() => { setError(null); setPaso('correo') }}>
+                Cambiar de correo
+              </button>
+            </form>
           )}
 
           {error && (

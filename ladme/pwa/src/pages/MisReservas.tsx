@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { cancelarReserva, extenderReserva, liberarReserva, misReservas, registrarLlegada } from '../lib/api'
-import type { Reserva } from '../lib/types'
 import {
-  MAX_HORAS_EXTENSION,
-  MAX_HORAS_TOTAL,
+  cancelarReserva, extenderReserva, liberarReserva, misReservas, misSolicitudes, registrarLlegada, retirarSolicitud
+} from '../lib/api'
+import type { Reserva, Solicitud } from '../lib/types'
+import { useLimites } from '../lib/politicas'
+import {
   aInputLocal,
+  duracion,
+  tonoEstado,
   esFuturo,
   esPasado,
   estadoReserva,
@@ -21,15 +24,11 @@ import { useToast } from '../components/Toast'
 
 type Dialogo = { tipo: 'cancelar' | 'extender' | 'liberar'; reserva: Reserva } | null
 
-function tonoEstado(estado: string): string {
-  if (estado === 'En curso') return 'ok'
-  if (estado === 'Sin registrar llegada') return 'warn'
-  if (estado === 'Cancelada' || estado === 'Finalizada') return 'gray'
-  return 'info'
-}
-
 export default function MisReservas() {
   const toast = useToast()
+  const lim = useLimites()
+  const MAX_HORAS_EXTENSION = lim.maxExtension
+  const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
   const [reservas, setReservas] = useState<Reserva[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +41,9 @@ export default function MisReservas() {
   const cargar = useCallback(async () => {
     try {
       setError(null)
-      setReservas(await misReservas())
+      const [res, sol] = await Promise.all([misReservas(), misSolicitudes()])
+      setReservas(res)
+      setSolicitudes(sol)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudieron cargar sus reservas.')
     } finally {
@@ -58,12 +59,30 @@ export default function MisReservas() {
     const act: Reserva[] = []
     const his: Reserva[] = []
     for (const r of reservas) {
-      const visible = estadoReserva(r)
+      const visible = estadoReserva(r, lim.toleranciaMin)
       if (r.estado === 'activa' && !esPasado(r.fin) && visible !== 'Finalizada') act.push(r)
       else his.push(r)
     }
     return { activas: act, historial: his }
-  }, [reservas])
+  }, [reservas, lim.toleranciaMin])
+
+  /** Tope total en horas; una reserva aprobada por excepción solo está limitada por la extensión. */
+  function topeHoras(r: Reserva): number {
+    return r.excepcion ? horasEntre(r.inicio, r.fin) + lim.maxExtension : lim.maxTotal
+  }
+
+  async function retirar(id: string) {
+    setProcesando(true)
+    try {
+      await retirarSolicitud(id)
+      toast.mostrar('Solicitud retirada.')
+      await cargar()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo retirar la solicitud.')
+    } finally {
+      setProcesando(false)
+    }
+  }
 
   function abrirCancelar(r: Reserva) {
     setMotivo('')
@@ -73,7 +92,7 @@ export default function MisReservas() {
 
   function abrirExtension(r: Reserva) {
     const finActual = new Date(r.fin)
-    const tope = new Date(new Date(r.inicio).getTime() + MAX_HORAS_TOTAL * 3600000)
+    const tope = new Date(new Date(r.inicio).getTime() + topeHoras(r) * 3600000)
     const propuesto = new Date(Math.min(finActual.getTime() + MAX_HORAS_EXTENSION * 3600000, tope.getTime()))
     setNuevoFin(aInputLocal(propuesto))
     setError(null)
@@ -107,7 +126,7 @@ export default function MisReservas() {
       setError('Indique la nueva fecha y hora de fin.')
       return
     }
-    const maximo = new Date(new Date(r.inicio).getTime() + MAX_HORAS_TOTAL * 3600000)
+    const maximo = new Date(new Date(r.inicio).getTime() + topeHoras(r) * 3600000)
     if (fin.toISOString() <= r.fin) {
       setError('El nuevo fin debe ser posterior al actual.')
       return
@@ -117,7 +136,7 @@ export default function MisReservas() {
       return
     }
     if (fin > maximo) {
-      setError(`La reserva no puede superar ${MAX_HORAS_TOTAL} h en total.`)
+      setError(`La reserva no puede superar ${Math.round(topeHoras(r))} h en total.`)
       return
     }
     setProcesando(true)
@@ -162,31 +181,37 @@ export default function MisReservas() {
   }
 
   function tarjeta(r: Reserva) {
-    const estado = estadoReserva(r)
+    const estado = estadoReserva(r, lim.toleranciaMin)
     const vigente = r.estado === 'activa' && !esPasado(r.fin)
-    const puedeLlegada = estado === 'Sin registrar llegada' || estado === 'Activa'
+    const puedeLlegada = !r.llegada_en
     const puedeExtender =
       vigente &&
-      r.extensiones < 1 &&
-      new Date(r.inicio).getTime() + MAX_HORAS_TOTAL * 3600000 > new Date(r.fin).getTime()
+      r.extensiones < lim.extensionesMax &&
+      new Date(r.inicio).getTime() + topeHoras(r) * 3600000 > new Date(r.fin).getTime()
 
     return (
       <article key={r.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
         <div className="row between" style={{ alignItems: 'flex-start' }}>
           <div style={{ minWidth: 0 }}>
             <div className="row tight">
-              <span style={{ fontWeight: 700, letterSpacing: '-0.01em' }}>{r.codigo_legible}</span>
+              <span style={{ fontWeight: 750, fontSize: 'var(--text-lg)', letterSpacing: '-0.01em' }}>
+                {r.equipos?.codigo ?? 'Equipo'}
+              </span>
               <span className={`badge ${tonoEstado(estado)}`}>
                 {estado === 'En curso' && <span className="punto" />}
                 {estado}
               </span>
               {r.desatendido && <span className="badge gray">Desatendido</span>}
+              {r.excepcion && <span className="badge outline">Reserva larga</span>}
             </div>
+            <p className="tiny muted" style={{ margin: '2px 0 0' }}>
+              {r.equipos?.nombre} · {r.codigo_legible}
+            </p>
             <p className="small" style={{ margin: '2px 0 0' }}>
               <Icon nombre="calendario" width={13} height={13} /> {rango(r.inicio, r.fin)}
             </p>
           </div>
-          <span className="badge outline num">{horasEntre(r.inicio, r.fin).toFixed(0)} h</span>
+          <span className="badge outline num">{duracion(r.inicio, r.fin)}</span>
         </div>
 
         {r.actividad && <p className="small" style={{ margin: 0 }}>{r.actividad}</p>}
@@ -205,14 +230,19 @@ export default function MisReservas() {
             <Icon nombre="reloj" width={13} height={13} /> Termina {hace(r.fin)}
           </p>
         )}
+        {r.llegada_en && vigente && (
+          <p className="tiny muted" style={{ margin: 0 }}>
+            <Icon nombre="check" width={13} height={13} /> Llegada registrada {hace(r.llegada_en)}.
+          </p>
+        )}
         {estado === 'Sin registrar llegada' && (
           <p className="tiny" style={{ margin: 0, color: 'var(--warning-fg)' }}>
-            <Icon nombre="alerta" width={13} height={13} /> Registre su llegada para no perder el turno.
+            <Icon nombre="alerta" width={13} height={13} /> Registre su llegada: el laboratorio ya fue avisado de que no ha llegado.
           </p>
         )}
         {r.extensiones > 0 && (
           <p className="tiny muted" style={{ margin: 0 }}>
-            Extensión usada ({r.extensiones} de 1).
+            Extensión usada ({r.extensiones} de {lim.extensionesMax}).
           </p>
         )}
 
@@ -298,6 +328,42 @@ export default function MisReservas() {
           Historial ({historial.length})
         </button>
       </div>
+
+      {pestana === 'vigentes' && solicitudes.some((x) => x.estado === 'pendiente' || x.estado === 'rechazada') && (
+        <section className="card">
+          <h3 style={{ fontSize: 'var(--text-base)' }}>Solicitudes de reserva larga</h3>
+          <div className="stack" style={{ marginTop: 'var(--s3)' }}>
+            {solicitudes
+              .filter((x) => x.estado === 'pendiente' || x.estado === 'rechazada')
+              .slice(0, 5)
+              .map((x) => (
+                <div key={x.id} className="row between" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row tight">
+                      <strong>{x.equipos?.codigo}</strong>
+                      <span className={`badge ${x.estado === 'pendiente' ? 'warn' : 'danger'}`}>
+                        {x.estado === 'pendiente' ? 'En revisión' : 'No aprobada'}
+                      </span>
+                    </div>
+                    <p className="tiny muted" style={{ margin: '2px 0 0' }}>
+                      {rango(x.inicio, x.fin)} · {duracion(x.inicio, x.fin)}
+                    </p>
+                    {x.respuesta && (
+                      <p className="tiny" style={{ margin: '2px 0 0' }}>
+                        Respuesta: {x.respuesta}
+                      </p>
+                    )}
+                  </div>
+                  {x.estado === 'pendiente' && (
+                    <button className="btn gray sm" type="button" disabled={procesando} onClick={() => retirar(x.id)}>
+                      Retirar
+                    </button>
+                  )}
+                </div>
+              ))}
+          </div>
+        </section>
+      )}
 
       {cargando && <Cargando texto="Cargando sus reservas…" />}
 
@@ -390,7 +456,7 @@ export default function MisReservas() {
       <Modal
         abierto={dialogo?.tipo === 'extender'}
         titulo="Extender la reserva"
-        descripcion="Una única extensión por reserva, de hasta 24 h y sin superar 192 h desde el inicio."
+        descripcion={`Hasta ${lim.maxExtension} h más. Extensiones permitidas por reserva: ${lim.extensionesMax}.`}
         onCerrar={() => setDialogo(null)}
         pie={
           <>
@@ -412,7 +478,7 @@ export default function MisReservas() {
                 <br />
                 Máximo permitido:{' '}
                 <strong>
-                  {fecha(new Date(new Date(dialogo.reserva.inicio).getTime() + MAX_HORAS_TOTAL * 3600000).toISOString())}
+                  {fecha(new Date(new Date(dialogo.reserva.inicio).getTime() + topeHoras(dialogo.reserva) * 3600000).toISOString())}
                 </strong>
               </div>
             </div>

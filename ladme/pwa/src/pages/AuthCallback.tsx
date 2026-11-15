@@ -14,7 +14,14 @@ export default function AuthCallback() {
     const query = new URLSearchParams(window.location.search)
     const descripcion = hash.get('error_description') ?? query.get('error_description')
     if (descripcion) {
-      setError(descripcion.replace(/\+/g, ' '))
+      const texto = descripcion.replace(/\+/g, ' ')
+      // La base de datos rechaza las cuentas que no son institucionales; Supabase
+      // lo reporta como un error genérico al guardar el usuario.
+      setError(
+        /database error|unal\.edu\.co|saving new user/i.test(texto)
+          ? 'Esa cuenta no es institucional. Ingrese con su cuenta @unal.edu.co (en Google, elija «Usar otra cuenta»).'
+          : texto
+      )
       return
     }
 

@@ -46,10 +46,14 @@ def _serial(value: str | None) -> float | None:
 class Xlsx:
     def __init__(self, path: str) -> None:
         self.zip = zipfile.ZipFile(path)
-        shared = self.zip.read("xl/sharedStrings.xml")
+        # Algunos exportadores no generan sharedStrings.xml (usan texto en línea).
+        try:
+            shared = self.zip.read("xl/sharedStrings.xml")
+        except KeyError:
+            shared = None
         self.strings = [
             "".join(t.text or "" for t in si.iter(MAIN + "t"))
-            for si in ET.fromstring(shared).findall("m:si", NS)
+            for si in (ET.fromstring(shared).findall("m:si", NS) if shared else [])
         ]
         wb = ET.fromstring(self.zip.read("xl/workbook.xml"))
         rels = ET.fromstring(self.zip.read("xl/_rels/workbook.xml.rels"))

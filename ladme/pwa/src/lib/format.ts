@@ -58,13 +58,33 @@ export function esPasado(iso: string): boolean {
   return new Date(iso).getTime() <= Date.now()
 }
 
-export function estadoReserva(r: { estado: string; estado_vigente?: string; inicio: string; fin: string }): string {
+/** Estado visible, calculado con la hora actual (nunca queda desactualizado). */
+export function estadoReserva(
+  r: { estado: string; inicio: string; fin: string; liberada_en?: string | null; llegada_en?: string | null },
+  toleranciaMin = 30
+): string {
   if (r.estado === 'cancelada') return 'Cancelada'
-  if (r.estado_vigente === 'finalizada' || r.estado_vigente === 'liberada' || esPasado(r.fin)) return 'Finalizada'
-  if (r.estado_vigente === 'en_curso') return 'En curso'
-  if (r.estado_vigente === 'sin_llegada') return 'Sin registrar llegada'
+  if (r.liberada_en || esPasado(r.fin)) return 'Finalizada'
   if (esFuturo(r.inicio)) return 'Programada'
-  return 'Activa'
+  if (!r.llegada_en && Date.now() > new Date(r.inicio).getTime() + toleranciaMin * 60000) return 'Sin registrar llegada'
+  return 'En curso'
+}
+
+export function tonoEstado(estado: string): string {
+  if (estado === 'En curso') return 'ok'
+  if (estado === 'Sin registrar llegada') return 'warn'
+  if (estado === 'Cancelada') return 'danger'
+  if (estado === 'Finalizada') return 'gray'
+  return 'info'
+}
+
+/** "3 d 4 h", "5 h", "40 min". */
+export function duracion(inicio: string, fin: string): string {
+  const min = Math.round((new Date(fin).getTime() - new Date(inicio).getTime()) / 60000)
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 48) return min % 60 ? `${h} h ${min % 60} min` : `${h} h`
+  return h % 24 ? `${Math.floor(h / 24)} d ${h % 24} h` : `${h / 24} d`
 }
 
 export function nuevoIdSolicitud(): string {

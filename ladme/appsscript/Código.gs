@@ -357,6 +357,11 @@ function validarDatosReserva_(datos) {
 // ============================================================================
 
 function doGet(e) {
+  // Corte a la PWA: si la propiedad PWA_URL está definida, este sistema deja de
+  // atender y solo envía a la aplicación nueva (los NFC/QR siguen funcionando).
+  var pwa = urlPwa_();
+  if (pwa) return paginaTraslado_(pwa, e);
+
   try {
     inicializarHojas_();
   } catch (err) {
@@ -599,6 +604,8 @@ function formatHoraStr(val) {
 // ============================================================================
 
 function registrarReserva(datosCrudos) {
+  if (urlPwa_()) return { success: false, message: "Las reservas ahora se hacen en la nueva aplicación LADME: " + urlPwa_() };
+
   var lock = null;
   var tieneLock = false;
   var datos;
@@ -1489,6 +1496,8 @@ function obtenerBloqueosAdmin() {
  * No cancela nada: las reservas que se solapen quedan listadas en "reservas afectadas" para decidir una por una.
  */
 function crearBloqueo(equipoEtiqueta, desde, hasta, motivo) {
+  if (urlPwa_()) return { success: false, message: "Las reservas ahora se hacen en la nueva aplicación LADME: " + urlPwa_() };
+
   var lock = null;
   var tieneLock = false;
   try {
@@ -1688,6 +1697,8 @@ function buscarMantenimientoPorId_(id) {
  * en ese intervalo (si todavía no ha terminado).
  */
 function crearMantenimiento(datos) {
+  if (urlPwa_()) return { success: false, message: "Las reservas ahora se hacen en la nueva aplicación LADME: " + urlPwa_() };
+
   var lock = null;
   var tieneLock = false;
   try {
@@ -1990,6 +2001,8 @@ function enviarCorreoLab_(asunto, cuerpoHtml, destinatarios) {
  * No repite el aviso el mismo día (columna «Último aviso»).
  */
 function revisarMantenimientos_() {
+  if (urlPwa_()) return; // tras el corte, los avisos salen de la PWA
+
   var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MANTENIMIENTOS);
   if (!hoja || hoja.getLastRow() < 2) return { revisados: 0, avisos: 0 };
 
@@ -2087,6 +2100,8 @@ function revisarMantenimientos_() {
  * repetir el aviso. Los avisos en la PWA se alimentan de la misma tabla.
  */
 function recordarFinReservas_() {
+  if (urlPwa_()) return; // tras el corte, los avisos salen de la PWA
+
   var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_RESERVAS);
   if (!hoja || hoja.getLastRow() < 2) return { enviados: 0 };
 
@@ -2165,12 +2180,13 @@ function enviarRecordatorioFin_(r) {
  * Es idempotente: borra los disparadores previos de estas mismas funciones.
  */
 function instalarDisparadores() {
-  var handlers = ["revisarMantenimientos_", "recordarFinReservas_"];
+  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_"];
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (handlers.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger("revisarMantenimientos_").timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger("recordarFinReservas_").timeBased().everyMinutes(30).create();
+  instalarWorkerCorreo_();
   return { ok: true, mensaje: "Disparadores instalados: revisión diaria de mantenimientos (07:00) y recordatorios de fin cada 30 min." };
 }
 
@@ -2865,4 +2881,124 @@ function pruebasMantenimiento() {
   }
 
   Logger.log(r.join("\n"));
+}
+
+/* ============================================================================
+ * PUENTE CON LA PWA (Supabase)
+ * ----------------------------------------------------------------------------
+ * Dos piezas, ambas apagadas hasta que se definan las Propiedades del script
+ * (Configuración del proyecto → Propiedades del script):
+ *
+ *   SUPABASE_URL          https://<proyecto>.supabase.co
+ *   SUPABASE_SECRET_KEY   clave secreta (sb_secret_… o service_role). NUNCA en el código.
+ *   PWA_URL               https://<dominio de la PWA>   ← definirla ES el corte.
+ *
+ * 1. Worker de correo: cada 5 minutos lee la cola de avisos de Supabase y los
+ *    envía desde esta cuenta institucional. Funciona con solo las dos primeras.
+ * 2. Corte: con PWA_URL definida, doGet deja de servir este sistema y envía a
+ *    la PWA; las funciones que escriben se niegan y los recordatorios viejos se
+ *    apagan. Para revertir, borre la propiedad PWA_URL.
+ * ========================================================================== */
+
+function prop_(clave) {
+  return String(PropertiesService.getScriptProperties().getProperty(clave) || "").trim();
+}
+
+function urlPwa_() {
+  var u = prop_("PWA_URL").replace(/\/+$/, "");
+  return /^https:\/\/[A-Za-z0-9.-]+(\/.*)?$/.test(u) ? u : "";
+}
+
+function escH_(t) {
+  return String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** Página de traslado. Un script web no puede redirigir solo: se ofrece un botón (y se intenta abrir). */
+function paginaTraslado_(pwa, e) {
+  var activo = (e && e.parameter && e.parameter.asset) ? String(e.parameter.asset).trim() : "";
+  var destino = /^[A-Za-z0-9-]{3,20}$/.test(activo) ? pwa + "/equipo/" + encodeURIComponent(activo.toUpperCase())
+              : (e && e.parameter && e.parameter.action) ? pwa + "/mis-reservas" : pwa + "/";
+  var html = '<!doctype html><html lang="es"><head><base target="_top"><meta charset="utf-8">'
+    + '<style>body{font-family:system-ui,sans-serif;background:#f7f6fb;color:#221e35;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px}'
+    + '.c{max-width:420px;background:#fff;border-radius:20px;padding:28px;text-align:center;box-shadow:0 10px 30px -15px #4c1d95}'
+    + 'a{display:inline-block;margin-top:16px;background:#6d28d9;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px}'
+    + 'p{color:#5b5478}</style></head><body><div class="c"><h2>LADME se mudó</h2>'
+    + '<p>Las reservas del laboratorio ahora se hacen en la nueva aplicación. Ingrese con su cuenta @unal.edu.co.</p>'
+    + '<a href="' + escH_(destino) + '">Abrir LADME</a></div>'
+    + '<script>try{window.top.location.href=' + JSON.stringify(destino) + '}catch(e){}</script></body></html>';
+  return HtmlService.createHtmlOutput(html)
+      .setTitle("LADME")
+      .addMetaTag("viewport", "width=device-width, initial-scale=1")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function supabaseRpc_(funcion, cuerpo) {
+  var base = prop_("SUPABASE_URL").replace(/\/+$/, ""), clave = prop_("SUPABASE_SECRET_KEY");
+  if (!base || !clave) return null;
+  var r = UrlFetchApp.fetch(base + "/rest/v1/rpc/" + funcion, {
+    method: "post",
+    contentType: "application/json",
+    headers: { apikey: clave, Authorization: "Bearer " + clave },
+    payload: JSON.stringify(cuerpo || {}),
+    muteHttpExceptions: true
+  });
+  if (r.getResponseCode() >= 300) throw new Error("Supabase " + funcion + " respondió " + r.getResponseCode() + ": " + r.getContentText().slice(0, 300));
+  var texto = r.getContentText();
+  return texto ? JSON.parse(texto) : null;
+}
+
+/**
+ * Worker de correo de la PWA. Disparador: cada 5 minutos.
+ * Cada aviso se marca como enviado apenas sale, así un fallo a mitad de lote
+ * no produce correos repetidos.
+ */
+function enviarCorreosSupabase_() {
+  if (!prop_("SUPABASE_URL") || !prop_("SUPABASE_SECRET_KEY")) return;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;               // ya hay otra ejecución en curso
+  try {
+    // También genera los recordatorios, por si el cron de Supabase no está configurado.
+    try {
+      supabaseRpc_("encolar_recordatorios_fin", { p_minutos: 30 });
+      supabaseRpc_("encolar_avisos_no_show", {});
+      if (new Date().getHours() >= 7) supabaseRpc_("encolar_recordatorios_mantenimiento", {});   // una vez al día por persona (lo garantiza la base)
+    } catch (err) { Logger.log(err); }
+
+    var cupo = Math.max(0, MailApp.getRemainingDailyQuota() - 20);   // reserva para el resto del sistema
+    if (cupo === 0) return;
+    var pendientes = supabaseRpc_("correos_pendientes", { p_limite: Math.min(40, cupo) }) || [];
+    var pwa = urlPwa_() || prop_("PWA_URL_PRUEBAS");
+    for (var i = 0; i < pendientes.length; i++) {
+      var c = pendientes[i];
+      if (!/@unal\.edu\.co$/i.test(String(c.correo || ""))) { supabaseRpc_("marcar_correos_enviados", { p_ids: [c.id] }); continue; }
+      var enlace = pwa && c.url ? pwa + c.url : pwa;
+      var html = '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;border:1px solid #e7e4f1;border-radius:14px;overflow:hidden">'
+        + '<div style="background:#6d28d9;color:#fff;padding:18px 22px"><strong style="font-size:17px">' + escH_(c.titulo) + '</strong></div>'
+        + '<div style="padding:22px;color:#221e35;font-size:15px;line-height:1.5"><p>Hola' + (c.nombre ? ' ' + escH_(String(c.nombre).split(' ')[0]) : '') + ':</p><p>' + escH_(c.cuerpo) + '</p>'
+        + (enlace ? '<p><a href="' + escH_(enlace) + '" style="display:inline-block;background:#6d28d9;color:#fff;text-decoration:none;font-weight:bold;padding:11px 18px;border-radius:9px">Abrir LADME</a></p>' : '')
+        + '<p style="color:#736c90;font-size:12px;margin-top:22px">Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede de La Paz</p></div></div>';
+      var opciones = { to: c.correo, subject: "LADME · " + c.titulo, htmlBody: html, name: NOMBRE_REMITENTE };
+      opciones.replyTo = /@unal\.edu\.co$/i.test(String(c.responder_a || "")) ? c.responder_a : CUENTA_REMITENTE;
+      MailApp.sendEmail(opciones);
+      supabaseRpc_("marcar_correos_enviados", { p_ids: [c.id] });
+    }
+  } catch (err) {
+    Logger.log("enviarCorreosSupabase_: " + err);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function instalarWorkerCorreo_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "enviarCorreosSupabase_") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("enviarCorreosSupabase_").timeBased().everyMinutes(5).create();
+}
+
+/** Ejecutar desde el editor para comprobar la conexión con Supabase (no envía correos). */
+function probarConexionSupabase() {
+  var n = (supabaseRpc_("correos_pendientes", { p_limite: 100 }) || []).length;
+  Logger.log("Conexión correcta. Correos pendientes en la cola: " + n);
+  return n;
 }

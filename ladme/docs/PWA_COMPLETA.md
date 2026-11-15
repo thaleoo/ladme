@@ -1,0 +1,115 @@
+# Puesta en marcha de la PWA completa
+
+Guía corta para activar todo lo que trae la rama `pwa-completa`. Hágalo en este
+orden; cada paso se puede probar antes de seguir. Los nombres exactos de los
+menús de Supabase y Google pueden variar un poco.
+
+## 1. Base de datos (5 min)
+
+1. Supabase → **SQL Editor** → pegue y ejecute `ladme/db/migrations/0002_pwa_completa.sql`.
+   Es una sola transacción: si algo falla, no cambia nada.
+2. Verifique: `select clave, valor from politicas order by clave;` debe mostrar 10 filas.
+
+La migración da por atendidos los avisos de prueba que ya hubiera en la cola,
+para que al activar el correo no salga una ráfaga.
+
+## 2. Ingreso con Google (15 min)
+
+La PWA ofrece «Continuar con Google» y, como respaldo, un código de 6 dígitos al
+correo. La base de datos rechaza cualquier cuenta que no sea `@unal.edu.co`,
+sin importar el método.
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → cree un proyecto (p. ej. `ladme-acceso`). Es gratis y no se usa para nada más.
+2. **APIs y servicios → Pantalla de consentimiento de OAuth**: nombre `LADME`, correo de soporte `labdatos_paz@unal.edu.co`.
+   - Tipo **Interno** si la consola lo permite con su cuenta institucional (solo deja entrar a `unal.edu.co`).
+   - Si no, **Externo** y publíquela. Con los permisos básicos (correo y perfil) no requiere verificación.
+3. **Credenciales → Crear credenciales → ID de cliente de OAuth → Aplicación web**:
+   - Orígenes de JavaScript autorizados: la URL de la PWA.
+   - URI de redireccionamiento autorizado: `https://<ref-del-proyecto>.supabase.co/auth/v1/callback`
+4. Supabase → **Authentication → Providers → Google**: actívelo y pegue el ID de cliente y el secreto.
+5. Supabase → **Authentication → URL Configuration**: confirme que `https://<dominio-pwa>/auth/callback` está en *Redirect URLs*.
+6. Pruebe con una cuenta `@unal.edu.co` y con una `@gmail.com` (esta debe ser rechazada con un mensaje claro).
+
+Si el Workspace de la universidad bloquea aplicaciones de terceros, Google
+mostrará un error de acceso: en ese caso el código por correo sigue funcionando
+y es el único método hasta que la OTIC autorice el cliente.
+
+### Código por correo
+
+Supabase → **Authentication → Email Templates → Magic Link**. Deje el asunto que
+quiera y use un cuerpo que muestre el código:
+
+```html
+<h2>Su código de acceso a LADME</h2>
+<p style="font-size:28px;letter-spacing:6px"><strong>{{ .Token }}</strong></p>
+<p>Escríbalo en la aplicación. Vence en pocos minutos y sirve una sola vez.</p>
+```
+
+Sin SMTP propio, Supabase envía muy pocos correos por hora: por eso Google es el
+método principal. Si configura SMTP (DESPLIEGUE §4), el código queda sin ese límite.
+
+## 3. Correos del sistema (10 min)
+
+Los envía Apps Script desde `labdatos_paz@unal.edu.co`, leyendo la cola de Supabase.
+
+1. Copie `ladme/appsscript/Código.gs` completo al editor de Apps Script (reemplaza el actual). `Index.html` no cambia.
+2. **Configuración del proyecto → Propiedades del script**:
+   - `SUPABASE_URL` = `https://<ref>.supabase.co`
+   - `SUPABASE_SECRET_KEY` = la clave secreta (Supabase → Settings → API Keys). Nunca la pegue en el código ni en un chat.
+   - `PWA_URL_PRUEBAS` = URL de la PWA (para que los correos lleven el botón «Abrir LADME» antes del corte).
+3. Ejecute `probarConexionSupabase` (pedirá autorizar el acceso a servicios externos) y luego `instalarDisparadores`.
+
+Desde ahí, cada 5 minutos salen: confirmación, extensión, cancelación hecha por
+el laboratorio, recordatorio de fin, contacto al titular, respuestas a
+solicitudes y avisos de mantenimiento al personal. El mismo disparador genera
+los recordatorios y los avisos de no-show, así que **no hace falta pg_cron**.
+
+Web Push (DESPLIEGUE §9) es opcional y complementario: quien no lo active ve
+todo en **Avisos**, dentro de la aplicación.
+
+## 4. Primer administrador y perfiles
+
+1. Ingrese a la PWA con su cuenta.
+2. SQL Editor: `update perfiles set rol = 'administrador' where correo = 'su.correo@unal.edu.co';`
+3. Desde **Usuarios** asigne laboratoristas y el permiso de validar mantenimiento.
+
+## 5. Migrar los datos de Sheets
+
+1. Exporte la hoja como `.xlsx` a `ladme/sheets/` (esa carpeta no se versiona).
+2. `python ladme/scripts/migrar_sheets.py "ladme/sheets/LADME.xlsx" > ladme/sheets/migracion.sql`
+3. Pegue `migracion.sql` en el SQL Editor y ejecútelo. Al final muestra un resumen:
+   - `historica`: pasada o cancelada; queda para estadísticas.
+   - `vigente`: el titular ya tenía cuenta; quedó a su nombre.
+   - `vigente_pendiente`: ocupa el equipo y pasará a su titular cuando ingrese por primera vez.
+   - `conflicto` / `equipo_desconocido`: revíselas a mano (el listado aparece debajo).
+4. Borre `migracion.sql`: contiene nombres y correos.
+
+Se puede ejecutar varias veces sin duplicar. La cédula no se migra.
+
+## 6. El corte (un solo día)
+
+Los dos sistemas no se sincronizan, así que no deben aceptar reservas a la vez.
+
+1. Avise la fecha a los usuarios.
+2. Ese día: exporte la hoja y repita el paso 5 (trae lo creado desde la primera importación).
+3. En Apps Script agregue la propiedad `PWA_URL` = URL de la PWA. Desde ese instante:
+   - el sistema anterior muestra «LADME se mudó» con un botón a la PWA;
+   - las etiquetas NFC/QR (`?asset=UNAL-05`) llevan a la ficha del equipo en la PWA;
+   - el sistema anterior ya no acepta reservas ni envía sus recordatorios.
+4. Para revertir, borre la propiedad `PWA_URL`.
+
+Conserve la hoja como archivo de solo lectura al menos un semestre.
+
+## 7. Pruebas automáticas de la base de datos
+
+```bash
+PGURL=postgresql://postgres@localhost:5432/postgres bash ladme/db/tests/ejecutar.sh
+```
+
+Crea una base desechable en un PostgreSQL local, aplica esquema y migraciones y
+comprueba 40 reglas (límites, permisos, avisos, importación). No toca Supabase.
+
+## Qué queda fuera
+
+- **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.
+- **Liberación automática por no-show**: solo se avisa al titular y al personal; liberar sigue siendo una decisión humana.

@@ -4,6 +4,7 @@ ladme/sheets/*.xlsx
 ladme/sheets/*.xls
 ladme/sheets/*.csv
 ladme/sheets/*.ods
+ladme/sheets/*.sql
 
 # --- Credenciales y configuración local de clasp ---
 .clasp.json
