@@ -2961,6 +2961,7 @@ function enviarCorreosSupabase_() {
     try {
       supabaseRpc_("encolar_recordatorios_fin", { p_minutos: 30 });
       supabaseRpc_("encolar_avisos_no_show", {});
+      supabaseRpc_("encolar_alertas_liberacion", {});
       if (new Date().getHours() >= 7) supabaseRpc_("encolar_recordatorios_mantenimiento", {});   // una vez al día por persona (lo garantiza la base)
     } catch (err) { Logger.log(err); }
 
@@ -2972,11 +2973,7 @@ function enviarCorreosSupabase_() {
       var c = pendientes[i];
       if (!/@unal\.edu\.co$/i.test(String(c.correo || ""))) { supabaseRpc_("marcar_correos_enviados", { p_ids: [c.id] }); continue; }
       var enlace = pwa && c.url ? pwa + c.url : pwa;
-      var html = '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;border:1px solid #e7e4f1;border-radius:14px;overflow:hidden">'
-        + '<div style="background:#6d28d9;color:#fff;padding:18px 22px"><strong style="font-size:17px">' + escH_(c.titulo) + '</strong></div>'
-        + '<div style="padding:22px;color:#221e35;font-size:15px;line-height:1.5"><p>Hola' + (c.nombre ? ' ' + escH_(String(c.nombre).split(' ')[0]) : '') + ':</p><p>' + escH_(c.cuerpo) + '</p>'
-        + (enlace ? '<p><a href="' + escH_(enlace) + '" style="display:inline-block;background:#6d28d9;color:#fff;text-decoration:none;font-weight:bold;padding:11px 18px;border-radius:9px">Abrir LADME</a></p>' : '')
-        + '<p style="color:#736c90;font-size:12px;margin-top:22px">Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede de La Paz</p></div></div>';
+      var html = plantillaCorreo_(c, enlace, pwa);
       var opciones = { to: c.correo, subject: "LADME · " + c.titulo, htmlBody: html, name: NOMBRE_REMITENTE };
       opciones.replyTo = /@unal\.edu\.co$/i.test(String(c.responder_a || "")) ? c.responder_a : CUENTA_REMITENTE;
       MailApp.sendEmail(opciones);
@@ -2987,6 +2984,76 @@ function enviarCorreosSupabase_() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Plantilla única de los correos de la PWA. Maquetada con tablas y estilos en
+ * línea porque es lo que respetan Gmail, Outlook y los clientes móviles.
+ * `c` trae: titulo, cuerpo, nombre, tipo y, si el aviso es de una reserva,
+ * equipo, inicio, fin y codigo.
+ */
+function plantillaCorreo_(c, enlace, pwa) {
+  var MORADO = "#6d28d9", TINTA = "#1f1a33", SUAVE = "#6b6485", LINEA = "#e8e5f3";
+  var botones = {
+    confirmacion: "Ver mi pase", extension: "Ver mi pase", cancelacion: "Hacer otra reserva",
+    fin_proximo: "Extender o liberar", contacto: "Liberar o responder", sin_llegada: "Registrar mi llegada",
+    solicitud_excepcion: "Revisar la solicitud", solicitud_rechazada: "Ver mis reservas",
+    reporte_falla: "Ver el reporte", reporte_respuesta: "Ver el equipo", equipo_libre: "Reservar ahora"
+  };
+  var boton = botones[c.tipo] || "Abrir LADME";
+  var nombre = c.nombre ? " " + escH_(String(c.nombre).split(" ")[0]) : "";
+  var logo = pwa
+    ? '<img src="' + escH_(pwa) + '/icon-192.png" width="40" height="40" alt="" style="display:block;border:0;border-radius:11px">'
+    : '<div style="width:40px;height:40px;border-radius:11px;background:' + MORADO + '"></div>';
+
+  var fila = function (etiqueta, valor) {
+    return valor ? '<tr><td style="padding:5px 0;color:' + SUAVE + ';font-size:13px;width:92px;vertical-align:top">' + etiqueta
+      + '</td><td style="padding:5px 0;color:' + TINTA + ';font-size:15px;font-weight:bold">' + escH_(valor) + '</td></tr>' : "";
+  };
+  var datos = c.equipo
+    ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0 4px;background:#f6f4fd;border-radius:12px"><tr><td style="padding:14px 18px">'
+      + '<div style="font-size:26px;line-height:1.1;font-weight:bold;color:' + MORADO + ';letter-spacing:-0.5px">' + escH_(c.equipo) + '</div>'
+      + '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:8px">'
+      + fila("Desde", c.inicio) + fila("Hasta", c.fin) + fila("Reserva", c.codigo)
+      + '</table></td></tr></table>'
+    : "";
+
+  return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<meta name="color-scheme" content="light"></head>'
+    + '<body style="margin:0;padding:0;background:#f3f1fa;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">'
+    // Texto de vista previa que muestran las bandejas de entrada junto al asunto.
+    + '<div style="display:none;max-height:0;overflow:hidden;opacity:0">' + escH_(String(c.cuerpo || "").slice(0, 140)) + '</div>'
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f1fa"><tr><td align="center" style="padding:24px 12px">'
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid ' + LINEA + ';border-radius:18px">'
+    + '<tr><td style="padding:22px 26px 0"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+    + '<td style="padding-right:12px">' + logo + '</td>'
+    + '<td style="font-size:15px;font-weight:bold;color:' + TINTA + ';letter-spacing:.5px">LADME'
+    + '<div style="font-size:12px;font-weight:normal;color:' + SUAVE + ';letter-spacing:0">Laboratorio de Datos · UNAL Sede de La Paz</div></td>'
+    + '</tr></table></td></tr>'
+    + '<tr><td style="padding:22px 26px 26px">'
+    + '<h1 style="margin:0 0 12px;font-size:22px;line-height:1.25;color:' + TINTA + '">' + escH_(c.titulo) + '</h1>'
+    + '<p style="margin:0 0 10px;font-size:15px;line-height:1.55;color:' + TINTA + '">Hola' + nombre + ':</p>'
+    + '<p style="margin:0;font-size:15px;line-height:1.55;color:' + TINTA + '">' + escH_(c.cuerpo) + '</p>'
+    + datos
+    + (enlace ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:20px"><tr><td style="border-radius:11px;background:' + MORADO + '">'
+        + '<a href="' + escH_(enlace) + '" style="display:inline-block;padding:13px 22px;font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none">' + boton + '</a>'
+        + '</td></tr></table>' : "")
+    + '</td></tr>'
+    + '<tr><td style="padding:16px 26px;border-top:1px solid ' + LINEA + ';font-size:12px;line-height:1.5;color:' + SUAVE + '">'
+    + 'Recibe este correo porque usa el sistema de reservas del laboratorio con su cuenta institucional. '
+    + 'Si tiene dudas, responda a este mensaje.'
+    + '</td></tr></table>'
+    + '</td></tr></table></body></html>';
+}
+
+/** Ejecutar desde el editor: le envía a usted mismo un correo de muestra con la plantilla. */
+function probarPlantillaCorreo() {
+  var pwa = urlPwa_() || prop_("PWA_URL_PRUEBAS");
+  var muestra = { tipo: "confirmacion", nombre: "Usuario de prueba", titulo: "Reserva confirmada: UNAL-05",
+    cuerpo: "Su reserva quedó registrada. Abra LADME para ver su pase con el código QR.",
+    equipo: "UNAL-05", inicio: "16/11/2026 08:00", fin: "18/11/2026 08:00", codigo: "RES-000123" };
+  MailApp.sendEmail({ to: Session.getEffectiveUser().getEmail(), subject: "LADME · " + muestra.titulo + " (muestra)",
+    htmlBody: plantillaCorreo_(muestra, pwa ? pwa + "/mis-reservas" : "", pwa), name: NOMBRE_REMITENTE });
 }
 
 function instalarWorkerCorreo_() {

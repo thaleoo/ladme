@@ -2973,3 +2973,190 @@ a.avisos__item:hover {
   color: var(--pase-muted);
   word-break: break-all;
 }
+
+/* ============================================================================
+   14. Inicio compacto, reglamento, encuesta
+   ========================================================================== */
+.barra-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s3);
+  align-items: center;
+}
+.barra-filtros__buscar {
+  flex: 1 1 180px;
+  max-width: 320px;
+}
+.grupo-titulo {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-size: var(--text-base);
+}
+.grupo-titulo span {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-500);
+}
+/* Cada recurso es una celda pequeña: 16 caben en una pantalla de teléfono. */
+.mosaico {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: var(--s2);
+}
+.mosaico__celda {
+  --tono: var(--ink-400);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 78px;
+  padding: 10px 11px;
+  text-align: left;
+  color: var(--ink-900);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--tono);
+  border-radius: var(--r-md);
+  box-shadow: none;
+  font-weight: 500;
+}
+.mosaico__celda:hover {
+  border-color: var(--line-strong);
+  border-left-color: var(--tono);
+  background: var(--surface-2, var(--surface));
+}
+.mosaico__celda--libre {
+  --tono: #16a34a;
+}
+.mosaico__celda--ocupado {
+  --tono: #d97706;
+}
+.mosaico__celda--bloqueado,
+.mosaico__celda--inactivo {
+  --tono: var(--ink-400);
+}
+.mosaico__celda--inactivo {
+  opacity: 0.7;
+}
+.mosaico__codigo {
+  font-weight: 750;
+  font-size: var(--text-base);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.mosaico__estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.mosaico__punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tono);
+}
+.mosaico__detalle {
+  font-size: 0.7rem;
+  color: var(--ink-500);
+  line-height: 1.25;
+}
+
+.btn-enlace {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 4px;
+  min-height: 0;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-decoration: underline;
+}
+.btn-enlace:hover {
+  background: none;
+  color: var(--ink-900);
+}
+
+.encuesta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-md);
+  background: var(--soft-brand-bg-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.reglamento {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: rgba(15, 10, 35, 0.6);
+  backdrop-filter: blur(4px);
+}
+.reglamento__caja {
+  width: min(560px, 100%);
+  max-height: min(92vh, 780px);
+  overflow-y: auto;
+  padding: var(--s5);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: 0 30px 60px -20px rgba(20, 10, 60, 0.5);
+}
+.reglamento__caja h2 {
+  margin: 0 0 4px;
+}
+.reglamento__lista {
+  display: grid;
+  gap: var(--s3);
+  margin: var(--s4) 0;
+  padding-left: 1.3rem;
+}
+.reglamento__lista li::marker {
+  font-weight: 700;
+  color: var(--soft-brand-icon);
+}
+.reglamento__lista strong {
+  display: block;
+  font-size: var(--text-sm);
+}
+.reglamento__lista span {
+  font-size: var(--text-sm);
+  color: var(--ink-600);
+}
+.reglamento__pie {
+  position: sticky;
+  bottom: calc(var(--s5) * -1);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin: 0 calc(var(--s5) * -1) calc(var(--s5) * -1);
+  padding: var(--s3) var(--s5);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.mosaico__celda {
+  min-width: 0;
+  overflow: hidden;
+}
+.mosaico__detalle {
+  overflow-wrap: anywhere;
+}
+.mosaico__estado,
+.mosaico__detalle {
+  max-width: 100%;
+  white-space: normal;
+}
+.reglamento {
+  z-index: 1000;
+}

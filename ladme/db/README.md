@@ -65,3 +65,9 @@ Pasos completos de activación: [`../docs/PWA_COMPLETA.md`](../docs/PWA_COMPLETA
 
 `tests/ejecutar.sh` monta una base desechable en un PostgreSQL local (con un sustituto mínimo de
 `auth` de Supabase), aplica esquema + migraciones y ejecuta `tests/pruebas.sql`.
+
+## Migración 0003 — reportes, categorías y reglamento
+
+`migrations/0003_reportes_categorias.sql`, después de 0002: reportes de fallas de los usuarios,
+alerta «ya está libre», reglamento aceptado (requisito para reservar), valoración al terminar y la
+cola de correo con equipo y horario para la plantilla nueva.

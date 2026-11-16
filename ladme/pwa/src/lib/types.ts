@@ -10,6 +10,7 @@ export interface Perfil {
   permisos: string[]
   tipo_usuario: 'Estudiante' | 'Docente/Investigador' | null
   matricula: string | null
+  reglamento_aceptado_en: string | null
 }
 
 export interface Equipo {
@@ -52,6 +53,7 @@ export interface Reserva {
   programa: string | null
   matricula: string | null
   excepcion: boolean
+  funciono: boolean | null
   creado_en: string
   equipos?: { codigo: string; nombre: string; ubicacion: string | null } | null
   perfiles?: { nombre: string; correo: string; programa: string | null } | null
@@ -171,4 +173,30 @@ export function perfilCompleto(p: Perfil | null): boolean {
   if (!p) return false
   if (!p.tipo_usuario || !p.programa?.trim()) return false
   return p.tipo_usuario !== 'Estudiante' || !!p.matricula?.trim()
+}
+
+export const CATEGORIAS_FALLA = [
+  'No enciende', 'Lento o se congela', 'Software', 'Pantalla o periféricos', 'Red o internet', 'Otro'
+] as const
+
+export interface Reporte {
+  id: string
+  equipo_id: string
+  usuario_id: string
+  categoria: string
+  descripcion: string
+  estado: 'abierto' | 'en_revision' | 'resuelto' | 'descartado'
+  respuesta: string | null
+  resuelto_en: string | null
+  creado_en: string
+  equipos?: { codigo: string; nombre: string; estado: string } | null
+  autor?: { nombre: string; correo: string } | null
+}
+
+export interface EstadisticasSoporte {
+  reportes: number
+  reportes_abiertos: number
+  valoradas: number
+  con_problemas: number
+  reportes_por_equipo: Conteo[]
 }

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  contactarTitular, crearReserva, obtenerEquipo, ocupacionPublica, mantenimientoDelEquipo, registrarLlegada,
+  alternarAlerta, contactarTitular, crearReserva, listarReportes, obtenerEquipo, tengoAlerta, ocupacionPublica, mantenimientoDelEquipo, registrarLlegada,
   type EstadoMantenimientoEquipo
 } from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { ACTIVIDADES, perfilCompleto, type Equipo, type Ocupacion } from '../lib/types'
+import { ACTIVIDADES, perfilCompleto, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
+import ReporteFalla from '../components/ReporteFalla'
 import { dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -41,7 +42,31 @@ export default function FichaEquipo() {
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const toast = useToast()
-  const [dialogo, setDialogo] = useState<'rapida' | 'contacto' | null>(null)
+  const [dialogo, setDialogo] = useState<'rapida' | 'contacto' | 'falla' | null>(null)
+  const [alerta, setAlerta] = useState(false)
+  const [reportes, setReportes] = useState<Reporte[]>([])
+
+  const cargarReportes = (equipoId: string) =>
+    listarReportes(equipoId)
+      .then((l) => setReportes(l.filter((x) => x.estado === 'abierto' || x.estado === 'en_revision')))
+      .catch(() => undefined)
+
+  useEffect(() => {
+    if (!equipo?.id) return
+    void tengoAlerta(equipo.id).then(setAlerta)
+    void cargarReportes(equipo.id)
+  }, [equipo?.id])
+
+  async function cambiarAlerta() {
+    if (!equipo) return
+    try {
+      const activa = await alternarAlerta(equipo.codigo)
+      setAlerta(activa)
+      toast.mostrar(activa ? 'Listo: le avisaremos cuando quede libre.' : 'Alerta desactivada.')
+    } catch (e) {
+      toast.mostrar(e instanceof Error ? e.message : 'No se pudo cambiar la alerta.', 'warn')
+    }
+  }
   const [horasRapida, setHorasRapida] = useState(2)
   const [actividad, setActividad] = useState(() => localStorage.getItem(CLAVE_ACTIVIDAD) ?? '')
   const [desatendido, setDesatendido] = useState(false)
@@ -271,6 +296,9 @@ export default function FichaEquipo() {
             >
               <Icon nombre="campana" /> Preguntar si lo libera
             </button>
+            <button className={`btn ${alerta ? 'gray' : 'ghost'}`} type="button" onClick={cambiarAlerta} aria-pressed={alerta}>
+              <Icon nombre="chispa" /> {alerta ? 'Alerta activa: quitar' : 'Avisarme cuando se libere'}
+            </button>
           </div>
         </section>
       )}
@@ -343,6 +371,32 @@ export default function FichaEquipo() {
             )
           })}
         </div>
+      </section>
+
+      <section className="card">
+        <div className="row between" style={{ gap: 'var(--s3)' }}>
+          <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+            <h3 style={{ fontSize: 'var(--text-base)', margin: 0 }}>¿Algo no funciona?</h3>
+            <p className="small muted" style={{ margin: '2px 0 0' }}>
+              {reportes.length
+                ? `${reportes.length === 1 ? 'Hay 1 reporte' : `Hay ${reportes.length} reportes`} en revisión para este equipo.`
+                : 'Avise al laboratorio para que lo revisen. Toma menos de un minuto.'}
+            </p>
+          </div>
+          <button className="btn ghost" type="button" onClick={() => setDialogo('falla')}>
+            <Icon nombre="alerta" /> Reportar un problema
+          </button>
+        </div>
+        {reportes.length > 0 && (
+          <ul className="small" style={{ margin: 'var(--s3) 0 0', paddingLeft: '1.05rem' }}>
+            {reportes.slice(0, 4).map((x) => (
+              <li key={x.id}>
+                <strong>{x.categoria}:</strong> {x.descripcion}{' '}
+                <span className="muted">· {x.estado === 'abierto' ? 'recibido' : 'en revisión'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="card">
@@ -472,6 +526,13 @@ export default function FichaEquipo() {
           </div>
         )}
       </Modal>
+
+      <ReporteFalla
+        equipo={equipo.codigo}
+        abierto={dialogo === 'falla'}
+        alCerrar={() => setDialogo(null)}
+        alEnviar={() => void cargarReportes(equipo.id)}
+      />
     </>
   )
 }

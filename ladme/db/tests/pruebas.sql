@@ -27,6 +27,8 @@ begin
     ('ana@unal.edu.co', '{"name": "Ana Pérez"}'), ('beto@unal.edu.co', '{}'),
     ('admin@unal.edu.co', '{"full_name": "Admin LADME"}'), ('lab@unal.edu.co', '{}');
   perform pg_temp.ok((select nombre from perfiles where correo = 'ana@unal.edu.co') = 'Ana Pérez', 'nombre tomado de Google');
+  -- Reglamento (0003): sin aceptarlo no se puede reservar para uno mismo.
+  update perfiles set reglamento_aceptado_en = now() where correo <> 'beto@unal.edu.co';
   update perfiles set rol = 'administrador', tipo_usuario = 'Docente/Investigador', programa = 'Profesor/Investigador' where correo = 'admin@unal.edu.co';
   update perfiles set rol = 'laboratorista', tipo_usuario = 'Docente/Investigador', programa = 'Profesor/Investigador' where correo = 'lab@unal.edu.co';
   update perfiles set tipo_usuario = 'Estudiante', programa = 'Estadística', matricula = 'Octava matrícula' where correo = 'beto@unal.edu.co';
@@ -141,6 +143,34 @@ begin
                         from perfiles where correo = 'carla@unal.edu.co'), 'el perfil se completa con los datos anteriores');
   perform pg_temp.ok(importar_bloqueo_hoja('UNAL-11', now() + interval '1 day', now() + interval '2 days', 'Verificación') = 'creado', 'bloqueo importado');
 
+  -- 0003: reglamento, reportes, alerta de liberación, valoración, categorías.
+  perform pg_temp.como('beto@unal.edu.co');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-12', %L, %L, 'PAE')$q$, t0, t0 + interval '1 hour'), 'aceptar el reglamento');
+  perform aceptar_reglamento();
+  r := crear_reserva('UNAL-12', now() - interval '1 minute', now() + interval '1 hour', 'PAE');
+  perform pg_temp.ok(r.id is not null, 'tras aceptar el reglamento se puede reservar');
+  perform pg_temp.falla($q$select reportar_falla('UNAL-12', 'Magia', 'No prende')$q$, 'tipo de problema');
+  perform reportar_falla('UNAL-12', 'No enciende', E'El equipo no da\nvideo');
+  perform pg_temp.ok((select count(*) from cola_notificaciones where tipo = 'reporte_falla') = 2, 'el reporte de falla llega a todo el personal');
+  perform pg_temp.falla(format($q$select atender_reporte(%L, 'resuelto', 'ok')$q$, (select id from reportes limit 1)), 'Solo el personal');
+  perform valorar_reserva(r.id, false);
+  perform pg_temp.ok((select funciono = false from reservas where id = r.id), 'valoración guardada');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.ok(alternar_alerta_liberacion('UNAL-12'), 'alerta de liberación activada');
+  perform pg_temp.ok(encolar_alertas_liberacion() = 0, 'no avisa mientras el equipo sigue ocupado');
+  perform pg_temp.como('beto@unal.edu.co');
+  perform liberar_reserva(r.id);
+  perform pg_temp.ok(encolar_alertas_liberacion() = 1, 'avisa cuando el equipo se libera');
+  perform pg_temp.ok((select count(*) from alertas_liberacion) = 0, 'la alerta se borra al avisar');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.falla(format($q$select atender_reporte(%L, 'resuelto', '')$q$, (select id from reportes limit 1)), 'Escriba una respuesta');
+  perform atender_reporte((select id from reportes limit 1), 'resuelto', 'Se cambió el cable de video', true);
+  perform pg_temp.ok((select estado = 'fuera_de_servicio' from equipos where codigo = 'UNAL-12')
+                     and exists (select 1 from cola_notificaciones where tipo = 'reporte_respuesta'), 'atender un reporte responde y puede sacar el equipo de servicio');
+  perform pg_temp.ok((select equipo = 'UNAL-12' and inicio is not null from correos_pendientes(100) where titulo like 'Reserva confirmada: UNAL-12'), 'el correo lleva equipo y horario');
+  perform pg_temp.ok((estadisticas_soporte(now() - interval '1 day', now() + interval '1 day') ->> 'con_problemas')::int = 1, 'estadísticas de soporte');
+  perform pg_temp.ok((select categoria = 'Estación de trabajo' from equipos where codigo = 'UNAL-01'), 'categoría del esquema base');
+
   -- Estadísticas.
   perform pg_temp.como('lab@unal.edu.co');
   j := estadisticas(now() - interval '30 days', now() + interval '60 days');
@@ -162,6 +192,8 @@ do $$ begin
   perform pg_temp.ok((select count(*) from perfiles) = 1, 'un usuario solo ve su propio perfil');
   perform pg_temp.ok((select count(*) from reservas where usuario_id <> auth.uid()) = 0, 'un usuario solo ve sus reservas');
   perform pg_temp.ok((select count(*) from contactos) = 0, 'los contactos solo los ve el personal');
+  perform pg_temp.ok((select count(*) from reportes) = 0, 'los reportes ajenos no se ven');
+  perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id <> auth.uid()) = 0, 'cada quien ve solo sus avisos');
   perform pg_temp.ok((select count(*) from ocupacion_publica) > 0, 'la ocupación pública es visible');
 end $$;

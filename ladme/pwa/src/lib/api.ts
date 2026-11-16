@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type {
-  Aviso, Equipo, Estadisticas, Mantenimiento, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+  Aviso, Equipo, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
 } from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
@@ -398,4 +398,73 @@ export async function estadisticas(desde: string, hasta: string): Promise<Estadi
   const { data, error } = await supabase.rpc('estadisticas', { p_desde: desde, p_hasta: hasta })
   if (error) fail('No se pudieron calcular las estadísticas', error)
   return data as Estadisticas
+}
+
+// ------------------------------------------------------------ Reportes de fallas
+const SELECT_REPORTE = '*, equipos(codigo, nombre, estado), autor:perfiles!reportes_usuario_id_fkey(nombre, correo)'
+
+export async function reportarFalla(equipo: string, categoria: string, descripcion: string): Promise<void> {
+  const { error } = await supabase.rpc('reportar_falla', {
+    p_equipo: equipo,
+    p_categoria: categoria,
+    p_descripcion: descripcion
+  })
+  if (error) fail('No se pudo enviar el reporte', error)
+}
+
+/** Reportes visibles para quien consulta: los propios, o todos si es del personal (RLS). */
+export async function listarReportes(equipoId?: string): Promise<Reporte[]> {
+  let consulta = supabase.from('reportes').select(SELECT_REPORTE).order('creado_en', { ascending: false }).limit(200)
+  if (equipoId) consulta = consulta.eq('equipo_id', equipoId)
+  const { data, error } = await consulta
+  if (error) fail('No se pudieron cargar los reportes', error)
+  return (data ?? []) as Reporte[]
+}
+
+export async function atenderReporte(
+  id: string,
+  estado: 'en_revision' | 'resuelto' | 'descartado',
+  respuesta: string,
+  fueraDeServicio: boolean
+): Promise<void> {
+  const { error } = await supabase.rpc('atender_reporte', {
+    p_id: id,
+    p_estado: estado,
+    p_respuesta: respuesta || null,
+    p_fuera_de_servicio: fueraDeServicio
+  })
+  if (error) fail('No se pudo actualizar el reporte', error)
+}
+
+// ----------------------------------------------------- Alerta «ya está libre»
+export async function tengoAlerta(equipoId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from('alertas_liberacion')
+    .select('equipo_id', { count: 'exact', head: true })
+    .eq('equipo_id', equipoId)
+  if (error) return false
+  return (count ?? 0) > 0
+}
+
+export async function alternarAlerta(equipo: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('alternar_alerta_liberacion', { p_equipo: equipo })
+  if (error) fail('No se pudo cambiar la alerta', error)
+  return data === true
+}
+
+// ------------------------------------------------- Reglamento y valoración
+export async function aceptarReglamento(): Promise<void> {
+  const { error } = await supabase.rpc('aceptar_reglamento')
+  if (error) fail('No se pudo registrar la aceptación', error)
+}
+
+export async function valorarReserva(id: string, funciono: boolean): Promise<void> {
+  const { error } = await supabase.rpc('valorar_reserva', { p_reserva: id, p_funciono: funciono })
+  if (error) fail('No se pudo guardar su respuesta', error)
+}
+
+export async function estadisticasSoporte(desde: string, hasta: string): Promise<EstadisticasSoporte> {
+  const { data, error } = await supabase.rpc('estadisticas_soporte', { p_desde: desde, p_hasta: hasta })
+  if (error) fail('No se pudieron calcular las estadísticas de soporte', error)
+  return data as EstadisticasSoporte
 }

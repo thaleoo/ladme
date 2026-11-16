@@ -107,7 +107,33 @@ PGURL=postgresql://postgres@localhost:5432/postgres bash ladme/db/tests/ejecutar
 ```
 
 Crea una base desechable en un PostgreSQL local, aplica esquema y migraciones y
-comprueba 40 reglas (límites, permisos, avisos, importación). No toca Supabase.
+comprueba más de 50 reglas (límites, permisos, avisos, importación). No toca Supabase.
+
+## 8. Segunda tanda: reportes, inicio compacto y más (migración 0003)
+
+1. SQL Editor → ejecute `ladme/db/migrations/0003_reportes_categorias.sql` (después de 0002).
+2. Vuelva a pegar `ladme/appsscript/Código.gs` en Apps Script: trae la plantilla nueva de correo y el
+   aviso «ya está libre». Ejecute `probarPlantillaCorreo` para recibir una muestra en su bandeja.
+3. Despliegue la PWA. Quien tenga la versión anterior instalada verá el icono nuevo al reinstalarla
+   (Android a veces lo actualiza solo al cabo de unos días).
+
+Qué cambia para las personas:
+
+- **Reglamento**: en el primer ingreso se muestra una vez y hay que aceptarlo para reservar. El texto
+  es un borrador en `ladme/pwa/src/lib/reglamento.ts`: **revíselo con la coordinación antes de publicar**.
+- **Reportes de fallas**: botón en la ficha de cada equipo; llegan a todo el personal y se atienden en
+  Administración → Reportes.
+- **Categorías**: en Administración → Equipos, el campo «Categoría» agrupa el inicio (p. ej.
+  «Realidad aumentada»). Con una sola categoría no aparecen pestañas.
+- **«Avisarme cuando se libere»**, **«Reservar otra vez»** y la pregunta **«¿Todo funcionó bien?»** al terminar.
+
+### Etiquetas NFC y QR
+
+La PWA entiende `https://<dominio-pwa>/?asset=UNAL-05` y `https://<dominio-pwa>/equipo/UNAL-05`: ambas
+abren la ficha de ese equipo. Las etiquetas actuales apuntan a Apps Script; tras el corte muestran
+«LADME se mudó» con un botón hacia la ficha correcta (un toque adicional, porque un script web no puede
+redirigir por sí solo). Para que sea directo, regrabe los NFC y reimprima los QR con la URL de la PWA:
+use `ladme/scripts/generar_qr_ladme.py` con la URL de la PWA como base (genera `https://<dominio-pwa>?asset=UNAL-05`).
 
 ## Qué queda fuera
 

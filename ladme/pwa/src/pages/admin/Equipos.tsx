@@ -16,6 +16,7 @@ interface Borrador {
   id?: string
   codigo: string
   nombre: string
+  categoria: string
   marca: string
   modelo: string
   ubicacion: string
@@ -33,6 +34,7 @@ function aBorrador(e?: Equipo): Borrador {
     id: e?.id,
     codigo: e?.codigo ?? '',
     nombre: e?.nombre ?? '',
+    categoria: e?.categoria ?? 'Estación de trabajo',
     marca: e?.marca ?? '',
     modelo: e?.modelo ?? '',
     ubicacion: e?.ubicacion ?? 'Sala LADME',
@@ -77,6 +79,7 @@ export default function Equipos() {
     const codigo = b.codigo.trim().toUpperCase()
     if (!/^[A-Z0-9-]{3,20}$/.test(codigo)) return setError('El código usa solo letras, números y guiones (3 a 20), p. ej. UNAL-17.')
     if (!b.nombre.trim()) return setError('Escriba el nombre o modelo del equipo.')
+    if (b.categoria.trim().length < 2) return setError('Indique la categoría (p. ej. Estación de trabajo).')
     if (!b.id && equipos.some((e) => e.codigo === codigo)) return setError('Ya existe un equipo con ese código.')
     const especificaciones: Record<string, string> = {}
     for (const linea of b.especificaciones.split('\n')) {
@@ -89,6 +92,7 @@ export default function Equipos() {
         id: b.id,
         codigo,
         nombre: b.nombre.trim(),
+        categoria: b.categoria.trim(),
         marca: b.marca.trim() || null,
         modelo: b.modelo.trim() || null,
         ubicacion: b.ubicacion.trim() || null,
@@ -157,7 +161,7 @@ export default function Equipos() {
                     {e.archivado && <span className="badge gray">Archivado</span>}
                   </div>
                   <p className="small muted" style={{ margin: '2px 0 0' }}>
-                    {[e.nombre, e.marca, e.ubicacion].filter(Boolean).join(' · ')}
+                    {[e.categoria, e.nombre, e.marca, e.ubicacion].filter(Boolean).join(' · ')}
                   </p>
                   {(e.serial || e.placa_oficial) && (
                     <p className="tiny muted" style={{ margin: '2px 0 0' }}>
@@ -210,6 +214,24 @@ export default function Equipos() {
                 {b.estado !== 'activo' && <p className="help">No se podrá reservar. Las reservas ya hechas no se cancelan solas.</p>}
               </div>
               {campo('nombre', 'Nombre o modelo')}
+              <div className="field">
+                <label className="field__label" htmlFor="eq-categoria">
+                  Categoría
+                </label>
+                <input
+                  id="eq-categoria"
+                  list="eq-categorias"
+                  value={b.categoria}
+                  maxLength={40}
+                  onChange={(e) => setB({ ...b, categoria: e.target.value })}
+                />
+                <datalist id="eq-categorias">
+                  {[...new Set(['Estación de trabajo', 'Realidad aumentada', 'Dispositivos electrónicos', ...equipos.map((e) => e.categoria)])].map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+                <p className="help">El inicio agrupa los recursos por categoría.</p>
+              </div>
               {campo('marca', 'Marca')}
               {campo('modelo', 'Modelo')}
               {campo('ubicacion', 'Ubicación')}

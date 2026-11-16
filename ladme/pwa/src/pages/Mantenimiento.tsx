@@ -80,6 +80,17 @@ export default function MantenimientoPage() {
     if (perfil?.correo && !responsable) setResponsable(perfil.correo)
   }, [perfil, responsable])
 
+  // Llegada desde un reporte de falla: abre el formulario con el equipo y la descripción.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    const eq = q.get('equipo')
+    if (!eq) return
+    setEquipo(eq.toUpperCase())
+    setTipo('correctivo')
+    setDescripcion(q.get('descripcion') ?? '')
+    setFormAbierto(true)
+  }, [])
+
   const filtrados = useMemo(
     () =>
       items.filter(
