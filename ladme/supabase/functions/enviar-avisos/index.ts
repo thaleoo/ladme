@@ -14,6 +14,9 @@ interface Notificacion {
   usuario_id: string
   reserva_id: string | null
   mantenimiento_id: string | null
+  titulo?: string | null
+  cuerpo?: string | null
+  url?: string | null
 }
 
 interface Suscripcion {
@@ -23,6 +26,16 @@ interface Suscripcion {
 }
 
 function contenido(n: Notificacion): { title: string; body: string; url: string; tag: string } {
+  // Desde la migración 0002 la base de datos redacta el aviso (con equipo y horario).
+  // Los textos fijos de abajo quedan solo como respaldo para filas antiguas.
+  if (n.titulo) {
+    return {
+      title: n.titulo,
+      body: n.cuerpo ?? '',
+      url: n.url ?? '/avisos',
+      tag: `${n.tipo}-${n.reserva_id ?? n.mantenimiento_id ?? n.id}`
+    }
+  }
   switch (n.tipo) {
     case 'confirmacion':
       return {
@@ -116,7 +129,7 @@ Deno.serve(async (req) => {
 
   const { data: pendientes, error } = await supabase
     .from('cola_notificaciones')
-    .select('id, tipo, usuario_id, reserva_id, mantenimiento_id')
+    .select('id, tipo, usuario_id, reserva_id, mantenimiento_id, titulo, cuerpo, url')
     .is('push_enviado_en', null)
     .lt('push_intentos', 5)
     .order('creado_en', { ascending: true })

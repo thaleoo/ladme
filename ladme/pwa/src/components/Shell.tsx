@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { esAdmin, esStaff, useAuth } from '../context/AuthContext'
+import { contarAvisosSinLeer } from '../lib/api'
+import { perfilCompleto } from '../lib/types'
 import AvisosPush from './AvisosPush'
 import Icon, { type NombreIcono } from './Icon'
 import Logo from './Logo'
@@ -33,6 +35,8 @@ const TITULOS: Array<[RegExp, string]> = [
   [/^\/validar/, 'Validar credencial'],
   [/^\/mantenimiento/, 'Mantenimiento'],
   [/^\/usuarios/, 'Usuarios'],
+  [/^\/admin/, 'Administración'],
+  [/^\/avisos/, 'Avisos'],
   [/^\/cuenta/, 'Mi cuenta']
 ]
 
@@ -50,6 +54,7 @@ export default function Shell() {
   const [enLinea, setEnLinea] = useState(navigator.onLine)
   const [instalacion, setInstalacion] = useState<EventoInstalacion | null>(null)
   const [masAbierto, setMasAbierto] = useState(false)
+  const [sinLeer, setSinLeer] = useState(0)
 
   const staff = esStaff(perfil)
   const admin = esAdmin(perfil)
@@ -66,6 +71,7 @@ export default function Shell() {
 
   const gestion = useMemo<Enlace[]>(() => {
     const lista: Enlace[] = []
+    if (staff) lista.push({ a: '/admin', texto: 'Administración', icono: 'ajustes' })
     if (staff) lista.push({ a: '/mantenimiento', texto: 'Mantenimiento', icono: 'llave' })
     if (admin) lista.push({ a: '/usuarios', texto: 'Usuarios', icono: 'usuarios' })
     return lista
@@ -87,6 +93,20 @@ export default function Shell() {
       window.removeEventListener('beforeinstallprompt', preparado)
     }
   }, [])
+
+  // Contador de avisos sin leer: al entrar, cada 2 minutos y cuando se leen.
+  useEffect(() => {
+    let vivo = true
+    const contar = () => contarAvisosSinLeer().then((n) => vivo && setSinLeer(n))
+    void contar()
+    const t = window.setInterval(() => document.visibilityState === 'visible' && void contar(), 120000)
+    window.addEventListener('ladme-avisos', contar)
+    return () => {
+      vivo = false
+      window.clearInterval(t)
+      window.removeEventListener('ladme-avisos', contar)
+    }
+  }, [location.pathname])
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -146,6 +166,11 @@ export default function Shell() {
               {e.texto}
             </NavLink>
           ))}
+          <NavLink to="/avisos" className="sidebar__link">
+            <Icon nombre="campana" />
+            Avisos
+            {sinLeer > 0 && <span className="contador">{sinLeer > 9 ? '9+' : sinLeer}</span>}
+          </NavLink>
           {gestion.length > 0 && (
             <>
               <div className="sidebar__group">Gestión</div>
@@ -201,6 +226,10 @@ export default function Shell() {
               <Icon nombre="sin-conexion" />
             </span>
           )}
+          <Link to="/avisos" className="icon-btn campana" aria-label={sinLeer ? `Avisos: ${sinLeer} sin leer` : 'Avisos'}>
+            <Icon nombre="campana" width={20} height={20} />
+            {sinLeer > 0 && <span className="contador">{sinLeer > 9 ? '9+' : sinLeer}</span>}
+          </Link>
           <Link to="/cuenta" className="icon-btn" aria-label="Mi cuenta" style={{ padding: 0, width: 'auto' }}>
             <span className="avatar sm">{inicial}</span>
           </Link>
@@ -218,8 +247,23 @@ export default function Shell() {
                   </div>
                 </div>
               )}
+              {perfil && !perfilCompleto(perfil) && !/^\/(cuenta|reservar)/.test(location.pathname) && (
+                <div className="alert info">
+                  <Icon nombre="info" />
+                  <div className="alert__body">
+                    <strong>Complete su perfil para poder reservar.</strong> Solo son su programa y su matrícula.
+                    <div className="alert__actions">
+                      <Link className="btn sm" to="/cuenta#perfil">
+                        Completar ahora
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
               <AvisosPush />
-              <Outlet />
+              <Suspense fallback={<div className="cargando"><span className="spinner" aria-hidden="true" /> Cargando…</div>}>
+                <Outlet />
+              </Suspense>
             </div>
           </div>
         </main>
@@ -235,7 +279,7 @@ export default function Shell() {
         {staff && (
           <button
             type="button"
-            className={`bottomnav__link${gestion.some((g) => g.a === location.pathname) ? ' activo' : ''}`}
+            className={`bottomnav__link${gestion.some((g) => location.pathname.startsWith(g.a)) ? ' activo' : ''}`}
             onClick={() => setMasAbierto(true)}
             aria-haspopup="dialog"
           >

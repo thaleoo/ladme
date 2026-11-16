@@ -2,7 +2,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import Icon from '../components/Icon'
 import { esAdmin, esStaff, puedeValidarMantenimiento, useAuth } from '../context/AuthContext'
-import { EXTENSIONES_MAX, MAX_HORAS_EXTENSION, MAX_HORAS_RESERVA, MAX_HORAS_TOTAL } from '../lib/format'
+import PerfilForm from '../components/PerfilForm'
+import { useLimites } from '../lib/politicas'
+import { perfilCompleto } from '../lib/types'
 
 const ROL: Record<string, { etiqueta: string; descripcion: string; clase: string }> = {
   usuario: {
@@ -25,6 +27,7 @@ const ROL: Record<string, { etiqueta: string; descripcion: string; clase: string
 export default function Cuenta() {
   const { perfil, salir } = useAuth()
   const navigate = useNavigate()
+  const lim = useLimites()
 
   if (!perfil) return null
 
@@ -78,11 +81,32 @@ export default function Cuenta() {
         </p>
       </section>
 
+      <section className={`card ${perfilCompleto(perfil) ? '' : 'warn'}`} id="perfil">
+        <h3>Datos académicos</h3>
+        <p className="small muted">
+          {perfilCompleto(perfil)
+            ? 'Se usan en sus reservas y en las estadísticas de uso del laboratorio.'
+            : 'Complete estos datos para poder reservar. Solo se piden una vez.'}
+        </p>
+        <PerfilForm />
+      </section>
+
       <section>
         <div className="section-title">
           <h2>Accesos rápidos</h2>
         </div>
         <div className="grid cols-2">
+          {esStaff(perfil) && (
+            <Link to="/admin" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
+              <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
+                <Icon nombre="ajustes" />
+              </span>
+              <span>
+                <strong style={{ display: 'block' }}>Administración</strong>
+                <span className="tiny muted">Ronda, reservas, bloqueos, equipos y estadísticas.</span>
+              </span>
+            </Link>
+          )}
           {esStaff(perfil) && (
             <Link to="/mantenimiento" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
               <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
@@ -134,14 +158,17 @@ export default function Cuenta() {
         <h3>Reglas de reserva</h3>
         <ul className="small muted" style={{ paddingLeft: '1.05rem', margin: 0 }}>
           <li>
-            Máximo <strong>{MAX_HORAS_RESERVA} h</strong> por reserva (7 días).
+            Máximo <strong>{lim.maxHoras} h</strong> por reserva.
           </li>
           <li>
-            Una única extensión de hasta <strong>{MAX_HORAS_EXTENSION} h</strong> ({EXTENSIONES_MAX} por reserva).
+            {lim.extensionesMax === 1 ? 'Una única extensión' : `${lim.extensionesMax} extensiones`} de hasta{' '}
+            <strong>{lim.maxExtension} h</strong>, sin pasar de <strong>{lim.maxTotal} h</strong> desde el inicio.
           </li>
           <li>
-            Tope absoluto de <strong>{MAX_HORAS_TOTAL} h</strong> contadas desde el inicio.
+            ¿Necesita más tiempo? Envíe una solicitud de reserva larga (hasta {Math.round(lim.excepcionMaxHoras / 24)}{' '}
+            días) desde «Reservar»; la administración la revisa.
           </li>
+          <li>Registre su llegada dentro de los primeros {lim.toleranciaMin} minutos.</li>
           <li>Las cancelaciones no se borran: quedan en el historial con su motivo.</li>
         </ul>
       </section>

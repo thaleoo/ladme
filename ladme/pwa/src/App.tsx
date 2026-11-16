@@ -1,19 +1,23 @@
 import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import Shell from './components/Shell'
 import { esAdmin, esStaff, useAuth } from './context/AuthContext'
 import AuthCallback from './pages/AuthCallback'
-import Credencial from './pages/Credencial'
-import Cuenta from './pages/Cuenta'
 import Disponibilidad from './pages/Disponibilidad'
-import FichaEquipo from './pages/FichaEquipo'
 import Login from './pages/Login'
-import Mantenimiento from './pages/Mantenimiento'
-import MisReservas from './pages/MisReservas'
 import NoEncontrada from './pages/NoEncontrada'
-import Reservar from './pages/Reservar'
-import Usuarios from './pages/Usuarios'
-import Validar from './pages/Validar'
+import { PoliticasProvider } from './lib/politicas'
+
+const Credencial = lazy(() => import('./pages/Credencial'))
+const Cuenta = lazy(() => import('./pages/Cuenta'))
+const FichaEquipo = lazy(() => import('./pages/FichaEquipo'))
+const Mantenimiento = lazy(() => import('./pages/Mantenimiento'))
+const MisReservas = lazy(() => import('./pages/MisReservas'))
+const Reservar = lazy(() => import('./pages/Reservar'))
+const Usuarios = lazy(() => import('./pages/Usuarios'))
+const Validar = lazy(() => import('./pages/Validar'))
+const Admin = lazy(() => import('./pages/Admin'))
+const Avisos = lazy(() => import('./pages/Avisos'))
 
 function Cargando() {
   return (
@@ -67,7 +71,11 @@ function SoloAutenticado({ children }: { children: ReactNode }) {
       </Aviso>
     )
   }
-  return <>{children}</>
+  return (
+    <PoliticasProvider>
+      <Suspense fallback={<Cargando />}>{children}</Suspense>
+    </PoliticasProvider>
+  )
 }
 
 function SoloStaff({ children }: { children: ReactNode }) {
@@ -108,6 +116,15 @@ export default function App() {
         <Route path="credencial/:id" element={<Credencial />} />
         <Route path="equipo/:codigo" element={<FichaEquipo />} />
         <Route path="cuenta" element={<Cuenta />} />
+        <Route path="avisos" element={<Avisos />} />
+        <Route
+          path="admin"
+          element={
+            <SoloStaff>
+              <Admin />
+            </SoloStaff>
+          }
+        />
         <Route path="validar" element={<Validar />} />
         <Route path="validar/:token" element={<Validar />} />
         <Route

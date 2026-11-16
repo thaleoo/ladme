@@ -1,9 +1,13 @@
 import { supabase } from './supabase'
-import type { Equipo, Mantenimiento, Ocupacion, Perfil, Reserva, ResultadoValidacion, Rol } from './types'
+import type {
+  Aviso, Equipo, Estadisticas, Mantenimiento, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+} from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
   throw new Error(error?.message ? `${contexto}: ${error.message}` : contexto)
 }
+
+const SELECT_RESERVA = '*, equipos(codigo, nombre, ubicacion), perfiles(nombre, correo, programa)'
 
 /** Perfil del usuario autenticado (lo crea un trigger al registrarse). */
 export async function obtenerPerfil(): Promise<Perfil | null> {
@@ -14,12 +18,10 @@ export async function obtenerPerfil(): Promise<Perfil | null> {
   return data as Perfil
 }
 
-export async function listarEquipos(): Promise<Equipo[]> {
-  const { data, error } = await supabase
-    .from('equipos')
-    .select('*')
-    .eq('archivado', false)
-    .order('codigo')
+export async function listarEquipos(incluirArchivados = false): Promise<Equipo[]> {
+  let consulta = supabase.from('equipos').select('*').order('codigo')
+  if (!incluirArchivados) consulta = consulta.eq('archivado', false)
+  const { data, error } = await consulta
   if (error) fail('No se pudieron cargar los equipos', error)
   return (data ?? []) as Equipo[]
 }
@@ -58,8 +60,8 @@ export async function misReservas(): Promise<Reserva[]> {
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return []
   const { data, error } = await supabase
-    .from('reservas_estado')
-    .select('*')
+    .from('reservas')
+    .select(SELECT_RESERVA)
     .eq('usuario_id', auth.user.id)
     .eq('tipo', 'reserva')
     .order('inicio', { ascending: false })
@@ -124,23 +126,25 @@ export async function obtenerEquipo(codigo: string): Promise<Equipo | null> {
 
 export async function obtenerReserva(id: string): Promise<Reserva | null> {
   const { data, error } = await supabase
-    .from('reservas_estado')
-    .select('*')
+    .from('reservas')
+    .select(SELECT_RESERVA)
     .eq('id', id)
     .maybeSingle()
   if (error) fail('No se pudo cargar la reserva', error)
   return (data as Reserva | null) ?? null
 }
 
-export async function listarPoliticas(): Promise<Record<string, number>> {
-  const { data, error } = await supabase.from('politicas').select('clave, valor')
+export async function listarPoliticas(): Promise<Politica[]> {
+  const { data, error } = await supabase.from('politicas').select('clave, valor, descripcion').order('clave')
   if (error) fail('No se pudieron cargar las políticas', error)
-  const salida: Record<string, number> = {}
-  for (const fila of (data ?? []) as Array<{ clave: string; valor: unknown }>) {
-    const n = Number(fila.valor)
-    if (Number.isFinite(n)) salida[fila.clave] = n
-  }
-  return salida
+  return ((data ?? []) as Array<{ clave: string; valor: unknown; descripcion: string | null }>)
+    .map((f) => ({ clave: f.clave, valor: Number(f.valor), descripcion: f.descripcion }))
+    .filter((f) => Number.isFinite(f.valor))
+}
+
+export async function guardarPolitica(clave: string, valor: number): Promise<void> {
+  const { error } = await supabase.from('politicas').update({ valor }).eq('clave', clave)
+  if (error) fail('No se pudo guardar la política', error)
 }
 
 export interface EstadoMantenimientoEquipo {
@@ -238,4 +242,160 @@ export async function otorgarPermiso(usuario: string, permiso: string, activo: b
     p_activo: activo
   })
   if (error) fail('No se pudo actualizar el permiso', error)
+}
+
+// ------------------------------------------------------------------ Perfil
+export async function guardarPerfil(datos: {
+  nombre: string
+  tipo_usuario: string
+  programa: string
+  matricula: string | null
+}): Promise<void> {
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) throw new Error('Debe iniciar sesión.')
+  const { error } = await supabase.from('perfiles').update(datos).eq('id', auth.user.id)
+  if (error) fail('No se pudo guardar el perfil', error)
+}
+
+// ------------------------------------------------------------------ Avisos
+export async function listarAvisos(): Promise<Aviso[]> {
+  const { data, error } = await supabase
+    .from('cola_notificaciones')
+    .select('id, tipo, titulo, cuerpo, url, creado_en, leido_en')
+    .order('creado_en', { ascending: false })
+    .limit(60)
+  if (error) fail('No se pudieron cargar los avisos', error)
+  return (data ?? []) as Aviso[]
+}
+
+export async function contarAvisosSinLeer(): Promise<number> {
+  const { count, error } = await supabase
+    .from('cola_notificaciones')
+    .select('id', { count: 'exact', head: true })
+    .is('leido_en', null)
+  if (error) return 0
+  return count ?? 0
+}
+
+export async function marcarAvisosLeidos(): Promise<void> {
+  const { error } = await supabase.rpc('marcar_avisos_leidos')
+  if (error) fail('No se pudieron marcar los avisos', error)
+}
+
+// ---------------------------------------------------------------- Contacto
+export async function contactarTitular(equipo: string, mensaje: string): Promise<void> {
+  const { error } = await supabase.rpc('contactar_titular', { p_equipo: equipo, p_mensaje: mensaje })
+  if (error) fail('No se pudo enviar el mensaje', error)
+}
+
+// ------------------------------------------------- Solicitudes de reserva larga
+const SELECT_SOLICITUD =
+  '*, equipos(codigo, nombre), solicitante:perfiles!solicitudes_excepcion_usuario_id_fkey(nombre, correo, programa)'
+
+export async function solicitarExcepcion(input: {
+  equipo: string
+  inicio: string
+  fin: string
+  actividad: string
+  detalle?: string
+  justificacion: string
+}): Promise<void> {
+  const { error } = await supabase.rpc('solicitar_excepcion', {
+    p_equipo: input.equipo,
+    p_inicio: input.inicio,
+    p_fin: input.fin,
+    p_actividad: input.actividad,
+    p_detalle: input.detalle ?? null,
+    p_justificacion: input.justificacion
+  })
+  if (error) fail('No se pudo enviar la solicitud', error)
+}
+
+export async function misSolicitudes(): Promise<Solicitud[]> {
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return []
+  const { data, error } = await supabase
+    .from('solicitudes_excepcion')
+    .select(SELECT_SOLICITUD)
+    .eq('usuario_id', auth.user.id)
+    .order('creado_en', { ascending: false })
+    .limit(20)
+  if (error) fail('No se pudieron cargar sus solicitudes', error)
+  return (data ?? []) as Solicitud[]
+}
+
+export async function listarSolicitudes(): Promise<Solicitud[]> {
+  const { data, error } = await supabase
+    .from('solicitudes_excepcion')
+    .select(SELECT_SOLICITUD)
+    .order('creado_en', { ascending: false })
+    .limit(100)
+  if (error) fail('No se pudieron cargar las solicitudes', error)
+  return (data ?? []) as Solicitud[]
+}
+
+export async function retirarSolicitud(id: string): Promise<void> {
+  const { error } = await supabase.rpc('retirar_solicitud', { p_id: id })
+  if (error) fail('No se pudo retirar la solicitud', error)
+}
+
+export async function resolverSolicitud(id: string, aprobar: boolean, respuesta: string): Promise<void> {
+  const { error } = await supabase.rpc('resolver_excepcion', {
+    p_id: id,
+    p_aprobar: aprobar,
+    p_respuesta: respuesta || null
+  })
+  if (error) fail('No se pudo resolver la solicitud', error)
+}
+
+// ------------------------------------------------------------ Administración
+/** Reservas y bloqueos (solo el personal ve los de otras personas, por RLS). */
+export async function listarReservasAdmin(desde: string, hasta: string): Promise<Reserva[]> {
+  const { data, error } = await supabase
+    .from('reservas')
+    .select(SELECT_RESERVA)
+    .lt('inicio', hasta)
+    .gt('fin', desde)
+    .order('inicio', { ascending: false })
+    .limit(1000)
+  if (error) fail('No se pudieron cargar las reservas', error)
+  return (data ?? []) as Reserva[]
+}
+
+export async function crearBloqueo(input: {
+  equipo: string
+  inicio: string
+  fin: string
+  motivo: string
+  cancelarConflictos: boolean
+}): Promise<{ bloqueo: string; canceladas: number }> {
+  const { data, error } = await supabase.rpc('crear_bloqueo', {
+    p_equipo: input.equipo,
+    p_inicio: input.inicio,
+    p_fin: input.fin,
+    p_motivo: input.motivo,
+    p_cancelar_conflictos: input.cancelarConflictos
+  })
+  if (error) fail('No se pudo crear el bloqueo', error)
+  return data as { bloqueo: string; canceladas: number }
+}
+
+export async function cancelarBloqueo(id: string): Promise<void> {
+  const { error } = await supabase.rpc('cancelar_bloqueo', { p_bloqueo: id })
+  if (error) fail('No se pudo quitar el bloqueo', error)
+}
+
+export async function guardarEquipo(equipo: Partial<Equipo> & { codigo: string; nombre: string }): Promise<void> {
+  const { id, ...campos } = equipo
+  const consulta = id
+    ? supabase.from('equipos').update(campos).eq('id', id)
+    : supabase.from('equipos').insert(campos)
+  const { error } = await consulta
+  if (error) fail('No se pudo guardar el equipo', error)
+}
+
+export async function estadisticas(desde: string, hasta: string): Promise<Estadisticas> {
+  const { data, error } = await supabase.rpc('estadisticas', { p_desde: desde, p_hasta: hasta })
+  if (error) fail('No se pudieron calcular las estadísticas', error)
+  return data as Estadisticas
 }
