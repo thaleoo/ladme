@@ -5,6 +5,7 @@ import Ronda from './admin/Ronda'
 import ReservasAdmin from './admin/ReservasAdmin'
 import Bloqueos from './admin/Bloqueos'
 import Solicitudes from './admin/Solicitudes'
+import Reportes from './admin/Reportes'
 import Equipos from './admin/Equipos'
 import Estadisticas from './admin/Estadisticas'
 import Politicas from './admin/Politicas'
@@ -13,6 +14,7 @@ const PESTANAS = [
   { id: 'ronda', texto: 'Ronda' },
   { id: 'reservas', texto: 'Reservas' },
   { id: 'bloqueos', texto: 'Bloqueos' },
+  { id: 'reportes', texto: 'Reportes' },
   { id: 'solicitudes', texto: 'Solicitudes' },
   { id: 'equipos', texto: 'Equipos' },
   { id: 'estadisticas', texto: 'Estadísticas' },
@@ -52,6 +54,7 @@ export default function Admin() {
       {actual === 'ronda' && <Ronda />}
       {actual === 'reservas' && <ReservasAdmin />}
       {actual === 'bloqueos' && <Bloqueos />}
+      {actual === 'reportes' && <Reportes />}
       {actual === 'solicitudes' && <Solicitudes />}
       {actual === 'equipos' && <Equipos />}
       {actual === 'estadisticas' && <Estadisticas />}

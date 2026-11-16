@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { esAdmin, esStaff, useAuth } from '../context/AuthContext'
 import { contarAvisosSinLeer } from '../lib/api'
 import { perfilCompleto } from '../lib/types'
+import Reglamento from './Reglamento'
 import AvisosPush from './AvisosPush'
 import Icon, { type NombreIcono } from './Icon'
 import Logo from './Logo'
@@ -261,6 +262,7 @@ export default function Shell() {
                 </div>
               )}
               <AvisosPush />
+              {perfil && !perfil.reglamento_aceptado_en && <Reglamento />}
               <Suspense fallback={<div className="cargando"><span className="spinner" aria-hidden="true" /> Cargando…</div>}>
                 <Outlet />
               </Suspense>

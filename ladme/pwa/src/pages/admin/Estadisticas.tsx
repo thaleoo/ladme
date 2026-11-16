@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { estadisticas } from '../../lib/api'
-import type { Conteo, Estadisticas as Datos } from '../../lib/types'
+import { estadisticas, estadisticasSoporte } from '../../lib/api'
+import type { Conteo, Estadisticas as Datos, EstadisticasSoporte } from '../../lib/types'
 import { descargarCSV } from '../../lib/csv'
 import { Cargando } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
@@ -67,13 +67,16 @@ function Columnas({ titulo, datos, etiqueta }: { titulo: string; datos: Array<{ 
 export default function Estadisticas() {
   const [dias, setDias] = useState(120)
   const [datos, setDatos] = useState<Datos | null>(null)
+  const [soporte, setSoporte] = useState<EstadisticasSoporte | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let vivo = true
     setDatos(null)
     const hasta = new Date()
-    estadisticas(new Date(hasta.getTime() - dias * 86400000).toISOString(), hasta.toISOString())
+    const desde = new Date(hasta.getTime() - dias * 86400000).toISOString()
+    estadisticasSoporte(desde, hasta.toISOString()).then((d) => vivo && setSoporte(d)).catch(() => undefined)
+    estadisticas(desde, hasta.toISOString())
       .then((d) => vivo && setDatos(d))
       .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudieron calcular las estadísticas.'))
     return () => {
@@ -150,6 +153,30 @@ export default function Estadisticas() {
             <Barras titulo="Reservas por programa" datos={datos.por_programa} />
             <Barras titulo="Reservas por matrícula" datos={datos.por_matricula} />
             <Columnas titulo="Reservas por día de la semana (inicio)" datos={porDia} etiqueta={(c) => c} />
+            {soporte && <Barras titulo="Reportes de fallas por equipo" datos={soporte.reportes_por_equipo} />}
+            {soporte && (
+              <section className="card">
+                <h3 style={{ fontSize: 'var(--text-base)' }}>Soporte</h3>
+                <div className="stack">
+                  <div className="row between small">
+                    <span className="muted">Reportes de fallas en el período</span>
+                    <strong className="num">{soporte.reportes}</strong>
+                  </div>
+                  <div className="row between small">
+                    <span className="muted">Reportes aún pendientes</span>
+                    <strong className="num">{soporte.reportes_abiertos}</strong>
+                  </div>
+                  <div className="row between small">
+                    <span className="muted">Usos valorados por los usuarios</span>
+                    <strong className="num">{soporte.valoradas}</strong>
+                  </div>
+                  <div className="row between small">
+                    <span className="muted">Usos con algún problema</span>
+                    <strong className="num">{soporte.con_problemas}</strong>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
           <Columnas titulo="Reservas por hora de inicio" datos={porHora} etiqueta={(c, i) => (i % 3 === 0 ? c.slice(0, 2) : '')} />
           <p className="tiny muted">

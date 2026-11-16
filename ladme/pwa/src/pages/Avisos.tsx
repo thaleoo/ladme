@@ -5,6 +5,7 @@ import type { Aviso } from '../lib/types'
 import { fecha, hace } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon, { type NombreIcono } from '../components/Icon'
+import { esStaff, useAuth } from '../context/AuthContext'
 
 function icono(tipo: string): NombreIcono {
   if (tipo.startsWith('mantenimiento')) return 'llave'
@@ -12,11 +13,15 @@ function icono(tipo: string): NombreIcono {
   if (tipo === 'fin_proximo' || tipo.startsWith('sin_llegada')) return 'reloj'
   if (tipo === 'contacto') return 'campana'
   if (tipo === 'solicitud_excepcion') return 'info'
+  if (tipo.startsWith('reporte')) return 'alerta'
+  if (tipo === 'equipo_libre') return 'chispa'
   return 'check-circulo'
 }
 
 /** Centro de avisos: funciona aunque la persona no active las notificaciones push. */
 export default function Avisos() {
+  const { perfil } = useAuth()
+  const staff = esStaff(perfil)
   const [avisos, setAvisos] = useState<Aviso[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +47,15 @@ export default function Avisos() {
 
   return (
     <>
-      <PageHeader eyebrow="Novedades" titulo="Avisos" sub="Lo que ha pasado con sus reservas y, si es del personal, con el laboratorio." />
+      <PageHeader
+        eyebrow="Novedades"
+        titulo="Avisos"
+        sub={
+          staff
+            ? 'Novedades del laboratorio: reportes de fallas, solicitudes, mantenimientos y reservas sin llegada.'
+            : 'Lo que ha pasado con sus reservas, sus solicitudes y sus reportes.'
+        }
+      />
 
       {error && (
         <div className="alert danger">
@@ -55,7 +68,9 @@ export default function Avisos() {
       {!cargando && avisos.length === 0 && !error && (
         <div className="card">
           <Empty icono="campana" titulo="Sin avisos">
-            Aquí aparecerán las confirmaciones, recordatorios y mensajes sobre sus reservas.
+            {staff
+              ? 'Aquí aparecerán los reportes, las solicitudes y las alertas del laboratorio.'
+              : 'Aquí aparecerán las confirmaciones, recordatorios y mensajes sobre sus reservas.'}
           </Empty>
         </div>
       )}

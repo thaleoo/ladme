@@ -124,6 +124,20 @@ export default function Credencial() {
     URL.revokeObjectURL(url)
   }
 
+  /** Abre Google Calendar con el evento ya diligenciado: solo falta guardar. */
+  function enlaceGoogleCalendar(): string {
+    if (!reserva) return '#'
+    const equipo = reserva.equipos?.codigo ?? 'equipo'
+    const q = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: `LADME · ${equipo}`,
+      dates: `${icsFecha(reserva.inicio)}/${icsFecha(reserva.fin)}`,
+      location: reserva.equipos?.ubicacion || 'Laboratorio LADME',
+      details: `Reserva ${reserva.codigo_legible} del equipo ${equipo}.\nPase: ${publicUrl}/credencial/${reserva.id}`
+    })
+    return `https://calendar.google.com/calendar/render?${q.toString()}`
+  }
+
   async function copiar() {
     try {
       await navigator.clipboard.writeText(enlace)
@@ -269,14 +283,17 @@ export default function Credencial() {
           <section className="card">
             <h3 style={{ fontSize: 'var(--text-base)' }}>Acciones</h3>
             <div className="stack" style={{ marginTop: 'var(--s3)' }}>
-              <button className="btn block" onClick={descargarICS} type="button">
-                <Icon nombre="calendario" /> Añadir al calendario
-              </button>
+              <a className="btn block" href={enlaceGoogleCalendar()} target="_blank" rel="noopener noreferrer">
+                <Icon nombre="calendario" /> Añadir a Google Calendar
+              </a>
               <Link className="btn ghost block" to="/mis-reservas">
                 <Icon nombre="ticket" /> Extender, liberar o cancelar
               </Link>
               <button className="btn gray block" onClick={() => window.print()} type="button">
                 <Icon nombre="imprimir" /> Imprimir
+              </button>
+              <button className="btn-enlace" onClick={descargarICS} type="button">
+                Descargar archivo .ics (Outlook, Apple)
               </button>
             </div>
           </section>

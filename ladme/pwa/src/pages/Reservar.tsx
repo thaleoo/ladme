@@ -26,8 +26,14 @@ export default function Reservar() {
   const [equipo, setEquipo] = useState(params.get('equipo')?.toUpperCase() ?? '')
   const ahora = useMemo(() => redondear(new Date(), 30), [])
   const [inicio, setInicio] = useState(params.get('inicio') ?? aInputLocal(ahora))
-  const [fin, setFin] = useState(params.get('fin') ?? aInputLocal(new Date(sumarHoras(ahora.toISOString(), 2))))
-  const [actividad, setActividad] = useState('')
+  const horasIniciales = Math.min(Math.max(Number(params.get('horas')) || 2, 0.5), lim.maxHoras)
+  const [fin, setFin] = useState(
+    params.get('fin') ?? aInputLocal(new Date(sumarHoras(ahora.toISOString(), horasIniciales)))
+  )
+  const [actividad, setActividad] = useState(() => {
+    const a = params.get('actividad') ?? ''
+    return (ACTIVIDADES as readonly string[]).includes(a) ? a : ''
+  })
   const [detalle, setDetalle] = useState('')
   const [desatendido, setDesatendido] = useState(false)
   const [mensaje, setMensaje] = useState('')
@@ -167,6 +173,7 @@ export default function Reservar() {
   }
 
   const equipoActual = equipos.find((e) => e.codigo === equipo)
+  const categorias = [...new Set(equipos.map((e) => e.categoria))].sort()
   const porcentaje = Number.isFinite(duracion) && duracion > 0 ? Math.min(100, (duracion / lim.maxTotal) * 100) : 0
 
   return (
@@ -191,11 +198,21 @@ export default function Reservar() {
                 Equipo
               </label>
               <select id="equipo" value={equipo} onChange={(e) => setEquipo(e.target.value)} disabled={cargando}>
-                {equipos.map((e) => (
-                  <option key={e.id} value={e.codigo}>
-                    {e.codigo} · {e.nombre}
-                  </option>
-                ))}
+                {categorias.length > 1
+                  ? categorias.map((c) => (
+                      <optgroup key={c} label={c}>
+                        {equipos.filter((e) => e.categoria === c).map((e) => (
+                          <option key={e.id} value={e.codigo}>
+                            {e.codigo} · {e.nombre}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : equipos.map((e) => (
+                      <option key={e.id} value={e.codigo}>
+                        {e.codigo} · {e.nombre}
+                      </option>
+                    ))}
               </select>
               {equipoActual && (
                 <p className="help">

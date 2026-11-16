@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  cancelarReserva, extenderReserva, liberarReserva, misReservas, misSolicitudes, registrarLlegada, retirarSolicitud
+  cancelarReserva, extenderReserva, liberarReserva, misReservas, misSolicitudes, registrarLlegada, retirarSolicitud,
+  valorarReserva
 } from '../lib/api'
 import type { Reserva, Solicitud } from '../lib/types'
 import { useLimites } from '../lib/politicas'
+import ReporteFalla from '../components/ReporteFalla'
 import {
   aInputLocal,
   duracion,
@@ -29,6 +31,8 @@ export default function MisReservas() {
   const lim = useLimites()
   const MAX_HORAS_EXTENSION = lim.maxExtension
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
+  const [encuesta, setEncuesta] = useState<Reserva | null>(null)
+  const [reporte, setReporte] = useState<string | null>(null)
   const [reservas, setReservas] = useState<Reserva[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +85,19 @@ export default function MisReservas() {
       setError(e instanceof Error ? e.message : 'No se pudo retirar la solicitud.')
     } finally {
       setProcesando(false)
+    }
+  }
+
+  /** «¿Todo funcionó bien?»: un toque. Si no, se abre el reporte de falla. */
+  async function valorar(r: Reserva, ok: boolean) {
+    setEncuesta(null)
+    try {
+      await valorarReserva(r.id, ok)
+      setReservas((lista) => lista.map((x) => (x.id === r.id ? { ...x, funciono: ok } : x)))
+      if (ok) toast.mostrar('¡Gracias por contarnos!')
+      else if (r.equipos?.codigo) setReporte(r.equipos.codigo)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo guardar su respuesta.')
     }
   }
 
@@ -156,9 +173,11 @@ export default function MisReservas() {
     if (!dialogo) return
     setProcesando(true)
     try {
-      await liberarReserva(dialogo.reserva.id)
+      const liberada = dialogo.reserva
+      await liberarReserva(liberada.id)
       setDialogo(null)
       toast.mostrar('Equipo liberado. ¡Gracias!')
+      if (liberada.funciono === null) setEncuesta(liberada)
       await cargar()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo liberar el equipo.')
@@ -246,10 +265,32 @@ export default function MisReservas() {
           </p>
         )}
 
+        {estado === 'Finalizada' && r.funciono === null && Date.now() - new Date(r.fin).getTime() < 7 * 86400000 && (
+          <div className="encuesta">
+            <span>¿Todo funcionó bien con el equipo?</span>
+            <span className="row tight">
+              <button className="btn ok sm" type="button" onClick={() => valorar(r, true)}>
+                Sí
+              </button>
+              <button className="btn gray sm" type="button" onClick={() => valorar(r, false)}>
+                No, hubo un problema
+              </button>
+            </span>
+          </div>
+        )}
+
         <div className="row" style={{ gap: 'var(--s2)' }}>
           <Link className="btn ghost sm" to={`/credencial/${r.id}`}>
             <Icon nombre="qr" /> Credencial
           </Link>
+          {!vigente && r.equipos?.codigo && (
+            <Link
+              className="btn ghost sm"
+              to={`/reservar?equipo=${r.equipos.codigo}&actividad=${encodeURIComponent(r.actividad ?? '')}&horas=${Math.min(horasEntre(r.inicio, r.fin), lim.maxHoras).toFixed(1)}`}
+            >
+              <Icon nombre="actualizar" /> Reservar otra vez
+            </Link>
+          )}
 
           {vigente && (
             <>
@@ -496,6 +537,29 @@ export default function MisReservas() {
           </>
         )}
       </Modal>
+
+      <Modal
+        abierto={!!encuesta}
+        titulo="¿Todo funcionó bien?"
+        descripcion={encuesta ? `Su uso del equipo ${encuesta.equipos?.codigo ?? ''} acaba de terminar.` : undefined}
+        onCerrar={() => setEncuesta(null)}
+        pie={
+          <>
+            <button className="btn gray" type="button" onClick={() => encuesta && valorar(encuesta, false)}>
+              No, hubo un problema
+            </button>
+            <button className="btn ok" type="button" onClick={() => encuesta && valorar(encuesta, true)}>
+              Sí, todo bien
+            </button>
+          </>
+        }
+      >
+        <p className="small" style={{ margin: 0 }}>
+          Su respuesta ayuda al laboratorio a detectar equipos con fallas antes de que afecten a otra persona.
+        </p>
+      </Modal>
+
+      <ReporteFalla equipo={reporte ?? ''} abierto={!!reporte} alCerrar={() => setReporte(null)} />
     </>
   )
 }

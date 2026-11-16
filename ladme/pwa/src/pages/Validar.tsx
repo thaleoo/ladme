@@ -124,7 +124,11 @@ export default function Validar() {
       <PageHeader
         eyebrow="Laboratorio"
         titulo="Validar credencial"
-        sub="Escanee el QR o pegue el enlace. El veredicto lo calcula la base de datos, no el teléfono."
+        sub={
+          esStaff(perfil)
+            ? 'Escanee el QR del pase para confirmar la reserva y registrar la llegada.'
+            : 'Compruebe si un pase sigue vigente. Verá solo el resultado, sin datos de otra persona.'
+        }
       />
 
       <section className="card">
@@ -244,10 +248,7 @@ export default function Validar() {
           )}
 
           {!esStaff(perfil) && (
-            <p className="tiny muted">
-              Como usuario, solo ve el veredicto. Los datos de la reserva quedan visibles para el personal
-              del laboratorio.
-            </p>
+            <p className="tiny muted">Por privacidad no se muestran los datos de la reserva.</p>
           )}
         </section>
       )}
