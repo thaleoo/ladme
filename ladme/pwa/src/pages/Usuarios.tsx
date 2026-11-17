@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { activarUsuario, asignarRol, listarPerfiles, otorgarPermiso } from '../lib/api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  activarUsuario, actividadUsuario, asignarRol, buscarUsuarios, otorgarPermiso, resumenUsuarios,
+  type FiltroUsuarios, type ResumenUsuarios
+} from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import type { Perfil, Rol } from '../lib/types'
+import { fecha, hace } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon from '../components/Icon'
+import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 
 const ROLES: Array<{ valor: Rol; etiqueta: string }> = [
@@ -11,8 +16,9 @@ const ROLES: Array<{ valor: Rol; etiqueta: string }> = [
   { valor: 'laboratorista', etiqueta: 'Laboratorista' },
   { valor: 'administrador', etiqueta: 'Administrador' }
 ]
-
+const ETIQUETA_ROL: Record<Rol, string> = { usuario: 'Usuario', laboratorista: 'Laboratorista', administrador: 'Administrador' }
 const PERMISO_VALIDAR = 'validar_mantenimiento'
+const TAMANO = 30
 
 function inicialesDe(texto: string): string {
   return (
@@ -30,276 +36,278 @@ function inicialesDe(texto: string): string {
 export default function Usuarios() {
   const { perfil: yo } = useAuth()
   const toast = useToast()
-  const [perfiles, setPerfiles] = useState<Perfil[]>([])
+  const [resumen, setResumen] = useState<ResumenUsuarios | null>(null)
+  const [lista, setLista] = useState<Perfil[]>([])
+  const [total, setTotal] = useState(0)
+  const [pagina, setPagina] = useState(0)
+  const [texto, setTexto] = useState('')
   const [busqueda, setBusqueda] = useState('')
-  const [filtroRol, setFiltroRol] = useState<'TODOS' | Rol>('TODOS')
+  const [filtro, setFiltro] = useState<FiltroUsuarios>('todos')
   const [cargando, setCargando] = useState(true)
+  const [masCargando, setMasCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [ocupado, setOcupado] = useState<string | null>(null)
+  const [sel, setSel] = useState<Perfil | null>(null)
+  const [actividad, setActividad] = useState<Awaited<ReturnType<typeof actividadUsuario>> | null>(null)
+  const [ocupado, setOcupado] = useState(false)
+  const consulta = useRef(0)
 
-  const cargar = useCallback(async () => {
-    try {
-      setError(null)
-      setPerfiles(await listarPerfiles())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron cargar los usuarios.')
-    } finally {
-      setCargando(false)
-    }
-  }, [])
+  // La búsqueda espera a que se deje de escribir (300 ms) para no consultar en cada tecla.
+  useEffect(() => {
+    const t = window.setTimeout(() => setBusqueda(texto), 300)
+    return () => window.clearTimeout(t)
+  }, [texto])
+
+  const cargar = useCallback(
+    async (pag: number) => {
+      const id = ++consulta.current
+      if (pag === 0) setCargando(true)
+      else setMasCargando(true)
+      try {
+        const r = await buscarUsuarios(busqueda, filtro, pag, TAMANO)
+        if (id !== consulta.current) return // llegó una búsqueda más reciente
+        setLista((previa) => (pag === 0 ? r.lista : [...previa, ...r.lista]))
+        setTotal(r.total)
+        setPagina(pag)
+        setError(null)
+      } catch (e) {
+        if (id === consulta.current) setError(e instanceof Error ? e.message : 'No se pudieron cargar los usuarios.')
+      } finally {
+        if (id === consulta.current) {
+          setCargando(false)
+          setMasCargando(false)
+        }
+      }
+    },
+    [busqueda, filtro]
+  )
 
   useEffect(() => {
-    void cargar()
+    void cargar(0)
   }, [cargar])
 
-  const filtrados = useMemo(() => {
-    const q = busqueda.trim().toLowerCase()
-    return perfiles.filter(
-      (p) =>
-        (filtroRol === 'TODOS' || p.rol === filtroRol) &&
-        (!q || p.nombre.toLowerCase().includes(q) || p.correo.toLowerCase().includes(q))
-    )
-  }, [perfiles, busqueda, filtroRol])
+  useEffect(() => {
+    resumenUsuarios().then(setResumen).catch(() => undefined)
+  }, [])
 
-  const conteos = useMemo(() => {
-    const c = { usuario: 0, laboratorista: 0, administrador: 0, inactivos: 0 }
-    for (const p of perfiles) {
-      c[p.rol]++
-      if (!p.activo) c.inactivos++
-    }
-    return c
-  }, [perfiles])
+  function abrir(p: Perfil) {
+    setSel(p)
+    setActividad(null)
+    actividadUsuario(p.id).then(setActividad).catch(() => undefined)
+  }
 
-  async function cambiarRol(p: Perfil, rol: Rol) {
+  /** Aplica un cambio y actualiza la fila en la lista sin recargar todo. */
+  async function cambiar(accion: () => Promise<void>, cambio: Partial<Perfil>, mensaje: string) {
+    if (!sel) return
+    setOcupado(true)
     setError(null)
-    setOcupado(p.id)
     try {
-      await asignarRol(p.id, rol)
-      toast.mostrar(`${p.nombre || p.correo} ahora tiene rol ${rol}.`)
-      await cargar()
+      await accion()
+      const nuevo = { ...sel, ...cambio }
+      setSel(nuevo)
+      setLista((l) => l.map((x) => (x.id === nuevo.id ? nuevo : x)))
+      toast.mostrar(mensaje)
+      resumenUsuarios().then(setResumen).catch(() => undefined)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo cambiar el rol.')
+      setError(e instanceof Error ? e.message : 'No se pudo aplicar el cambio.')
     } finally {
-      setOcupado(null)
+      setOcupado(false)
     }
   }
 
-  async function cambiarActivo(p: Perfil) {
-    setError(null)
-    setOcupado(p.id)
-    try {
-      await activarUsuario(p.id, !p.activo)
-      toast.mostrar(`${p.nombre || p.correo} quedó ${p.activo ? 'inhabilitado' : 'habilitado'}.`)
-      await cargar()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo cambiar el estado.')
-    } finally {
-      setOcupado(null)
-    }
-  }
+  const FILTROS: Array<{ id: FiltroUsuarios; texto: string; n?: number }> = [
+    { id: 'todos', texto: 'Todos', n: resumen?.total },
+    { id: 'usuario', texto: 'Usuarios', n: resumen?.usuario },
+    { id: 'laboratorista', texto: 'Laboratoristas', n: resumen?.laboratorista },
+    { id: 'administrador', texto: 'Administradores', n: resumen?.administrador },
+    { id: 'inhabilitados', texto: 'Inhabilitados', n: resumen?.inhabilitados },
+    { id: 'tecnicos', texto: 'Validan mantenimiento' }
+  ]
 
-  async function cambiarPermiso(p: Perfil) {
-    const activo = p.permisos.includes(PERMISO_VALIDAR)
-    setError(null)
-    setOcupado(p.id)
-    try {
-      await otorgarPermiso(p.id, PERMISO_VALIDAR, !activo)
-      toast.mostrar(
-        activo
-          ? `Se retiró «${PERMISO_VALIDAR}» a ${p.nombre || p.correo}.`
-          : `${p.nombre || p.correo} ahora puede validar mantenimiento.`
-      )
-      await cargar()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo cambiar el permiso.')
-    } finally {
-      setOcupado(null)
-    }
-  }
+  const esYo = sel?.id === yo?.id
+  const valida = !!sel?.permisos.includes(PERMISO_VALIDAR)
 
   return (
     <>
       <PageHeader
         eyebrow="Gestión"
         titulo="Usuarios y roles"
-        sub="Las cuentas se crean solas al ingresar con un correo @unal.edu.co. Aquí se asignan roles, se otorga el permiso técnico y se inhabilita a quien haga falta."
+        sub="Las cuentas se crean solas al ingresar con un correo @unal.edu.co. Toque a una persona para cambiar su rol, su permiso técnico o inhabilitarla."
       />
 
-      <div className="stats">
-        <div className="stat">
-          <div className="stat__label">
-            <Icon nombre="usuario" width={14} height={14} /> Usuarios
+      <section className="card stack">
+        <div className="field" style={{ margin: 0 }}>
+          <label className="solo-lector" htmlFor="buscar">
+            Buscar
+          </label>
+          <div style={{ position: 'relative' }}>
+            <Icon
+              nombre="buscar"
+              width={16}
+              height={16}
+              style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-400)', pointerEvents: 'none' }}
+            />
+            <input
+              id="buscar"
+              type="search"
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              placeholder="Nombre, correo o programa"
+              style={{ paddingLeft: 34 }}
+            />
           </div>
-          <div className="stat__value">{conteos.usuario}</div>
         </div>
-        <div className="stat brand">
-          <div className="stat__label">
-            <Icon nombre="llave" width={14} height={14} /> Laboratoristas
-          </div>
-          <div className="stat__value">{conteos.laboratorista}</div>
+        <div className="chips" role="group" aria-label="Filtrar">
+          {FILTROS.map((f) => (
+            <button key={f.id} type="button" className="chip" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
+              {f.texto}
+              {f.n !== undefined && <span className="chip__n">{f.n}</span>}
+            </button>
+          ))}
         </div>
-        <div className="stat ok">
-          <div className="stat__label">
-            <Icon nombre="escudo" width={14} height={14} /> Administradores
-          </div>
-          <div className="stat__value">{conteos.administrador}</div>
-        </div>
-        <div className="stat danger">
-          <div className="stat__label">
-            <Icon nombre="prohibido" width={14} height={14} /> Inhabilitados
-          </div>
-          <div className="stat__value">{conteos.inactivos}</div>
-        </div>
-      </div>
+      </section>
 
-      {error && (
+      {error && !sel && (
         <div className="alert danger">
           <Icon nombre="alerta" />
           <div className="alert__body">{error}</div>
         </div>
       )}
 
-      <section className="card">
-        <div className="row" style={{ gap: 'var(--s3)' }}>
-          <div className="field" style={{ flex: '1 1 220px' }}>
-            <label className="field__label" htmlFor="buscar">
-              Buscar
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Icon
-                nombre="buscar"
-                width={16}
-                height={16}
-                style={{
-                  position: 'absolute',
-                  left: 11,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--ink-400)',
-                  pointerEvents: 'none'
-                }}
-              />
-              <input
-                id="buscar"
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Nombre o correo"
-                style={{ paddingLeft: 34 }}
-              />
-            </div>
-          </div>
-          <div className="field" style={{ minWidth: 160 }}>
-            <label className="field__label" htmlFor="rol-filtro">
-              Rol
-            </label>
-            <select id="rol-filtro" value={filtroRol} onChange={(e) => setFiltroRol(e.target.value as 'TODOS' | Rol)}>
-              <option value="TODOS">Todos</option>
-              {ROLES.map((r) => (
-                <option key={r.valor} value={r.valor}>
-                  {r.etiqueta}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <p className="help" style={{ marginBottom: 0 }}>
-          {filtrados.length} de {perfiles.length} cuentas.
-        </p>
-      </section>
+      {cargando && <Cargando texto="Buscando…" />}
 
-      {cargando && <Cargando texto="Cargando usuarios…" />}
-
-      {!cargando && filtrados.length === 0 && (
+      {!cargando && lista.length === 0 && (
         <div className="card">
-          <Empty icono="usuarios" titulo="No hay usuarios que coincidan">
-            Cambie la búsqueda o el filtro de rol.
+          <Empty icono="usuarios" titulo="Nadie coincide">
+            Cambie la búsqueda o el filtro.
           </Empty>
         </div>
       )}
 
-      {!cargando && filtrados.length > 0 && (
-        <div className="grid" style={{ gap: 'var(--s2)' }}>
-          {filtrados.map((p) => {
-            const esYo = p.id === yo?.id
-            const bloqueado = ocupado === p.id
-            const valida = p.permisos.includes(PERMISO_VALIDAR)
-            return (
-              <div key={p.id} className="usuario-fila">
-                <div className="usuario-fila__identidad">
-                  <span className="avatar">{inicialesDe(p.nombre || p.correo)}</span>
-                  <div style={{ minWidth: 0 }}>
-                    <div className="row tight">
-                      <strong style={{ fontSize: 'var(--text-sm)' }}>{p.nombre || 'Sin nombre'}</strong>
-                      {esYo && <span className="badge gray">usted</span>}
-                    </div>
-                    <div className="tiny muted" style={{ wordBreak: 'break-all' }}>
-                      {p.correo}
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="solo-lector" htmlFor={`rol-${p.id}`}>
-                    Rol de {p.nombre}
-                  </label>
-                  <select
-                    id={`rol-${p.id}`}
-                    value={p.rol}
-                    disabled={esYo || bloqueado}
-                    onChange={(e) => cambiarRol(p, e.target.value as Rol)}
-                    style={{ minHeight: 36, fontSize: 'var(--text-sm)' }}
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r.valor} value={r.valor}>
-                        {r.etiqueta}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <span className={`badge ${p.activo ? 'ok' : 'danger'}`}>
-                    <span className="punto" />
-                    {p.activo ? 'Habilitado' : 'Inhabilitado'}
-                  </span>
-                </div>
-
-                <label className="switch" title="Permiso para validar mantenimiento">
-                  <input
-                    type="checkbox"
-                    checked={valida}
-                    disabled={bloqueado}
-                    onChange={() => cambiarPermiso(p)}
-                  />
-                  <span className="switch__track" />
-                  <span className="tiny">Validar mantenimiento</span>
-                </label>
-
-                <button
-                  className={`btn sm ${p.activo ? 'danger' : 'ok'}`}
-                  disabled={esYo || bloqueado}
-                  onClick={() => cambiarActivo(p)}
-                  type="button"
-                >
-                  {p.activo ? 'Inhabilitar' : 'Habilitar'}
-                </button>
-              </div>
-            )
-          })}
-        </div>
+      {!cargando && lista.length > 0 && (
+        <section className="lista-usuarios" aria-label={`${total} cuentas`}>
+          {lista.map((p) => (
+            <button key={p.id} type="button" className="lista-usuarios__fila" onClick={() => abrir(p)}>
+              <span className="avatar">{inicialesDe(p.nombre || p.correo)}</span>
+              <span className="lista-usuarios__texto">
+                <strong>
+                  {p.nombre || 'Sin nombre'} {p.id === yo?.id && <span className="badge gray">usted</span>}
+                </strong>
+                <span>
+                  {p.correo}
+                  {p.programa ? ` · ${p.programa}` : ''}
+                </span>
+              </span>
+              <span className="lista-usuarios__marcas">
+                {p.rol !== 'usuario' && <span className={`badge ${p.rol === 'administrador' ? 'ok' : 'info'}`}>{ETIQUETA_ROL[p.rol]}</span>}
+                {p.permisos.includes(PERMISO_VALIDAR) && <span className="badge outline">Técnico</span>}
+                {!p.activo && <span className="badge danger">Inhabilitado</span>}
+              </span>
+            </button>
+          ))}
+          <div className="lista-usuarios__pie">
+            <span className="tiny muted">
+              {lista.length} de {total}
+            </span>
+            {lista.length < total && (
+              <button className="btn ghost sm" type="button" disabled={masCargando} onClick={() => void cargar(pagina + 1)}>
+                {masCargando ? 'Cargando…' : `Ver ${Math.min(TAMANO, total - lista.length)} más`}
+              </button>
+            )}
+          </div>
+        </section>
       )}
 
-      <section className="card">
-        <h3 style={{ fontSize: 'var(--text-base)' }}>Reglas</h3>
-        <ul className="small muted" style={{ paddingLeft: '1.05rem', margin: 0 }}>
-          <li>Nadie puede cambiar su propio rol ni inhabilitar su propia cuenta.</li>
-          <li>Solo un administrador puede asignar roles, habilitar cuentas u otorgar permisos.</li>
-          <li>Los usuarios se crean al ingresar por primera vez con su correo @unal.edu.co.</li>
-          <li>
-            El permiso <code>validar_mantenimiento</code> se otorga por separado y no cambia el rol.
-          </li>
-        </ul>
-      </section>
+      <Modal
+        abierto={!!sel}
+        titulo={sel?.nombre || 'Sin nombre'}
+        descripcion={sel ? `${sel.correo}${sel.programa ? ` · ${sel.programa}` : ''}` : undefined}
+        onCerrar={() => {
+          setSel(null)
+          setError(null)
+        }}
+      >
+        {sel && (
+          <div className="stack">
+            <div className="row tight">
+              <span className={`badge ${sel.activo ? 'ok' : 'danger'}`}>
+                <span className="punto" /> {sel.activo ? 'Habilitado' : 'Inhabilitado'}
+              </span>
+              {sel.matricula && <span className="badge outline">{sel.matricula}</span>}
+              <span className="tiny muted">Cuenta creada {hace(sel.creado_en)}</span>
+            </div>
+            <p className="small" style={{ margin: 0 }}>
+              {actividad
+                ? actividad.reservas
+                  ? `${actividad.reservas} ${actividad.reservas === 1 ? 'reserva' : 'reservas'}. La última, ${actividad.ultima?.equipos?.codigo ?? ''}: ${fecha(actividad.ultima!.inicio)}`
+                  : 'Aún no ha hecho reservas.'
+                : 'Cargando actividad…'}
+            </p>
+
+            <div className="field">
+              <label className="field__label" htmlFor="usr-rol">
+                Rol
+              </label>
+              <select
+                id="usr-rol"
+                value={sel.rol}
+                disabled={esYo || ocupado}
+                onChange={(e) => {
+                  const rol = e.target.value as Rol
+                  void cambiar(() => asignarRol(sel.id, rol), { rol }, `${sel.nombre || sel.correo} ahora es ${ETIQUETA_ROL[rol].toLowerCase()}.`)
+                }}
+              >
+                {ROLES.map((r) => (
+                  <option key={r.valor} value={r.valor}>
+                    {r.etiqueta}
+                  </option>
+                ))}
+              </select>
+              {esYo && <p className="help">No puede cambiar su propio rol.</p>}
+            </div>
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={valida}
+                disabled={ocupado}
+                onChange={() =>
+                  void cambiar(
+                    () => otorgarPermiso(sel.id, PERMISO_VALIDAR, !valida),
+                    { permisos: valida ? sel.permisos.filter((x) => x !== PERMISO_VALIDAR) : [...sel.permisos, PERMISO_VALIDAR] },
+                    valida ? 'Permiso técnico retirado.' : 'Ahora puede validar mantenimientos.'
+                  )
+                }
+              />
+              <span>
+                <strong>Puede validar mantenimientos</strong>
+                Permiso técnico, independiente del rol.
+              </span>
+            </label>
+
+            {error && (
+              <div className="alert danger">
+                <Icon nombre="alerta" />
+                <div className="alert__body">{error}</div>
+              </div>
+            )}
+
+            <button
+              className={`btn ${sel.activo ? 'danger' : 'ok'}`}
+              type="button"
+              disabled={esYo || ocupado}
+              onClick={() =>
+                void cambiar(
+                  () => activarUsuario(sel.id, !sel.activo),
+                  { activo: !sel.activo },
+                  sel.activo ? 'Cuenta inhabilitada.' : 'Cuenta habilitada.'
+                )
+              }
+            >
+              {sel.activo ? 'Inhabilitar cuenta' : 'Habilitar cuenta'}
+            </button>
+          </div>
+        )}
+      </Modal>
     </>
   )
 }

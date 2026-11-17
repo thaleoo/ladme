@@ -15,7 +15,9 @@ self.addEventListener('push', function (evento) {
     data: { url: datos.url || '/' },
     lang: 'es-CO'
   }
-  evento.waitUntil(self.registration.showNotification(titulo, opciones))
+  // Marca el icono de la app instalada; la cifra exacta la pone la app al abrirse.
+  const marcar = self.navigator && self.navigator.setAppBadge ? self.navigator.setAppBadge().catch(function () {}) : Promise.resolve()
+  evento.waitUntil(Promise.all([self.registration.showNotification(titulo, opciones), marcar]))
 })
 
 self.addEventListener('notificationclick', function (evento) {

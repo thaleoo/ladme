@@ -32,6 +32,17 @@ const trazos: Record<string, ReactNode> = {
       <path d="M13 6.5v1.6M13 11v2M13 15.4v2.1" />
     </>
   ),
+  compartir: (
+    <>
+      <path d="M12 3v12M8 7l4-4 4 4" />
+      <path d="M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8" />
+    </>
+  ),
+  grafica: (
+    <>
+      <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+    </>
+  ),
   qr: (
     <>
       <rect x="3" y="3" width="6.5" height="6.5" rx="1.4" />

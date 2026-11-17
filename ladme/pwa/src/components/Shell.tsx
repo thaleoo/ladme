@@ -4,15 +4,14 @@ import { esAdmin, esStaff, useAuth } from '../context/AuthContext'
 import { contarAvisosSinLeer } from '../lib/api'
 import { perfilCompleto } from '../lib/types'
 import Reglamento from './Reglamento'
+import InstalarApp, { instalarAhora, puedeInstalarse } from './InstalarApp'
+import BannerActualizacion from './BannerActualizacion'
+import { propsPrecarga } from '../lib/rutas'
 import AvisosPush from './AvisosPush'
 import Icon, { type NombreIcono } from './Icon'
 import Logo from './Logo'
 import Modal from './Modal'
 
-interface EventoInstalacion extends Event {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
-}
 
 interface Enlace {
   a: string
@@ -38,6 +37,7 @@ const TITULOS: Array<[RegExp, string]> = [
   [/^\/usuarios/, 'Usuarios'],
   [/^\/admin/, 'Administración'],
   [/^\/avisos/, 'Avisos'],
+  [/^\/mi-uso/, 'Mi uso'],
   [/^\/cuenta/, 'Mi cuenta']
 ]
 
@@ -53,7 +53,7 @@ export default function Shell() {
   const navigate = useNavigate()
   const location = useLocation()
   const [enLinea, setEnLinea] = useState(navigator.onLine)
-  const [instalacion, setInstalacion] = useState<EventoInstalacion | null>(null)
+  const [instalacion, setInstalacion] = useState(puedeInstalarse)
   const [masAbierto, setMasAbierto] = useState(false)
   const [sinLeer, setSinLeer] = useState(0)
 
@@ -64,7 +64,8 @@ export default function Shell() {
     const base: Enlace[] = [
       { a: '/', texto: 'Disponibilidad', icono: 'inicio', fin: true },
       { a: '/reservar', texto: 'Reservar', icono: 'reservar' },
-      { a: '/mis-reservas', texto: 'Mis reservas', icono: 'ticket' }
+      { a: '/mis-reservas', texto: 'Mis reservas', icono: 'ticket' },
+      { a: '/mi-uso', texto: 'Mi uso', icono: 'grafica' }
     ]
     if (staff) base.push({ a: '/validar', texto: 'Validar credencial', icono: 'qr' })
     return base
@@ -81,17 +82,16 @@ export default function Shell() {
   useEffect(() => {
     const arriba = () => setEnLinea(true)
     const abajo = () => setEnLinea(false)
-    const preparado = (e: Event) => {
-      e.preventDefault()
-      setInstalacion(e as EventoInstalacion)
-    }
+    const preparado = () => setInstalacion(puedeInstalarse())
     window.addEventListener('online', arriba)
     window.addEventListener('offline', abajo)
-    window.addEventListener('beforeinstallprompt', preparado)
+    window.addEventListener('ladme-instalable', preparado)
+    window.addEventListener('appinstalled', preparado)
     return () => {
       window.removeEventListener('online', arriba)
       window.removeEventListener('offline', abajo)
-      window.removeEventListener('beforeinstallprompt', preparado)
+      window.removeEventListener('ladme-instalable', preparado)
+      window.removeEventListener('appinstalled', preparado)
     }
   }, [])
 
@@ -109,6 +109,13 @@ export default function Shell() {
     }
   }, [location.pathname])
 
+  // Número de avisos sin leer sobre el icono de la app instalada (donde se admite).
+  useEffect(() => {
+    const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> }
+    if (sinLeer > 0) void nav.setAppBadge?.(sinLeer).catch(() => undefined)
+    else void nav.clearAppBadge?.().catch(() => undefined)
+  }, [sinLeer])
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
     setMasAbierto(false)
@@ -120,10 +127,8 @@ export default function Shell() {
   }
 
   async function instalar() {
-    if (!instalacion) return
-    await instalacion.prompt()
-    await instalacion.userChoice
-    setInstalacion(null)
+    await instalarAhora()
+    setInstalacion(puedeInstalarse())
     setMasAbierto(false)
   }
 
@@ -162,12 +167,12 @@ export default function Shell() {
         <nav className="sidebar__nav" aria-label="Secciones">
           <div className="sidebar__group">Operación</div>
           {operacion.map((e) => (
-            <NavLink key={e.a} to={e.a} end={e.fin} className="sidebar__link">
+            <NavLink key={e.a} to={e.a} end={e.fin} className="sidebar__link" {...propsPrecarga(e.a)}>
               <Icon nombre={e.icono} />
               {e.texto}
             </NavLink>
           ))}
-          <NavLink to="/avisos" className="sidebar__link">
+          <NavLink to="/avisos" className="sidebar__link" {...propsPrecarga('/avisos')}>
             <Icon nombre="campana" />
             Avisos
             {sinLeer > 0 && <span className="contador">{sinLeer > 9 ? '9+' : sinLeer}</span>}
@@ -176,7 +181,7 @@ export default function Shell() {
             <>
               <div className="sidebar__group">Gestión</div>
               {gestion.map((e) => (
-                <NavLink key={e.a} to={e.a} className="sidebar__link">
+                <NavLink key={e.a} to={e.a} className="sidebar__link" {...propsPrecarga(e.a)}>
                   <Icon nombre={e.icono} />
                   {e.texto}
                 </NavLink>
@@ -263,17 +268,23 @@ export default function Shell() {
               )}
               <AvisosPush />
               {perfil && !perfil.reglamento_aceptado_en && <Reglamento />}
+              <InstalarApp />
               <Suspense fallback={<div className="cargando"><span className="spinner" aria-hidden="true" /> Cargando…</div>}>
-                <Outlet />
+                {/* La clave reinicia la animación de entrada en cada cambio de página. */}
+                <div className="pagina" key={location.pathname}>
+                  <Outlet />
+                </div>
               </Suspense>
             </div>
           </div>
         </main>
       </div>
 
+      <BannerActualizacion />
+
       <nav className="bottomnav" aria-label="Navegación principal">
         {enlacesMoviles.map((e) => (
-          <NavLink key={e.a} to={e.a} end={e.fin} className="bottomnav__link">
+          <NavLink key={e.a} to={e.a} end={e.fin} className="bottomnav__link" {...propsPrecarga(e.a)}>
             <Icon nombre={e.icono} />
             <span>{e.texto}</span>
           </NavLink>

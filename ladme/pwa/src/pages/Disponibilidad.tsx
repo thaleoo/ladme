@@ -2,11 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listarEquipos, listarOcupacion } from '../lib/api'
 import type { Equipo, Ocupacion } from '../lib/types'
-import { dia as textoDia, fecha, hora, inicioDia, sumarDias } from '../lib/format'
+import { dia as textoDia, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
 import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
+import Pestanas from '../components/Pestanas'
+import Deslizar from '../components/Deslizar'
+import { guardarCache, leerCache } from '../lib/cacheLocal'
+
 
 type Filtro = 'TODOS' | 'LIBRES' | 'OCUPADOS'
 type Situacion = 'libre' | 'ocupado' | 'bloqueado' | 'inactivo'
@@ -103,6 +107,14 @@ export default function Disponibilidad() {
     localStorage.getItem('ladme-vista') === 'linea' ? 'linea' : 'cuadricula'
   )
 
+  const [copia, setCopia] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+  const refrescar = () =>
+    new Promise<void>((listo) => {
+      setTick((n) => n + 1)
+      window.setTimeout(listo, 600)
+    })
+
   useEffect(() => {
     let vivo = true
     const cargar = () =>
@@ -112,8 +124,19 @@ export default function Disponibilidad() {
           setEquipos(eqs)
           setOcupacion(ocs)
           setError(null)
+          setCopia(null)
+          guardarCache('disponibilidad', { eqs, ocs })
         })
-        .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudo cargar la disponibilidad.'))
+        .catch((e: unknown) => {
+          if (!vivo) return
+          // Sin conexión: se muestra lo último que se vio, marcado como copia.
+          const c = leerCache<{ eqs: Equipo[]; ocs: Ocupacion[] }>('disponibilidad')
+          if (c) {
+            setEquipos(c.datos.eqs)
+            setOcupacion(c.datos.ocs)
+            setCopia(c.guardado)
+          } else setError(e instanceof Error ? e.message : 'No se pudo cargar la disponibilidad.')
+        })
         .finally(() => vivo && setCargando(false))
     void cargar()
     // La disponibilidad cambia mientras se mira: se refresca cada minuto.
@@ -122,7 +145,7 @@ export default function Disponibilidad() {
       vivo = false
       window.clearInterval(t)
     }
-  }, [])
+  }, [tick])
 
   const hoy = useMemo(() => inicioDia(new Date()), [])
   const dias = useMemo(() => Array.from({ length: 7 }, (_, i) => sumarDias(hoy, i)), [hoy])
@@ -195,6 +218,15 @@ export default function Disponibilidad() {
         }
       />
 
+      <Deslizar alActualizar={refrescar} />
+
+      {copia && (
+        <div className="alert warn">
+          <Icon nombre="sin-conexion" />
+          <div className="alert__body">Sin conexión: esto es lo que había {hace(copia)}. Puede haber cambiado.</div>
+        </div>
+      )}
+
       {error && (
         <div className="alert danger">
           <Icon nombre="alerta" />
@@ -248,20 +280,12 @@ export default function Disponibilidad() {
       </section>
 
       {categorias.length > 1 && (
-        <div className="pestanas" role="tablist" aria-label="Categorías">
-          {['TODAS', ...categorias].map((c) => (
-            <button
-              key={c}
-              role="tab"
-              type="button"
-              aria-selected={categoria === c}
-              className={categoria === c ? 'activo' : ''}
-              onClick={() => setCategoria(c)}
-            >
-              {c === 'TODAS' ? 'Todo' : c}
-            </button>
-          ))}
-        </div>
+        <Pestanas
+          etiqueta="Categorías"
+          opciones={['TODAS', ...categorias].map((c) => ({ id: c, texto: c === 'TODAS' ? 'Todo' : c }))}
+          actual={categoria}
+          alCambiar={setCategoria}
+        />
       )}
 
       {cargando && (

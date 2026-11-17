@@ -6,6 +6,7 @@ import { fecha, hace } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon, { type NombreIcono } from '../components/Icon'
 import { esStaff, useAuth } from '../context/AuthContext'
+import Deslizar from '../components/Deslizar'
 
 function icono(tipo: string): NombreIcono {
   if (tipo.startsWith('mantenimiento')) return 'llave'
@@ -56,6 +57,8 @@ export default function Avisos() {
             : 'Lo que ha pasado con sus reservas, sus solicitudes y sus reportes.'
         }
       />
+
+      <Deslizar alActualizar={cargar} />
 
       {error && (
         <div className="alert danger">

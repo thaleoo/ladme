@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { aplicarTema, temaGuardado, type Tema } from '../lib/tema'
+import { esIOS, estaInstalada, instalarAhora, puedeInstalarse } from '../components/InstalarApp'
 import PageHeader from '../components/PageHeader'
 import Icon from '../components/Icon'
 import { esAdmin, esStaff, puedeValidarMantenimiento, useAuth } from '../context/AuthContext'
@@ -28,6 +31,8 @@ export default function Cuenta() {
   const { perfil, salir } = useAuth()
   const navigate = useNavigate()
   const lim = useLimites()
+  const [tema, setTema] = useState<Tema>(temaGuardado)
+  const [instalable, setInstalable] = useState(puedeInstalarse)
 
   if (!perfil) return null
 
@@ -96,6 +101,15 @@ export default function Cuenta() {
           <h2>Accesos rápidos</h2>
         </div>
         <div className="grid cols-2">
+          <Link to="/mi-uso" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
+            <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
+              <Icon nombre="grafica" />
+            </span>
+            <span>
+              <strong style={{ display: 'block' }}>Mi uso</strong>
+              <span className="tiny muted">Horas y equipos usados, para sus informes.</span>
+            </span>
+          </Link>
           {esStaff(perfil) && (
             <Link to="/admin" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
               <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
@@ -174,19 +188,53 @@ export default function Cuenta() {
       </section>
 
       <section className="card">
+        <h3>Apariencia</h3>
+        <div className="segmented" role="group" aria-label="Tema" style={{ marginTop: 'var(--s2)' }}>
+          {(
+            [
+              ['auto', 'Automático'],
+              ['claro', 'Claro'],
+              ['oscuro', 'Oscuro']
+            ] as const
+          ).map(([v, t]) => (
+            <button
+              key={v}
+              type="button"
+              className={tema === v ? 'activo' : ''}
+              onClick={() => {
+                aplicarTema(v)
+                setTema(v)
+              }}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <p className="help" style={{ marginBottom: 0 }}>«Automático» sigue la configuración de su dispositivo.</p>
+      </section>
+
+      <section className="card">
         <h3>Instalación</h3>
-        <p className="small muted">
-          Instale LADME para abrirla como aplicación y recibir avisos del laboratorio.
-        </p>
-        <ul className="small muted" style={{ paddingLeft: '1.05rem', margin: 0 }}>
-          <li>
-            <strong>Android / escritorio:</strong> menú del navegador → «Instalar aplicación» o «Añadir a
-            pantalla de inicio».
-          </li>
-          <li>
-            <strong>iPhone / iPad:</strong> Compartir → «Añadir a pantalla de inicio».
-          </li>
-        </ul>
+        {estaInstalada() ? (
+          <p className="small muted" style={{ margin: 0 }}>
+            <Icon nombre="check-circulo" width={14} height={14} /> Ya está usando LADME como aplicación.
+          </p>
+        ) : instalable ? (
+          <>
+            <p className="small muted">Ábrala como una app, reciba avisos y entre más rápido.</p>
+            <button className="btn" type="button" onClick={async () => { await instalarAhora(); setInstalable(puedeInstalarse()) }}>
+              <Icon nombre="descargar" /> Instalar LADME
+            </button>
+          </>
+        ) : esIOS() ? (
+          <p className="small muted" style={{ margin: 0 }}>
+            En Safari toque <Icon nombre="compartir" width={14} height={14} /> Compartir y luego «Agregar a inicio».
+          </p>
+        ) : (
+          <p className="small muted" style={{ margin: 0 }}>
+            Abra el menú del navegador y elija «Instalar aplicación» o «Agregar a la pantalla de inicio».
+          </p>
+        )}
       </section>
 
       <button className="btn danger block" onClick={cerrar} type="button">

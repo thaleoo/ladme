@@ -10,8 +10,18 @@ function fail(contexto: string, error: { message: string } | null): never {
 const SELECT_RESERVA = '*, equipos(codigo, nombre, ubicacion), perfiles(nombre, correo, programa)'
 
 /** Perfil del usuario autenticado (lo crea un trigger al registrarse). */
+/**
+ * Usuario de la sesión guardada en el dispositivo, sin ir al servidor de
+ * autenticación (getUser hace una consulta de red en cada llamada). La base de
+ * datos valida el token en cada petición, así que no se pierde seguridad.
+ */
+async function usuarioActual(): Promise<{ user: { id: string } | null }> {
+  const { data } = await supabase.auth.getSession()
+  return { user: data.session?.user ?? null }
+}
+
 export async function obtenerPerfil(): Promise<Perfil | null> {
-  const { data: auth } = await supabase.auth.getUser()
+  const auth = await usuarioActual()
   if (!auth.user) return null
   const { data, error } = await supabase.from('perfiles').select('*').eq('id', auth.user.id).single()
   if (error) fail('No se pudo leer el perfil', error)
@@ -57,7 +67,7 @@ export async function crearReserva(input: {
 }
 
 export async function misReservas(): Promise<Reserva[]> {
-  const { data: auth } = await supabase.auth.getUser()
+  const auth = await usuarioActual()
   if (!auth.user) return []
   const { data, error } = await supabase
     .from('reservas')
@@ -251,7 +261,7 @@ export async function guardarPerfil(datos: {
   programa: string
   matricula: string | null
 }): Promise<void> {
-  const { data: auth } = await supabase.auth.getUser()
+  const auth = await usuarioActual()
   if (!auth.user) throw new Error('Debe iniciar sesión.')
   const { error } = await supabase.from('perfiles').update(datos).eq('id', auth.user.id)
   if (error) fail('No se pudo guardar el perfil', error)
@@ -312,7 +322,7 @@ export async function solicitarExcepcion(input: {
 }
 
 export async function misSolicitudes(): Promise<Solicitud[]> {
-  const { data: auth } = await supabase.auth.getUser()
+  const auth = await usuarioActual()
   if (!auth.user) return []
   const { data, error } = await supabase
     .from('solicitudes_excepcion')
@@ -467,4 +477,105 @@ export async function estadisticasSoporte(desde: string, hasta: string): Promise
   const { data, error } = await supabase.rpc('estadisticas_soporte', { p_desde: desde, p_hasta: hasta })
   if (error) fail('No se pudieron calcular las estadísticas de soporte', error)
   return data as EstadisticasSoporte
+}
+
+/** Reservas propias desde una fecha (para «Mi uso»). */
+export async function misReservasDesde(desde: string | null): Promise<Reserva[]> {
+  const auth = await usuarioActual()
+  if (!auth.user) return []
+  let consulta = supabase
+    .from('reservas')
+    .select('id, codigo_legible, inicio, fin, liberada_en, estado, actividad, tipo, equipos(codigo, nombre, ubicacion)')
+    .eq('usuario_id', auth.user.id)
+    .eq('tipo', 'reserva')
+    .neq('estado', 'cancelada')
+    .order('inicio', { ascending: false })
+    .limit(2000)
+  if (desde) consulta = consulta.gte('inicio', desde)
+  const { data, error } = await consulta
+  if (error) fail('No se pudo cargar su historial', error)
+  return (data ?? []) as unknown as Reserva[]
+}
+
+// ------------------------------------------------------------------ Usuarios
+export type FiltroUsuarios = 'todos' | 'usuario' | 'laboratorista' | 'administrador' | 'inhabilitados' | 'tecnicos'
+
+export interface ResumenUsuarios {
+  total: number
+  usuario: number
+  laboratorista: number
+  administrador: number
+  inhabilitados: number
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ConsultaFiltrable = any
+
+function aplicarFiltro(q: ConsultaFiltrable, filtro: FiltroUsuarios): ConsultaFiltrable {
+  if (filtro === 'inhabilitados') return q.eq('activo', false)
+  if (filtro === 'tecnicos') return q.contains('permisos', ['validar_mantenimiento'])
+  if (filtro !== 'todos') return q.eq('rol', filtro)
+  return q
+}
+
+/** Búsqueda paginada en el servidor: la lista nunca trae a todos los usuarios de una vez. */
+export async function buscarUsuarios(texto: string, filtro: FiltroUsuarios, pagina: number, tamano = 30) {
+  let q = aplicarFiltro(supabase.from('perfiles').select('*', { count: 'exact' }), filtro)
+  const limpio = texto.trim().replace(/[,()*%\\]/g, ' ').replace(/\s+/g, ' ').slice(0, 60)
+  if (limpio) q = q.or(`nombre.ilike.*${limpio}*,correo.ilike.*${limpio}*,programa.ilike.*${limpio}*`)
+  const { data, error, count } = await q
+    .order('nombre')
+    .range(pagina * tamano, pagina * tamano + tamano - 1)
+  if (error) fail('No se pudieron cargar los usuarios', error)
+  return { lista: (data ?? []) as Perfil[], total: count ?? 0 }
+}
+
+export async function resumenUsuarios(): Promise<ResumenUsuarios> {
+  const contar = async (filtro: FiltroUsuarios) => {
+    const { count } = await aplicarFiltro(supabase.from('perfiles').select('id', { count: 'exact', head: true }), filtro)
+    return count ?? 0
+  }
+  const [total, usuario, laboratorista, administrador, inhabilitados] = await Promise.all([
+    contar('todos'), contar('usuario'), contar('laboratorista'), contar('administrador'), contar('inhabilitados')
+  ])
+  return { total, usuario, laboratorista, administrador, inhabilitados }
+}
+
+/** Actividad de una persona para la ficha del panel de usuarios. */
+export async function actividadUsuario(id: string) {
+  const [{ count }, { data }] = await Promise.all([
+    supabase.from('reservas').select('id', { count: 'exact', head: true }).eq('usuario_id', id).eq('tipo', 'reserva'),
+    supabase
+      .from('reservas')
+      .select('inicio, equipos(codigo)')
+      .eq('usuario_id', id)
+      .eq('tipo', 'reserva')
+      .order('inicio', { ascending: false })
+      .limit(1)
+  ])
+  const ultima = (data?.[0] ?? null) as { inicio: string; equipos: { codigo: string } | null } | null
+  return { reservas: count ?? 0, ultima }
+}
+
+// ---------------------------------------------------------- Errores de la app
+export interface ErrorApp {
+  id: number
+  tipo: string
+  mensaje: string
+  pila: string | null
+  ruta: string | null
+  agente: string | null
+  version: string | null
+  creado_en: string
+  perfiles: { nombre: string; correo: string } | null
+}
+
+export async function listarErroresApp(): Promise<ErrorApp[]> {
+  const { data, error } = await supabase
+    .from('errores_app')
+    .select('*, perfiles(nombre, correo)')
+    .order('creado_en', { ascending: false })
+    .limit(300)
+  if (error) fail('No se pudieron cargar los errores', error)
+  return (data ?? []) as ErrorApp[]
 }

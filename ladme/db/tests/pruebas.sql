@@ -171,6 +171,12 @@ begin
   perform pg_temp.ok((estadisticas_soporte(now() - interval '1 day', now() + interval '1 day') ->> 'con_problemas')::int = 1, 'estadísticas de soporte');
   perform pg_temp.ok((select categoria = 'Estación de trabajo' from equipos where codigo = 'UNAL-01'), 'categoría del esquema base');
 
+  -- 0004: registro de errores con límite por persona.
+  perform pg_temp.como('beto@unal.edu.co');
+  for n in 1..25 loop perform registrar_error('error', 'Fallo de prueba ' || n, 'pila', '/', 'Chrome', 'v1'); end loop;
+  perform registrar_error('otro', 'tipo inválido');
+  perform pg_temp.ok((select count(*) from errores_app) = 20, 'errores registrados con límite de 20 cada 10 minutos');
+
   -- Estadísticas.
   perform pg_temp.como('lab@unal.edu.co');
   j := estadisticas(now() - interval '30 days', now() + interval '60 days');
@@ -193,6 +199,7 @@ do $$ begin
   perform pg_temp.ok((select count(*) from reservas where usuario_id <> auth.uid()) = 0, 'un usuario solo ve sus reservas');
   perform pg_temp.ok((select count(*) from contactos) = 0, 'los contactos solo los ve el personal');
   perform pg_temp.ok((select count(*) from reportes) = 0, 'los reportes ajenos no se ven');
+  perform pg_temp.ok((select count(*) from errores_app) = 0, 'el registro de errores solo lo ve el personal');
   perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id <> auth.uid()) = 0, 'cada quien ve solo sus avisos');
   perform pg_temp.ok((select count(*) from ocupacion_publica) > 0, 'la ocupación pública es visible');
