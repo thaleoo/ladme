@@ -3496,3 +3496,29 @@ button:active:not(:disabled),
 .chip[aria-pressed='true'] .chip__n {
   background: rgba(255, 255, 255, 0.24);
 }
+
+/* Botones con aspecto propio (celdas, filas, cabeceras): heredan de «button» un
+   texto blanco al pasar el cursor o tras tocarlos en el teléfono. Se fijan sus
+   variables para que el texto no desaparezca en ningún estado ni tema. */
+.mosaico__celda,
+.lista-usuarios__fila,
+.error-app__cabecera {
+  --btn-fg: var(--ink-900);
+  --btn-bg: transparent;
+  color: var(--ink-900);
+}
+.mosaico__celda:hover,
+.lista-usuarios__fila:hover,
+.error-app__cabecera:hover {
+  color: var(--ink-900);
+}
+.lista-usuarios__fila:hover,
+.error-app__cabecera:hover {
+  box-shadow: none;
+}
+.mosaico__celda:hover {
+  box-shadow: var(--shadow-sm);
+}
+.btn-enlace {
+  --btn-fg: var(--ink-500);
+}

@@ -20,29 +20,34 @@ function version(): string {
  * data-tema="claro" lo anule, sin tocar el CSS fuente.
  */
 function temaElegible(): { postcssPlugin: string; Once: (raiz: import('postcss').Root) => void } {
-  const prefijar = (selector: string, prefijo: string) =>
+  // La condición va dentro de :where(), que no suma especificidad: cada regla
+  // oscura conserva exactamente el peso que tenía en el CSS fuente. Si el prefijo
+  // sumara peso, una regla general como «button { --btn-bg }» le ganaría a
+  // variantes como «.btn.ghost» o «.chip[aria-pressed]» y a los enlaces con
+  // aspecto de botón.
+  const prefijar = (selector: string, condicion: string) =>
     selector
       .split(',')
       .map((s) => {
         const t = s.trim()
-        if (t === ':root' || t === 'html') return `${prefijo}`
-        if (t.startsWith(':root') || t.startsWith('html')) return t.replace(/^(:root|html)/, prefijo)
-        return `${prefijo} ${t}`
+        // :root / html: se conserva su peso propio y se añade la condición sin peso.
+        const raiz = t.match(/^(:root|html)(.*)$/)
+        if (raiz) return `:root:where(${condicion})${raiz[2]}`
+        return `:where(:root${condicion}) ${t}`
       })
       .join(', ')
+  const fuera = (r: Rule) => r.parent?.type === 'atrule' && /keyframes/.test((r.parent as AtRule).name)
   return {
     postcssPlugin: 'ladme-tema-elegible',
     Once(raiz) {
       raiz.walkAtRules('media', (at: AtRule) => {
-        if (!/prefers-color-scheme:\s*dark/.test(at.params) || at.params.includes('data-tema')) return
+        if (!/prefers-color-scheme:\s*dark/.test(at.params)) return
         const forzado = at.clone({ params: at.params.replace(/\(prefers-color-scheme:\s*dark\)\s*(and)?/, '').trim() })
         at.walkRules((r: Rule) => {
-          if (r.parent?.type === 'atrule' && /keyframes/.test((r.parent as AtRule).name)) return
-          r.selector = prefijar(r.selector, ':root:not([data-tema="claro"])')
+          if (!fuera(r)) r.selector = prefijar(r.selector, ':not([data-tema="claro"])')
         })
         forzado.walkRules((r: Rule) => {
-          if (r.parent?.type === 'atrule' && /keyframes/.test((r.parent as AtRule).name)) return
-          r.selector = prefijar(r.selector, ':root[data-tema="oscuro"]')
+          if (!fuera(r)) r.selector = prefijar(r.selector, '[data-tema="oscuro"]')
         })
         if (forzado.params) at.after(forzado)
         else at.after(forzado.nodes ?? [])

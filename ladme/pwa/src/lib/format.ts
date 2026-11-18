@@ -139,3 +139,8 @@ export function hace(iso: string): string {
   const d = Math.round(h / 24)
   return futuro ? `en ${d} d` : `hace ${d} d`
 }
+
+/** Cierra una frase con punto sin duplicarlo cuando termina en «a. m.» o «p. m.». */
+export function conPunto(texto: string): string {
+  return texto.endsWith('.') ? texto : `${texto}.`
+}
