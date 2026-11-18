@@ -6,16 +6,17 @@ const medida = document.querySelector('#medida .isla__contenido');
 
 let paquete = null;
 let abierta = false;
-let accion = null; // 'reservar' | 'extender' | 'liberar' | 'reportar' | 'ficha'
+let accion = null; // 'reservar' | 'extender' | 'liberar' | 'reportar'
+let aviso = ''; // error al abrir el navegador
 let insistiaAntes = false;
 let ultimaInsistencia = 0;
 const qrCache = {};
 
 const ACCIONES = {
-  reservar: { texto: 'Reservar este equipo', titulo: 'Reserva desde tu celular', cuerpo: 'Escanea, elige hasta qué hora y el equipo queda a tu nombre.', ruta: (c) => `/reservar?equipo=${c}`, icono: ICONOS.mas, principal: true },
-  extender: { texto: 'Extender', titulo: 'Extiende tu reserva', cuerpo: 'Escanea y toca «Extender» en la ficha del equipo.', ruta: (c) => `/equipo/${c}`, icono: ICONOS.reloj, principal: true },
-  liberar:  { texto: 'Liberar', titulo: 'Libera el equipo', cuerpo: 'Si ya terminaste, libéralo para que otra persona pueda usarlo.', ruta: (c) => `/equipo/${c}`, icono: ICONOS.salir },
-  reportar: { texto: 'Reportar falla', titulo: 'Reporta una falla', cuerpo: 'Cuéntale al laboratorio qué pasa con este equipo.', ruta: (c) => `/equipo/${c}?reportar=1`, icono: ICONOS.falla },
+  reservar: { texto: 'Reservar este equipo', titulo: 'Reserva desde tu celular', cuerpo: 'Escanea, elige hasta qué hora y el equipo queda a tu nombre.', ruta: (c) => `/pc/${c}/reservar`, icono: ICONOS.mas, principal: true },
+  extender: { texto: 'Extender', titulo: 'Extiende tu reserva', cuerpo: 'Escanea y elige cuánto tiempo más necesitas. Un toque y listo.', ruta: (c) => `/pc/${c}/extender`, icono: ICONOS.reloj, principal: true },
+  liberar:  { texto: 'Liberar', titulo: 'Libera el equipo', cuerpo: 'Si ya terminaste, escanea y confirma: el equipo queda libre para otra persona.', ruta: (c) => `/pc/${c}/liberar`, icono: ICONOS.salir },
+  reportar: { texto: 'Reportar falla', titulo: 'Reporta una falla', cuerpo: 'Cuéntale al laboratorio qué pasa con este equipo.', ruta: (c) => `/pc/${c}/reportar`, icono: ICONOS.falla },
 };
 
 function accionesDe(estado) {
@@ -31,7 +32,7 @@ function etiquetaCompacta(v) {
     case 'gracia': return 'Reserva terminada';
     case 'libre': return v.siguiente ? `Libre hasta ${textoHora(v.siguiente)}` : 'Disponible';
     case 'libre_en_uso': return 'Sin reserva';
-    case 'desbloqueado': return 'Uso libre';
+    case 'desbloqueado': return v.titulo === 'Clase en curso' ? 'Clase en curso' : 'Uso libre';
     case 'mantenimiento': return esc(v.titulo);
     case 'ocupado': return 'Bloqueado';
     default: return 'Conectando…';
@@ -73,6 +74,7 @@ function htmlAbierta(v) {
         <div class="qr">${svg ?? ''}</div>
         <div>
           <p><strong>${a.titulo}</strong>${a.cuerpo}</p>
+          ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
           <div class="acciones" style="margin-top:0">
             <button class="boton" data-abrir="${esc(ruta)}">${ICONOS.enlace} Abrir aquí</button>
             <button class="boton" data-volver>${ICONOS.volver}</button>
@@ -165,10 +167,16 @@ isla.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!abierta) { abierta = true; pintar(); return; }
   if (!b) return;
-  if (b.dataset.cerrar !== undefined) { abierta = false; accion = null; }
-  else if (b.dataset.volver !== undefined) accion = null;
-  else if (b.dataset.accion) accion = b.dataset.accion;
-  else if (b.dataset.abrir) { invocar('abrir', { ruta: b.dataset.abrir }); return; }
+  if (b.dataset.cerrar !== undefined) { abierta = false; accion = null; aviso = ''; }
+  else if (b.dataset.volver !== undefined) { accion = null; aviso = ''; }
+  else if (b.dataset.accion) { accion = b.dataset.accion; aviso = ''; }
+  else if (b.dataset.abrir) {
+    aviso = '';
+    invocar('abrir', { ruta: b.dataset.abrir })
+      .then(() => { abierta = false; accion = null; pintar(); })
+      .catch((err) => { aviso = String(err); pintar(); });
+    return;
+  }
   pintar();
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && abierta) { abierta = false; accion = null; pintar(); } });

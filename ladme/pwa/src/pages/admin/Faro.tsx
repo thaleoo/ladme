@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  codigoVinculoFaro, desbloquearFaro, desvincularFaro, generarClaveFaro, modoFaro, panelFaro,
+  codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, panelFaro, terminarClaseFaro,
   type EquipoFaro, type ModoFaro, type PanelFaro
 } from '../../lib/api'
 import { esAdmin, useAuth } from '../../context/AuthContext'
@@ -9,6 +9,7 @@ import { Cargando, Empty } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
 import Modal from '../../components/Modal'
 import { useToast } from '../../components/Toast'
+import FaroUso from './FaroUso'
 
 const MODOS: Array<{ id: ModoFaro; texto: string; ayuda: string }> = [
   { id: 'observar', texto: 'Observar', ayuda: 'Solo muestra la isla y registra el uso sin reserva.' },
@@ -54,6 +55,7 @@ export default function Faro() {
   const [confirmar, setConfirmar] = useState<{ titulo: string; texto: string; accion: () => Promise<void> } | null>(null)
   const [clave, setClave] = useState<string | null>(null)
   const [, setTic] = useState(0)
+  const [clase, setClase] = useState<{ motivo: string; minutos: number } | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -148,6 +150,32 @@ export default function Faro() {
           </div>
         </div>
       </section>
+
+      <section className="card tight">
+        <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s3)' }}>
+          <div style={{ minWidth: 0 }}>
+            <strong className="row tight"><Icon nombre="usuarios" /> Modo clase</strong>
+            <p className="tiny muted" style={{ margin: '2px 0 0' }}>
+              Bloquea los equipos para reservas durante la clase y los deja libres para usar sin reserva. Los equipos que ya
+              tienen una reserva en ese horario se respetan.
+            </p>
+          </div>
+          <div className="row tight">
+            <button className="btn ghost sm" type="button" disabled={ocupado}
+                    onClick={() => void hacer(async () => {
+                      const n = await terminarClaseFaro(null)
+                      toast.mostrar(n ? `Clase terminada en ${n} ${n === 1 ? 'equipo' : 'equipos'}.` : 'No hay clases en curso.')
+                    })}>
+              Terminar clase
+            </button>
+            <button className="btn sm" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>
+              Empezar clase
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <FaroUso />
 
       {admin && (
         <section className="card tight">
@@ -312,6 +340,45 @@ export default function Faro() {
           <p className="small muted" style={{ margin: 0 }}>
             No se volverá a mostrar. Guárdela donde solo el personal la vea; si se filtra, genere otra.
           </p>
+        </div>
+      </Modal>
+
+      <Modal abierto={!!clase} titulo="Empezar una clase en la sala" onCerrar={() => setClase(null)}
+             pie={
+               <>
+                 <button className="btn gray" type="button" onClick={() => setClase(null)}>Cancelar</button>
+                 <button className="btn" type="button" disabled={ocupado || (clase?.motivo.trim().length ?? 0) < 3}
+                         onClick={() => {
+                           const c = clase
+                           setClase(null)
+                           if (c) void hacer(async () => {
+                             const r = await empezarClaseFaro(null, c.minutos, c.motivo.trim())
+                             toast.mostrar(`Clase hasta las ${hora(r.fin)} en ${r.equipos.length} equipos.` +
+                               (r.omitidos.length ? ` Con reserva, se respetaron: ${r.omitidos.join(', ')}.` : ''))
+                           })
+                         }}>
+                   Empezar
+                 </button>
+               </>
+             }>
+        <div className="stack">
+          <div className="field">
+            <label className="field__label" htmlFor="clase-motivo">Clase o actividad</label>
+            <input id="clase-motivo" placeholder="Estadística I · grupo 2" maxLength={120}
+                   value={clase?.motivo ?? ''} onChange={(e) => clase && setClase({ ...clase, motivo: e.target.value })} />
+          </div>
+          <div className="field">
+            <span className="field__label">Duración</span>
+            <div className="chips" role="group" aria-label="Duración">
+              {[60, 90, 120, 180, 240].map((m) => (
+                <button key={m} type="button" className="chip" aria-pressed={clase?.minutos === m}
+                        onClick={() => clase && setClase({ ...clase, minutos: m })}>
+                  {m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="tiny muted" style={{ margin: 0 }}>Aplica a toda la sala. Al terminar, use «Terminar clase» o espere a que venza.</p>
         </div>
       </Modal>
 

@@ -63,3 +63,4 @@ body { display: flex; justify-content: center; align-items: flex-start; padding:
 /* Entrada suave del contenido al cambiar de tamaño */
 .isla__contenido > * { animation: aparecer 0.32s ease both; }
 @keyframes aparecer { from { opacity: 0; transform: translateY(-4px) scale(0.985); } to { opacity: 1; transform: none; } }
+.aviso-error { color: #fca5a5 !important; font-size: 12px !important; }

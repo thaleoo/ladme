@@ -2984,6 +2984,7 @@ function enviarCorreosSupabase_() {
   } catch (err) {
     Logger.log("enviarCorreosSupabase_: " + err);
   } finally {
+    try { enviarChatPersonal_(); } catch (err) { Logger.log("enviarChatPersonal_: " + err); }
     lock.releaseLock();
   }
 }
@@ -3185,4 +3186,62 @@ function respaldarAhora() {
   var r = respaldarSupabase_();
   Logger.log("Carpeta: " + carpetaRespaldos_().getUrl());
   return r;
+}
+
+
+/* ============================================================================
+ * AVISOS AL CHAT DEL PERSONAL (Telegram o Google Chat)
+ * ----------------------------------------------------------------------------
+ * Reportes de falla, solicitudes de reserva larga y alertas de Faro (equipo sin
+ * señal en horario, clave de emergencia usada, Faro cerrado a la fuerza) llegan a
+ * un chat del personal. Los mensajes NO llevan nombres ni datos personales:
+ * solo el equipo y qué pasó, con un enlace a LADME.
+ *
+ * Configure UNA de estas opciones en Propiedades del script:
+ *   Telegram:     TELEGRAM_BOT_TOKEN  (de @BotFather)  y  TELEGRAM_CHAT_ID (del grupo)
+ *   Google Chat:  GCHAT_WEBHOOK_URL   (Espacio → Apps e integraciones → Webhooks)
+ * Luego ejecute probarChatPersonal() una vez. El envío corre con el worker de
+ * correo (cada 5 minutos); no hace falta otro disparador.
+ * ========================================================================== */
+
+function chatConfigurado_() {
+  return (prop_("TELEGRAM_BOT_TOKEN") && prop_("TELEGRAM_CHAT_ID")) || prop_("GCHAT_WEBHOOK_URL");
+}
+
+function enviarMensajeChat_(texto) {
+  var token = prop_("TELEGRAM_BOT_TOKEN"), chat = prop_("TELEGRAM_CHAT_ID"), hook = prop_("GCHAT_WEBHOOK_URL");
+  var r;
+  if (token && chat) {
+    r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+      method: "post", contentType: "application/json", muteHttpExceptions: true,
+      payload: JSON.stringify({ chat_id: chat, text: texto, disable_web_page_preview: true })
+    });
+  } else if (hook) {
+    r = UrlFetchApp.fetch(hook, {
+      method: "post", contentType: "application/json; charset=UTF-8", muteHttpExceptions: true,
+      payload: JSON.stringify({ text: texto })
+    });
+  } else {
+    throw new Error("No hay chat configurado (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID o GCHAT_WEBHOOK_URL).");
+  }
+  if (r.getResponseCode() >= 300) throw new Error("El chat respondió " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
+}
+
+function enviarChatPersonal_() {
+  if (!chatConfigurado_() || !prop_("SUPABASE_URL") || !prop_("SUPABASE_SECRET_KEY")) return;
+  try { supabaseRpc_("encolar_alertas_faro", {}); } catch (err) { Logger.log(err); }
+  var pendientes = supabaseRpc_("chat_pendientes", { p_limite: 20 }) || [];
+  var pwa = urlPwa_() || prop_("PWA_URL_PRUEBAS");
+  for (var i = 0; i < pendientes.length; i++) {
+    var m = pendientes[i];
+    var texto = "LADME · " + m.texto + (pwa && m.url ? "\n" + pwa + m.url : "");
+    enviarMensajeChat_(texto);
+    supabaseRpc_("marcar_chat_enviado", { p_ids: [m.id] });
+  }
+}
+
+/** Ejecutar desde el editor para comprobar que el chat recibe mensajes. */
+function probarChatPersonal() {
+  enviarMensajeChat_("LADME · Prueba: los avisos del laboratorio llegarán a este chat.");
+  Logger.log("Mensaje de prueba enviado.");
 }

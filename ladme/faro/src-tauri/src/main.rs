@@ -9,5 +9,13 @@ fn main() {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
+    // El vigía es este mismo programa con --vigia <carpeta>: un bucle mínimo, sin ventanas.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.get(1).map(|a| a == faro_lib::ARG_VIGIA).unwrap_or(false) {
+        if let Some(carpeta) = args.get(2) {
+            faro_lib::correr_vigia(carpeta.into());
+        }
+        return;
+    }
     faro_lib::run()
 }

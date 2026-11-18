@@ -254,6 +254,43 @@ begin
   perform pg_temp.falla($q$select faro_panel()$q$, 'Solo el personal');
 end $$;
 
+-- Faro 0007: uso real por hora, modo clase y chat del personal.
+do $$
+declare j jsonb; k jsonb; t text; n int;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  j := faro_codigo_vinculo('UNAL-16');
+  t := faro_vincular(j ->> 'codigo', 'PC-16', 'Windows 11', '0.2.0') ->> 'token';
+  update agentes set ultimo_latido = now() - interval '60 seconds' where token_hash = _faro_hash_token(t);
+  perform faro_estado(t, '{"inactivo_seg": 5}');
+  perform pg_temp.ok((select encendido_seg = 60 and uso_seg = 60 and uso_sin_reserva_seg = 0 from faro_uso u join equipos e on e.id = u.equipo_id
+                       where e.codigo = 'UNAL-16'), 'el latido suma tiempo encendido y en uso (con reserva)');
+  update agentes set ultimo_latido = now() - interval '10 hours' where token_hash = _faro_hash_token(t);
+  perform faro_estado(t, '{"inactivo_seg": 5}');
+  perform pg_temp.ok((select encendido_seg = 180 from faro_uso u join equipos e on e.id = u.equipo_id where e.codigo = 'UNAL-16'),
+                     'si Faro estuvo apagado no se cuentan esas horas (máximo 2 min por latido)');
+  j := faro_estadisticas(now() - interval '1 day', now() + interval '1 hour');
+  perform pg_temp.ok(exists (select 1 from jsonb_array_elements(j -> 'por_equipo') x where x ->> 'codigo' = 'UNAL-16')
+                     and jsonb_array_length(j -> 'por_hora') >= 1, 'estadísticas de uso por equipo y por hora');
+
+  j := faro_clase(array['UNAL-16', 'UNAL-08'], 60, 'Estadística I');
+  perform pg_temp.ok(j -> 'omitidos' ? 'UNAL-16' and j -> 'equipos' ? 'UNAL-08',
+                     'el modo clase omite los equipos con reserva y bloquea los demás');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-08', %L, %L, 'PAE')$q$, now() + interval '5 minutes', now() + interval '30 minutes'), '');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.ok(faro_clase_terminar(null) = 1, 'terminar la clase libera los equipos');
+  perform pg_temp.falla($q$select faro_clase(null, 5, 'Corta')$q$, 'entre 15 minutos');
+
+  perform pg_temp.como('beto@unal.edu.co');
+  perform reportar_falla('UNAL-08', 'Software', 'No abre RStudio desde esta mañana.');
+  perform pg_temp.ok(exists (select 1 from cola_chat where tipo = 'reporte' and texto like '%UNAL-08%Software%' and texto not ilike '%beto%'),
+                     'los reportes llegan al chat del personal sin datos personales');
+  perform pg_temp.ok((select count(*) from chat_pendientes(10)) >= 1, 'Apps Script lee la cola del chat');
+  perform pg_temp.ok(marcar_chat_enviado(array(select id from cola_chat)) >= 1 and (select count(*) from chat_pendientes(10)) = 0,
+                     'los avisos enviados salen de la cola');
+end $$;
+
 -- Permisos reales del rol que usa la PWA.
 select pg_temp.como('ana@unal.edu.co') \gset sin_
 set role authenticated;
@@ -274,6 +311,8 @@ do $$ begin
   perform pg_temp.ok((select count(*) from ocupacion_publica) > 0, 'la ocupación pública es visible');
   perform pg_temp.falla($q$select * from agentes$q$, 'permission denied');
   perform pg_temp.falla($q$select * from faro_clave$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from chat_pendientes(5)$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from faro_uso$q$, 'permission denied');
 end $$;
 reset role;
 

@@ -10,6 +10,14 @@ mod clave;
 mod config;
 mod decision;
 mod inactividad;
+mod vigia;
+
+pub use vigia::ARG as ARG_VIGIA;
+
+/// Punto de entrada del vigía (ver `vigia.rs`).
+pub fn correr_vigia(carpeta: PathBuf) {
+    vigia::correr(carpeta)
+}
 
 use api::{Api, Fallo};
 use chrono::{Duration as Dur, Utc};
@@ -21,6 +29,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_opener::OpenerExt;
 
 const ISLA: &str = "isla";
@@ -52,6 +61,11 @@ struct Paquete {
     version: &'static str,
     vinculado: bool,
     clave_disponible: bool,
+}
+
+/// systemd define INVOCATION_ID en los servicios que lanza.
+fn gestionado_por_systemd() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("INVOCATION_ID").is_some()
 }
 
 fn host() -> String {
@@ -277,8 +291,23 @@ async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Op
 async fn ciclo(app: AppHandle, compartido: Compartido) {
     let api = Api::new();
     let mut ultimo_latido: Option<Instant> = None;
+    let mut ultimo_intento_vinculo: Option<Instant> = None;
+    let mut ultima_revision_vigia = Instant::now();
     loop {
         let inactivo = inactividad::segundos();
+        let (vinculado, carpeta) = {
+            let n = compartido.lock().unwrap();
+            (n.config.token.is_some(), n.carpeta.clone())
+        };
+        if !vinculado && ultimo_intento_vinculo.map(|t| t.elapsed() > Duration::from_secs(30)).unwrap_or(true) {
+            ultimo_intento_vinculo = Some(Instant::now());
+            vincular_solo(&app, &api, &compartido).await;
+        }
+        // El vigía solo acompaña a un Faro vinculado y en la versión instalada.
+        if vinculado && cfg!(not(debug_assertions)) && !gestionado_por_systemd() && ultima_revision_vigia.elapsed() >= Duration::from_secs(3) {
+            ultima_revision_vigia = Instant::now();
+            vigia::asegurar(&carpeta);
+        }
         let (vinculado, toca) = {
             let mut n = compartido.lock().unwrap();
             let cada = if n.copia.bloqueado { 10 } else { 30 };
@@ -309,6 +338,56 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
     }
 }
 
+// ------------------------------------------------------------------ actualizaciones
+
+/// Busca versiones nuevas en los Releases de GitHub (firmadas) y las instala solo cuando nadie
+/// está usando el equipo con una reserva. Solo en Windows (instalación por cuenta) y AppImage:
+/// los .deb y .rpm pedirían la contraseña de administrador, así que esos los actualiza TI.
+async fn actualizaciones(app: AppHandle, compartido: Compartido) {
+    use tauri::utils::{config::BundleType, platform::bundle_type};
+    use tauri_plugin_updater::UpdaterExt;
+    let (Some(clave), Some(url)) = (option_env!("FARO_UPDATER_PUBKEY"), option_env!("FARO_UPDATER_URL")) else { return };
+    if clave.is_empty() || url.is_empty() || !matches!(bundle_type(), Some(BundleType::Nsis) | Some(BundleType::AppImage)) {
+        return;
+    }
+    let Ok(url) = url.parse::<tauri::Url>() else { return };
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    loop {
+        let actualizador = app.updater_builder().pubkey(clave).endpoints(vec![url.clone()]).and_then(|b| b.build());
+        if let Ok(actualizador) = actualizador {
+            if let Ok(Some(nueva)) = actualizador.check().await {
+                // Espera un momento sin reserva vigente (máximo un día) para no interrumpir a nadie.
+                for _ in 0..1440 {
+                    let libre = compartido
+                        .lock()
+                        .unwrap()
+                        .vista
+                        .as_ref()
+                        .map(|v| !matches!(v.estado, decision::Estado::Reservado | decision::Estado::PorTerminar | decision::Estado::Gracia))
+                        .unwrap_or(true);
+                    if libre {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+                let (cfg, token, carpeta) = {
+                    let n = compartido.lock().unwrap();
+                    (n.config.clone(), n.config.token.clone(), n.carpeta.clone())
+                };
+                if let Some(t) = &token {
+                    let _ = Api::new().evento(&cfg, t, "actualizado", json!({ "de": env!("CARGO_PKG_VERSION"), "a": nueva.version })).await;
+                }
+                vigia::pausar(&carpeta, 600);
+                if nueva.download_and_install(|_, _| {}, || {}).await.is_ok() {
+                    app.restart();
+                }
+                vigia::quitar_pausa(&carpeta);
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+    }
+}
+
 // ------------------------------------------------------------------ comandos
 
 #[tauri::command]
@@ -318,17 +397,24 @@ fn estado_inicial(estado: tauri::State<Compartido>) -> Paquete {
 
 #[tauri::command]
 async fn vincular(app: AppHandle, estado: tauri::State<'_, Compartido>, codigo: String) -> Result<String, String> {
+    let estado: Compartido = estado.inner().clone();
     let cfg = estado.lock().unwrap().config.clone();
     let (token, equipo) = Api::new().vincular(&cfg, codigo.trim(), &host(), &sistema()).await.map_err(|f| match f {
         Fallo::Mensaje(m) => m,
         Fallo::Red(_) => "No hay conexión con el servidor. Revise la red e intente de nuevo.".into(),
         Fallo::NoVinculado => "El código no es válido.".into(),
     })?;
+    quedar_vinculado(&app, &estado, token, &equipo)?;
+    Ok(equipo)
+}
+
+fn quedar_vinculado(app: &AppHandle, estado: &Compartido, token: String, equipo: &str) -> Result<(), String> {
     {
         let mut n = estado.lock().unwrap();
-        config::guardar_vinculo(&n.carpeta, Some(&token), Some(&equipo)).map_err(|e| format!("No se pudo guardar: {e}"))?;
+        config::guardar_vinculo(&n.carpeta, Some(&token), Some(equipo)).map_err(|e| format!("No se pudo guardar: {e}"))?;
         n.config.token = Some(token);
-        n.config.equipo = Some(equipo.clone());
+        n.config.equipo = Some(equipo.to_string());
+        n.config.codigo_vinculo = None;
         n.copia = Copia::default();
         n.vista = None;
         n.forzar = true;
@@ -337,7 +423,32 @@ async fn vincular(app: AppHandle, estado: tauri::State<'_, Compartido>, codigo: 
     if let Some(i) = app.get_webview_window(ISLA) {
         let _ = i.show();
     }
-    Ok(equipo)
+    Ok(())
+}
+
+/// Vinculación sin teclear: el script de instalación deja el código en faro.json.
+async fn vincular_solo(app: &AppHandle, api: &Api, compartido: &Compartido) -> bool {
+    let (cfg, codigo) = {
+        let n = compartido.lock().unwrap();
+        (n.config.clone(), n.config.codigo_vinculo.clone())
+    };
+    let Some(codigo) = codigo else { return false };
+    match api.vincular(&cfg, &codigo, &host(), &sistema()).await {
+        Ok((token, equipo)) => {
+            if quedar_vinculado(app, compartido, token, &equipo).is_ok() {
+                if let Some(w) = app.get_webview_window(VINCULAR) {
+                    let _ = w.destroy();
+                }
+            }
+            false
+        }
+        // Código vencido o ya usado: se deja de intentar y queda la ventana para teclear otro.
+        Err(Fallo::Mensaje(_)) | Err(Fallo::NoVinculado) => {
+            compartido.lock().unwrap().config.codigo_vinculo = None;
+            false
+        }
+        Err(Fallo::Red(_)) => true,
+    }
 }
 
 #[tauri::command]
@@ -377,7 +488,28 @@ fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Resu
 
 #[tauri::command]
 fn abrir(app: AppHandle, estado: tauri::State<Compartido>, ruta: String) -> Result<(), String> {
-    let url = estado.lock().unwrap().config.url_pwa(&ruta).ok_or("Falta la dirección de LADME en la configuración.")?;
+    let url = estado.lock().unwrap().config.url_pwa(&ruta).ok_or("Falta la dirección de LADME en la configuración de Faro.")?;
+    abrir_url(&app, &url).map_err(|e| format!("No se pudo abrir el navegador: {e}"))
+}
+
+/// En Linux se llama a xdg-open con un entorno limpio: dentro de un AppImage (y con el modo
+/// XWayland de Faro) las variables propias de Faro hacían que el navegador no abriera.
+#[cfg(target_os = "linux")]
+fn abrir_url(_app: &AppHandle, url: &str) -> Result<(), String> {
+    let mut c = std::process::Command::new("xdg-open");
+    c.arg(url);
+    for v in ["LD_LIBRARY_PATH", "LD_PRELOAD", "GDK_BACKEND", "GDK_PIXBUF_MODULE_FILE", "GIO_MODULE_DIR", "GTK_PATH",
+              "GTK_EXE_PREFIX", "GTK_DATA_PREFIX", "GSETTINGS_SCHEMA_DIR", "PYTHONHOME", "PYTHONPATH", "PERLLIB",
+              "QT_PLUGIN_PATH", "APPDIR", "APPIMAGE", "ARGV0", "OWD"] {
+        c.env_remove(v);
+    }
+    // XDG_DATA_DIRS del AppImage apunta a su carpeta interna; se vuelve al valor normal del sistema.
+    c.env("XDG_DATA_DIRS", "/usr/local/share:/usr/share");
+    c.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn abrir_url(app: &AppHandle, url: &str) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
@@ -410,9 +542,13 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             let carpeta = app.path().app_config_dir()?;
+            vigia::escribir_pid(&carpeta, "faro.pid");
+            vigia::quitar_pausa(&carpeta);
+            let reabierto = std::env::args().any(|a| a == vigia::REABIERTO);
             let config = config::cargar(&carpeta);
             let copia = config::cargar_copia(&carpeta);
             let vinculado = config.token.is_some();
@@ -422,7 +558,11 @@ pub fn run() {
                 copia,
                 ultimo_ok: None,
                 vista: None,
-                pendientes: vec![("inicio".into(), json!({ "motivo": "arranque" }))],
+                pendientes: vec![if reabierto {
+                    ("cierre_forzado".into(), json!({ "detalle": "Faro se cerró a la fuerza y el vigía lo volvió a abrir" }))
+                } else {
+                    ("inicio".into(), json!({ "motivo": "arranque" }))
+                }],
                 forzar: true,
                 intentos_fallidos: 0,
                 espera_hasta: None,
@@ -430,10 +570,16 @@ pub fn run() {
             app.manage(compartido.clone());
 
             // Arranca solo al iniciar sesión en esta cuenta (no requiere permisos de administrador).
+            // Si lo abre un servicio de systemd (script de Linux), el arranque y el reinicio son de
+            // systemd: se quita la entrada de inicio propia para no abrir dos veces.
             #[cfg(not(debug_assertions))]
             {
                 use tauri_plugin_autostart::ManagerExt;
-                let _ = app.autolaunch().enable();
+                if gestionado_por_systemd() {
+                    let _ = app.autolaunch().disable();
+                } else {
+                    let _ = app.autolaunch().enable();
+                }
             }
 
             let isla = crear_isla(app.handle())?;
@@ -442,7 +588,8 @@ pub fn run() {
             } else {
                 abrir_vincular(app.handle());
             }
-            tauri::async_runtime::spawn(ciclo(app.handle().clone(), compartido));
+            tauri::async_runtime::spawn(ciclo(app.handle().clone(), compartido.clone()));
+            tauri::async_runtime::spawn(actualizaciones(app.handle().clone(), compartido));
             Ok(())
         })
         .on_window_event(|w, ev| {

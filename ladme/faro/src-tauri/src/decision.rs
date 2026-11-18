@@ -199,8 +199,17 @@ pub fn decidir(e: &Entrada) -> Vista {
     if let Some(hasta) = desbloqueo {
         if actual.map(es_reserva) != Some(true) {
             v.estado = Estado::Desbloqueado;
-            v.titulo = "Desbloqueado por el personal".into();
-            v.detalle = "Uso libre temporal autorizado por el laboratorio.".into();
+            match actual.and_then(|o| o.motivo.as_deref()).and_then(|m| m.strip_prefix("Clase · ")) {
+                // Modo clase: el equipo está apartado para la clase y libre para usarlo.
+                Some(clase) => {
+                    v.titulo = "Clase en curso".into();
+                    v.detalle = format!("{clase} · uso libre durante la clase.");
+                }
+                None => {
+                    v.titulo = "Desbloqueado por el personal".into();
+                    v.detalle = "Uso libre temporal autorizado por el laboratorio.".into();
+                }
+            }
             v.cuenta_hasta = Some(hasta);
             return v;
         }
@@ -404,6 +413,13 @@ mod pruebas {
         let m = Memoria::default();
         assert_eq!(ver(&r, 0, None, &m).estado, Estado::Desbloqueado);
         assert_eq!(ver(&r, 31, None, &m).estado, Estado::Bloqueado);
+        let mut clase = reserva(-5, 55);
+        clase.tipo = "bloqueo".into();
+        clase.motivo = Some("Clase · Estadística I".into());
+        let mut rc = remoto(Modo::Bloquear, Some(clase));
+        rc.desbloqueo_hasta = Some(t(55));
+        let v = ver(&rc, 0, None, &Memoria::default());
+        assert_eq!((v.estado, v.pantalla, v.titulo.as_str()), (Estado::Desbloqueado, Pantalla::Ninguna, "Clase en curso"));
         let m = Memoria { emergencia_hasta: Some(t(60)), ..Default::default() };
         assert_eq!(ver(&remoto(Modo::Bloquear, None), 45, None, &m).pantalla, Pantalla::Ninguna);
 

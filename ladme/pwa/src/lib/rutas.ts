@@ -30,6 +30,7 @@ const cargadores = {
   '/mis-reservas': () => import('../pages/MisReservas'),
   '/credencial': () => import('../pages/Credencial'),
   '/equipo': () => import('../pages/FichaEquipo'),
+  '/pc': () => import('../pages/AccionRapida'),
   '/validar': () => import('../pages/Validar'),
   '/avisos': () => import('../pages/Avisos'),
   '/cuenta': () => import('../pages/Cuenta'),
@@ -44,6 +45,7 @@ export const Paginas = {
   MisReservas: perezosa(cargadores['/mis-reservas']),
   Credencial: perezosa(cargadores['/credencial']),
   FichaEquipo: perezosa(cargadores['/equipo']),
+  AccionRapida: perezosa(cargadores['/pc']),
   Validar: perezosa(cargadores['/validar']),
   Avisos: perezosa(cargadores['/avisos']),
   Cuenta: perezosa(cargadores['/cuenta']),
@@ -70,4 +72,20 @@ export function propsPrecarga(ruta: string) {
     onTouchStart: () => precargar(ruta),
     onFocus: () => precargar(ruta)
   }
+}
+
+const CLAVE_VOLVER = 'ladme-volver'
+
+/** Guarda a dónde volver después de iniciar sesión (p. ej. el QR de Faro). Solo rutas internas. */
+export function recordarDestino(ruta: string): void {
+  if (ruta.startsWith('/') && !ruta.startsWith('//') && !ruta.startsWith('/login') && !ruta.startsWith('/auth')) {
+    sessionStorage.setItem(CLAVE_VOLVER, ruta)
+  }
+}
+
+/** Devuelve (y olvida) el destino guardado, o «/». */
+export function tomarDestino(): string {
+  const r = sessionStorage.getItem(CLAVE_VOLVER)
+  sessionStorage.removeItem(CLAVE_VOLVER)
+  return r && r.startsWith('/') && !r.startsWith('//') ? r : '/'
 }
