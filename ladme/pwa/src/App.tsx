@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
-import { lazy, Suspense, type ReactNode } from 'react'
+import { Suspense, type ReactNode } from 'react'
 import Shell from './components/Shell'
 import { esAdmin, esStaff, useAuth } from './context/AuthContext'
 import AuthCallback from './pages/AuthCallback'
@@ -7,31 +7,15 @@ import Disponibilidad from './pages/Disponibilidad'
 import Login from './pages/Login'
 import NoEncontrada from './pages/NoEncontrada'
 import { PoliticasProvider } from './lib/politicas'
+import { Paginas } from './lib/rutas'
+import CargaInicial from './components/CargaInicial'
 
-const Credencial = lazy(() => import('./pages/Credencial'))
-const Cuenta = lazy(() => import('./pages/Cuenta'))
-const FichaEquipo = lazy(() => import('./pages/FichaEquipo'))
-const Mantenimiento = lazy(() => import('./pages/Mantenimiento'))
-const MisReservas = lazy(() => import('./pages/MisReservas'))
-const Reservar = lazy(() => import('./pages/Reservar'))
-const Usuarios = lazy(() => import('./pages/Usuarios'))
-const Validar = lazy(() => import('./pages/Validar'))
-const Admin = lazy(() => import('./pages/Admin'))
-const Avisos = lazy(() => import('./pages/Avisos'))
+const {
+  Admin, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Reservar, Usuarios, Validar
+} = Paginas
 
 function Cargando() {
-  return (
-    <div className="acceso">
-      <div className="acceso__panel">
-        <div className="acceso__caja center">
-          <div className="cargando" style={{ justifyContent: 'center' }}>
-            <span className="spinner" aria-hidden="true" />
-            <span>Cargando LADME…</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+  return <CargaInicial />
 }
 
 function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
@@ -52,9 +36,19 @@ function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
 }
 
 function SoloAutenticado({ children }: { children: ReactNode }) {
-  const { session, cargando, perfil } = useAuth()
-  if (cargando) return <Cargando />
+  const { session, cargando, perfil, error, reintentar } = useAuth()
+  if (cargando) return <CargaInicial alReintentar={reintentar} />
   if (!session) return <Navigate to="/login" replace />
+  if (!perfil && error) {
+    return (
+      <Aviso titulo="Sin conexión con LADME">
+        {error}{' '}
+        <button className="btn sm" type="button" onClick={reintentar} style={{ marginTop: 'var(--s3)' }}>
+          Reintentar
+        </button>
+      </Aviso>
+    )
+  }
   if (!perfil) {
     return (
       <Aviso titulo="Cuenta sin perfil">
@@ -117,6 +111,7 @@ export default function App() {
         <Route path="equipo/:codigo" element={<FichaEquipo />} />
         <Route path="cuenta" element={<Cuenta />} />
         <Route path="avisos" element={<Avisos />} />
+        <Route path="mi-uso" element={<MiUso />} />
         <Route
           path="admin"
           element={

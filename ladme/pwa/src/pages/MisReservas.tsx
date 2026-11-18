@@ -7,6 +7,8 @@ import {
 import type { Reserva, Solicitud } from '../lib/types'
 import { useLimites } from '../lib/politicas'
 import ReporteFalla from '../components/ReporteFalla'
+import Deslizar from '../components/Deslizar'
+import { guardarCache, leerCache } from '../lib/cacheLocal'
 import {
   aInputLocal,
   duracion,
@@ -29,6 +31,7 @@ type Dialogo = { tipo: 'cancelar' | 'extender' | 'liberar'; reserva: Reserva } |
 export default function MisReservas() {
   const toast = useToast()
   const lim = useLimites()
+  const [copia, setCopia] = useState<string | null>(null)
   const MAX_HORAS_EXTENSION = lim.maxExtension
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
   const [encuesta, setEncuesta] = useState<Reserva | null>(null)
@@ -48,8 +51,14 @@ export default function MisReservas() {
       const [res, sol] = await Promise.all([misReservas(), misSolicitudes()])
       setReservas(res)
       setSolicitudes(sol)
+      setCopia(null)
+      guardarCache('mis-reservas', res)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron cargar sus reservas.')
+      const c = leerCache<Reserva[]>('mis-reservas')
+      if (c) {
+        setReservas(c.datos)
+        setCopia(c.guardado)
+      } else setError(e instanceof Error ? e.message : 'No se pudieron cargar sus reservas.')
     } finally {
       setCargando(false)
     }
@@ -341,6 +350,18 @@ export default function MisReservas() {
           </Link>
         }
       />
+
+      <Deslizar alActualizar={cargar} />
+
+      {copia && (
+        <div className="alert warn">
+          <Icon nombre="sin-conexion" />
+          <div className="alert__body">
+            Sin conexión: estas son sus reservas tal como estaban {hace(copia)}. Para extender, liberar o cancelar se
+            necesita internet.
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="alert danger">

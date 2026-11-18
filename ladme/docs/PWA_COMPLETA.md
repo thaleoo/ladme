@@ -135,6 +135,28 @@ abren la ficha de ese equipo. Las etiquetas actuales apuntan a Apps Script; tras
 redirigir por sí solo). Para que sea directo, regrabe los NFC y reimprima los QR con la URL de la PWA:
 use `ladme/scripts/generar_qr_ladme.py` con la URL de la PWA como base (genera `https://<dominio-pwa>?asset=UNAL-05`).
 
+## 9. Tercera tanda: estabilidad, instalación y movimiento (migración 0004)
+
+1. SQL Editor → ejecute `ladme/db/migrations/0004_errores_app.sql` (después de 0003).
+2. Despliegue la PWA. No hay cambios en Apps Script.
+
+Qué cambia:
+
+- **Ya no se queda cargando.** Se corrigió un bloqueo de la librería de Supabase al reanudar la app y
+  cada paso del arranque tiene un límite de tiempo. Si a los 8 s sigue cargando, aparece «Reintentar»;
+  al segundo intento, «Limpiar y recargar» (borra los archivos guardados de la app, no la sesión).
+- **Actualizaciones**: la versión nueva se descarga sola y aparece «Hay una versión nueva — Actualizar».
+  Si alguien tenía abierta una versión vieja y le falta una pantalla, la app recarga sola una vez.
+- **Errores de la app**: Administración → Errores muestra los fallos ocurridos en los dispositivos de
+  los usuarios (incluida la carga lenta), agrupados, con navegador y versión.
+- **Instalación**: banner «Instale LADME» (diálogo nativo en Chrome/Edge/Android; instrucciones en iPhone).
+  Si se cierra, vuelve al mes.
+- **Usuarios**: búsqueda en el servidor, filtros con conteo y páginas de 30. Tocar a una persona abre su ficha.
+- También: transiciones suaves, pestañas con indicador, tema claro/oscuro/automático (Mi cuenta),
+  «Mi uso» con exportación CSV, accesos directos al mantener presionado el icono, contador de avisos en
+  el icono, copia sin conexión de la disponibilidad, Mis reservas y el pase, y deslizar para actualizar
+  en la app instalada.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

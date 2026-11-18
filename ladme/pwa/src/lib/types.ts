@@ -11,6 +11,7 @@ export interface Perfil {
   tipo_usuario: 'Estudiante' | 'Docente/Investigador' | null
   matricula: string | null
   reglamento_aceptado_en: string | null
+  creado_en: string
 }
 
 export interface Equipo {

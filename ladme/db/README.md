@@ -71,3 +71,9 @@ Pasos completos de activación: [`../docs/PWA_COMPLETA.md`](../docs/PWA_COMPLETA
 `migrations/0003_reportes_categorias.sql`, después de 0002: reportes de fallas de los usuarios,
 alerta «ya está libre», reglamento aceptado (requisito para reservar), valoración al terminar y la
 cola de correo con equipo y horario para la plantilla nueva.
+
+## Migración 0004 — errores de la app
+
+`migrations/0004_errores_app.sql`, después de 0003: tabla `errores_app` y la función
+`registrar_error` (con límites por persona y por hora) para ver en Administración los fallos que
+ocurren en los dispositivos de los usuarios.

@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { obtenerPerfil } from '../lib/api'
 import { mensajeError } from '../lib/errores'
+import { borrarCache } from '../lib/cacheLocal'
 import type { Perfil } from '../lib/types'
 
 interface AuthState {
@@ -16,6 +17,8 @@ interface AuthState {
   entrarConGoogle: () => Promise<{ ok: boolean; mensaje: string }>
   salir: () => Promise<void>
   recargarPerfil: () => Promise<void>
+  /** Vuelve a intentar el arranque después de un error de conexión. */
+  reintentar: () => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -37,31 +40,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Arranque. Reglas para no quedar «cargando» para siempre:
+  //  * El aviso onAuthStateChange NO puede esperar consultas a Supabase: la
+  //    librería mantiene un candado mientras corre y una consulta adentro puede
+  //    trabarla (documentado por Supabase). El perfil se pide después, aparte.
+  //  * Cada paso tiene un límite de tiempo; si se vence, se muestra un error con
+  //    opción de reintentar en lugar de esperar indefinidamente.
+  const [intento, setIntento] = useState(0)
+  const reintentar = useCallback(() => {
+    setError(null)
+    setCargando(true)
+    setIntento((n) => n + 1)
+  }, [])
+
   useEffect(() => {
     let vivo = true
+    const conLimite = <T,>(promesa: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        promesa,
+        new Promise<T>((_, rechazar) => window.setTimeout(() => rechazar(new Error('tiempo')), ms))
+      ])
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    const aplicar = async (nueva: Session | null) => {
       if (!vivo) return
-      setSession(data.session ?? null)
-      if (data.session) await cargarPerfil()
-      setCargando(false)
-    })
-
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, nueva) => {
       setSession(nueva)
-      if (nueva) {
-        await cargarPerfil()
-      } else {
+      if (!nueva) {
         setPerfil(null)
+        setCargando(false)
+        return
       }
-      setCargando(false)
+      try {
+        await conLimite(cargarPerfil(), 10000)
+      } catch {
+        if (vivo) setError('No se pudo conectar con el servidor. Revise su conexión e intente de nuevo.')
+      } finally {
+        if (vivo) setCargando(false)
+      }
+    }
+
+    conLimite(supabase.auth.getSession(), 10000)
+      .then(({ data }) => aplicar(data.session ?? null))
+      .catch(() => {
+        if (!vivo) return
+        setError('No se pudo conectar con el servidor. Revise su conexión e intente de nuevo.')
+        setCargando(false)
+      })
+
+    const { data: sub } = supabase.auth.onAuthStateChange((evento, nueva) => {
+      // La renovación del token no cambia el perfil: no hace falta pedirlo de nuevo.
+      if (evento === 'TOKEN_REFRESHED') {
+        setSession(nueva)
+        return
+      }
+      if (evento === 'INITIAL_SESSION') return // ya lo atiende getSession()
+      window.setTimeout(() => void aplicar(nueva), 0)
     })
 
     return () => {
       vivo = false
       sub.subscription.unsubscribe()
     }
-  }, [cargarPerfil])
+  }, [cargarPerfil, intento])
 
   const enviarEnlace = useCallback(async (correo: string) => {
     const limpio = correo.trim().toLowerCase()
@@ -136,16 +175,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const salir = useCallback(async () => {
-    await supabase.auth.signOut()
+    borrarCache()
+    try {
+      await Promise.race([supabase.auth.signOut(), new Promise((r) => window.setTimeout(r, 5000))])
+    } catch {
+      // Aunque el servidor no responda, la sesión local se cierra.
+    }
+    setSession(null)
     setPerfil(null)
   }, [])
 
   const value = useMemo<AuthState>(
     () => ({
       session, perfil, cargando, error, enviarEnlace, verificarCodigo, entrarConGoogle, salir,
-      recargarPerfil: cargarPerfil
+      recargarPerfil: cargarPerfil, reintentar
     }),
-    [session, perfil, cargando, error, enviarEnlace, verificarCodigo, entrarConGoogle, salir, cargarPerfil]
+    [session, perfil, cargando, error, enviarEnlace, verificarCodigo, entrarConGoogle, salir, cargarPerfil, reintentar]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

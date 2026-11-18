@@ -10,6 +10,7 @@ import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Logo from '../components/Logo'
 import { useToast } from '../components/Toast'
+import { guardarCache, leerCache } from '../lib/cacheLocal'
 
 const REFRESCO_MS = 30000
 
@@ -49,12 +50,20 @@ export default function Credencial() {
       setActualizada(new Date())
       setSinRed(false)
       setError(null)
+      guardarCache(`pase:${id}`, r)
     } catch (e) {
-      // Con una copia ya en pantalla solo se avisa; no se da por válida sin red.
+      // Sin red: se muestra la última copia guardada, con aviso. La validación del
+      // QR siempre consulta el estado real, así que una copia vieja no engaña al personal.
       setSinRed(true)
+      const c = leerCache<Reserva>(`pase:${id}`)
       setReserva((previa) => {
-        if (!previa) setError(e instanceof Error ? e.message : 'No se pudo cargar la credencial.')
-        return previa
+        if (previa) return previa
+        if (c) {
+          setActualizada(new Date(c.guardado))
+          return c.datos
+        }
+        setError(e instanceof Error ? e.message : 'No se pudo cargar la credencial.')
+        return null
       })
     } finally {
       setCargando(false)

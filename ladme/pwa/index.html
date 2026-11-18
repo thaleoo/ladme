@@ -11,6 +11,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>LADME — Reservas y equipos</title>
+    <script>
+      // Aplica el tema elegido antes de pintar, para que no destelle el tema equivocado.
+      try {
+        var t = localStorage.getItem('ladme-tema')
+        if (t === 'claro' || t === 'oscuro') document.documentElement.setAttribute('data-tema', t)
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

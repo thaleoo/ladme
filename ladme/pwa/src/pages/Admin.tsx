@@ -1,6 +1,8 @@
 import { useSearchParams } from 'react-router-dom'
 import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
+import Pestanas from '../components/Pestanas'
+import Errores from './admin/Errores'
 import Ronda from './admin/Ronda'
 import ReservasAdmin from './admin/ReservasAdmin'
 import Bloqueos from './admin/Bloqueos'
@@ -18,7 +20,8 @@ const PESTANAS = [
   { id: 'solicitudes', texto: 'Solicitudes' },
   { id: 'equipos', texto: 'Equipos' },
   { id: 'estadisticas', texto: 'Estadísticas' },
-  { id: 'politicas', texto: 'Políticas', soloAdmin: true }
+  { id: 'politicas', texto: 'Políticas', soloAdmin: true },
+  { id: 'errores', texto: 'Errores de la app' }
 ] as const
 
 export default function Admin() {
@@ -36,20 +39,14 @@ export default function Admin() {
         sub="El estado del laboratorio, todas las reservas y la configuración."
       />
 
-      <div className="pestanas" role="tablist" aria-label="Secciones de administración">
-        {visibles.map((p) => (
-          <button
-            key={p.id}
-            role="tab"
-            type="button"
-            aria-selected={actual === p.id}
-            className={actual === p.id ? 'activo' : ''}
-            onClick={() => setParams({ tab: p.id }, { replace: true })}
-          >
-            {p.texto}
-          </button>
-        ))}
-      </div>
+      <Pestanas
+        etiqueta="Secciones de administración"
+        opciones={visibles.map((p) => ({ id: p.id, texto: p.texto }))}
+        actual={actual}
+        alCambiar={(id) => setParams({ tab: id }, { replace: true })}
+      />
+
+      <div className="panel-pestana" key={actual}>
 
       {actual === 'ronda' && <Ronda />}
       {actual === 'reservas' && <ReservasAdmin />}
@@ -59,6 +56,8 @@ export default function Admin() {
       {actual === 'equipos' && <Equipos />}
       {actual === 'estadisticas' && <Estadisticas />}
       {actual === 'politicas' && admin && <Politicas />}
+      {actual === 'errores' && <Errores />}
+      </div>
     </>
   )
 }
