@@ -217,6 +217,16 @@ Guía completa en `ladme/faro/README.md`. En resumen:
 - Órdenes remotas, anuncios, inventario y salud, filtro por programa, sesión limpia, lista de espera,
   mapa público `/sala` (y `?kiosco=1`), canal de pruebas y liberación por no-show (apagada por defecto).
 
+## 14. Una reserva a la vez (migración 0009)
+
+1. SQL Editor → `ladme/db/migrations/0009_una_reserva.sql` (después de 0008).
+2. Vuelva a pegar `ladme/appsscript/Código.gs` (el sistema actual también queda en una reserva a la vez).
+
+- Cada usuario puede tener una sola reserva vigente o futura; el personal está exento. Se cambia en
+  Políticas → «Reservas a la vez por usuario».
+- El formulario de reserva y la ficha del equipo avisan antes de llenar nada y muestran la reserva que ya
+  tiene. Las reservas que ya existían se respetan.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

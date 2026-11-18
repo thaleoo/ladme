@@ -8,6 +8,7 @@ import { esStaff, useAuth } from '../context/AuthContext'
 import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
 import MiReserva from '../components/MiReserva'
+import { useTopeReservas } from '../lib/reservaVigente'
 import { conPunto, dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -51,6 +52,7 @@ export default function FichaEquipo() {
   const [codigoLlegada] = useState(() => params.get('llegada'))
   const [recarga, setRecarga] = useState(0)
   const [mia, setMia] = useState<{ inicio: string; fin: string } | null>(null)
+  const tope = useTopeReservas()
   useEffect(() => {
     if (params.get('reportar') === '1' || params.get('accion') === 'reportar') setDialogo('falla')
     if (params.has('reportar') || params.has('accion') || params.has('llegada')) {
@@ -281,12 +283,14 @@ export default function FichaEquipo() {
                 <Icon nombre="chispa" width={16} height={16} /> ¿Está frente al equipo?
               </h3>
               <p className="small muted" style={{ margin: '2px 0 0' }}>
-                {rapidas.length
+                {tope.alcanzado
+                  ? `Ya tiene una reserva en ${tope.vigentes[0]?.equipos?.codigo ?? 'otro equipo'}: solo se permite una a la vez. Libérela o cancélela para usar este.`
+                  : rapidas.length
                   ? `Resérvelo desde ya, sin llenar el formulario.${siguiente ? ` ${conPunto(`Libre hasta ${fecha(siguiente.inicio)}`)}` : ''}`
                   : `Hay otra reserva a las ${hora(siguiente!.inicio)}: no alcanza para una reserva rápida.`}
               </p>
             </div>
-            {rapidas.length > 0 && (
+            {rapidas.length > 0 && !tope.alcanzado && (
               <button
                 className="btn"
                 type="button"

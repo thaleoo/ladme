@@ -4,6 +4,7 @@ import { crearReserva, equiposDisponibles, listarEquipos, solicitarExcepcion } f
 import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo } from '../lib/types'
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
+import { useTopeReservas } from '../lib/reservaVigente'
 import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import PerfilForm from '../components/PerfilForm'
@@ -21,6 +22,7 @@ export default function Reservar() {
   const { perfil } = useAuth()
   const lim = useLimites()
   const admin = esAdmin(perfil)
+  const tope = useTopeReservas()
   const [params] = useSearchParams()
   const [equipos, setEquipos] = useState<Equipo[]>([])
   const [equipo, setEquipo] = useState(params.get('equipo')?.toUpperCase() ?? '')
@@ -199,6 +201,29 @@ export default function Reservar() {
 
       <div className="dos-columnas">
         <form onSubmit={enviar} className="card stack" noValidate>
+          {tope.alcanzado && (
+            <div className="alert warn" role="status">
+              <Icon nombre="reloj" />
+              <div className="alert__body">
+                <strong>
+                  {tope.vigentes.length === 1 ? 'Ya tiene una reserva.' : `Ya tiene ${tope.vigentes.length} reservas.`}
+                </strong>{' '}
+                {lim.reservasALaVez === 1 ? 'Solo se permite una a la vez' : `El máximo es ${lim.reservasALaVez} a la vez`}: cuando termine, la
+                libere o la cancele, podrá hacer otra.
+                <ul className="tope-lista">
+                  {tope.vigentes.map((r) => (
+                    <li key={r.id}>
+                      <Link to={`/equipo/${encodeURIComponent(r.equipos?.codigo ?? '')}`}>
+                        <strong>{r.equipos?.codigo}</strong>
+                      </Link>{' '}
+                      · {fecha(r.inicio)} – {fecha(r.fin)}
+                    </li>
+                  ))}
+                </ul>
+                <Link to="/mis-reservas">Ir a mis reservas</Link>
+              </div>
+            </div>
+          )}
           <div className="grid cols-2 gap-sm">
             <div className="field">
               <label className="field__label" htmlFor="equipo">
@@ -389,7 +414,7 @@ export default function Reservar() {
           )}
 
           <div className="row" style={{ gap: 'var(--s2)' }}>
-            <button type="submit" disabled={enviando || cargando || !!problema || (adminExcede && !confirmaExceso)}>
+            <button type="submit" disabled={enviando || cargando || tope.alcanzado || !!problema || (adminExcede && !confirmaExceso)}>
               {enviando ? (
                 <>
                   <span className="spinner" aria-hidden="true" /> Enviando…

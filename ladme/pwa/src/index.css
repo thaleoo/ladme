@@ -3629,3 +3629,7 @@ a.sala__equipo:hover { transform: translateY(-2px); box-shadow: inset 4px 0 0 va
   color: var(--brand-700, #6d28d9); text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
 }
 .link-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* Aviso de «una reserva a la vez» en el formulario de reserva */
+.tope-lista { margin: var(--s2) 0; padding-left: 1.1em; }
+.tope-lista li { margin: 2px 0; }

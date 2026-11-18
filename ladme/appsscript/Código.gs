@@ -82,7 +82,7 @@ const DURACION_MAX_HORAS = 168;
 const EXTENSION_MAX_HORAS = 24;
 const DURACION_MAX_TOTAL_HORAS = 192;
 const EXTENSIONES_MAX = 1;
-const MAX_RESERVAS_ACTIVAS_USUARIO = 0; // opcional: 0 = sin límite (recomendado al inicio)
+const MAX_RESERVAS_ACTIVAS_USUARIO = 1; // reservas activas o futuras por usuario a la vez (el personal está exento); 0 = sin límite
 
 // Interruptor de emergencia: poner en false desactiva SOLO la comprobación de
 // identidad en los enlaces del correo (el historial sigue funcionando).
@@ -677,14 +677,16 @@ function registrarReserva(datosCrudos) {
       return { exito: false, mensaje: "El computador seleccionado ya fue reservado en ese bloque horario o no está disponible." };
     }
 
-    // 4b) Límite opcional de reservas vigentes por usuario (0 = desactivado)
-    if (MAX_RESERVAS_ACTIVAS_USUARIO > 0) {
+    // 4b) Reservas a la vez por usuario (el personal está exento; 0 = sin límite)
+    if (MAX_RESERVAS_ACTIVAS_USUARIO > 0 && !esAdminActual_() && !esLaboratoristaActual_()) {
       var vigentes = contarReservasVigentes_(datos.correo);
       if (vigentes >= MAX_RESERVAS_ACTIVAS_USUARIO) {
         return {
           exito: false,
-          mensaje: "Ya tiene " + vigentes + " reservas activas o futuras. El máximo es " +
-            MAX_RESERVAS_ACTIVAS_USUARIO + ". Cancele o libere una antes de crear otra."
+          mensaje: MAX_RESERVAS_ACTIVAS_USUARIO === 1
+            ? "Ya tiene una reserva activa o futura. Solo se permite una a la vez: libérela o cancélela antes de crear otra."
+            : "Ya tiene " + vigentes + " reservas activas o futuras. El máximo es " +
+              MAX_RESERVAS_ACTIVAS_USUARIO + ". Cancele o libere una antes de crear otra."
         };
       }
     }

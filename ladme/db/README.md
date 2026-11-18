@@ -123,3 +123,14 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
   `sala_publica` (anónima, sin datos personales) y `reporte_mensual` (`service_role`).
 - `equipos.plano_x` / `plano_y` para el mapa de la sala.
 
+## Migración 0009 — una reserva a la vez
+
+`migrations/0009_una_reserva.sql`, después de 0008.
+
+- `reservas_activas_max` pasa de 0 (sin límite) a **1**: cada usuario puede tener una sola reserva
+  vigente o futura. Al terminar, liberarla o cancelarla puede hacer otra. Se cambia en Políticas.
+- El personal (laboratoristas y administración) queda exento. Las reservas largas aprobadas por el
+  personal no pasan por este límite.
+- `crear_reserva` toma un candado por persona (`pg_advisory_xact_lock`), así que dos reservas enviadas al
+  mismo tiempo no pueden pasar las dos.
+

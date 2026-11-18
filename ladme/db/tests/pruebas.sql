@@ -27,6 +27,10 @@ begin
     ('ana@unal.edu.co', '{"name": "Ana Pérez"}'), ('beto@unal.edu.co', '{}'),
     ('admin@unal.edu.co', '{"full_name": "Admin LADME"}'), ('lab@unal.edu.co', '{}');
   perform pg_temp.ok((select nombre from perfiles where correo = 'ana@unal.edu.co') = 'Ana Pérez', 'nombre tomado de Google');
+  -- 0009: por defecto, una reserva a la vez. Las pruebas que siguen reservan varias veces con la misma
+  -- persona, así que se apaga aquí y el límite se prueba al final (bloque 0009).
+  perform pg_temp.ok(politica_int('reservas_activas_max') = 1, 'por defecto, una reserva a la vez por usuario');
+  update politicas set valor = '0' where clave = 'reservas_activas_max';
   -- Reglamento (0003): sin aceptarlo no se puede reservar para uno mismo.
   update perfiles set reglamento_aceptado_en = now() where correo <> 'beto@unal.edu.co';
   update perfiles set rol = 'administrador', tipo_usuario = 'Docente/Investigador', programa = 'Profesor/Investigador' where correo = 'admin@unal.edu.co';
@@ -397,6 +401,42 @@ begin
   perform faro_comando_resultado(t7, (j #>> '{comandos,0,id}')::bigint, true, 'desinstalado');
   perform pg_temp.falla(format('select faro_estado(%L)', t7), 'no está vinculado');
   update politicas set valor = '1' where clave = 'faro_llegada_automatica';
+end $$;
+
+-- 0009: una reserva vigente o futura a la vez para usuarios; el personal queda exento.
+do $$
+declare r reservas; r2 reservas; t0 timestamptz := date_trunc('hour', now()) + interval '50 hours';
+begin
+  update politicas set valor = '1' where clave = 'reservas_activas_max';
+  insert into auth.users (email, raw_user_meta_data) values ('caro@unal.edu.co', '{"name": "Caro"}');
+  update perfiles set reglamento_aceptado_en = now(), tipo_usuario = 'Estudiante', programa = 'Biología', matricula = 'Novena matrícula'
+   where correo = 'caro@unal.edu.co';
+  perform pg_temp.como('caro@unal.edu.co');
+  r := crear_reserva('UNAL-15', t0, t0 + interval '2 hours', 'PAE');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-16', %L, %L, 'PAE')$q$, t0 + interval '5 hours', t0 + interval '6 hours'), 'Solo se permite una a la vez');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-16', %L, %L, 'PAE')$q$, t0, t0 + interval '2 hours'), 'UNAL-15');
+  perform cancelar_reserva(r.id, 'cambio de planes');
+  r2 := crear_reserva('UNAL-16', t0 + interval '5 hours', t0 + interval '6 hours', 'PAE');
+  perform pg_temp.ok(r2.id is not null, 'al cancelar la reserva puede hacer otra');
+  -- Una reserva ya terminada no cuenta.
+  update reservas set inicio = now() - interval '3 hours', fin = now() - interval '1 hour' where id = r2.id;
+  r := crear_reserva('UNAL-14', t0, t0 + interval '1 hour', 'PAE');
+  perform pg_temp.ok(r.id is not null, 'una reserva terminada no cuenta para el límite');
+  -- Reintento con el mismo id de solicitud: devuelve la misma reserva, no choca con el límite.
+  update reservas set id_solicitud = 'sol-0000000000000099' where id = r.id;
+  perform pg_temp.ok((crear_reserva('UNAL-14', t0, t0 + interval '1 hour', 'PAE', null, false, null, 'sol-0000000000000099')).id = r.id,
+                     'el reintento de la misma reserva no choca con el límite');
+  -- El personal queda exento.
+  perform pg_temp.como('lab@unal.edu.co');
+  r := crear_reserva('UNAL-11', t0 + interval '20 hours', t0 + interval '21 hours', 'Docencia');
+  r2 := crear_reserva('UNAL-10', t0 + interval '20 hours', t0 + interval '21 hours', 'Docencia');
+  perform pg_temp.ok(r.id is not null and r2.id is not null, 'el laboratorista puede tener varias reservas');
+  -- Con la política en 2, se permiten dos.
+  update politicas set valor = '2' where clave = 'reservas_activas_max';
+  perform pg_temp.como('caro@unal.edu.co');
+  r := crear_reserva('UNAL-16', t0 + interval '8 hours', t0 + interval '9 hours', 'PAE');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-15', %L, %L, 'PAE')$q$, t0 + interval '10 hours', t0 + interval '11 hours'), 'el máximo permitido');
+  update politicas set valor = '1' where clave = 'reservas_activas_max';
 end $$;
 
 -- Permisos reales del rol que usa la PWA.
