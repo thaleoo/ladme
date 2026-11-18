@@ -1,0 +1,133 @@
+/* Faro · estilos compartidos. Negro casi puro, acentos de LADME (violeta) y estados con color. */
+:root {
+  --negro: #050507;
+  --isla: #0a0a0d;
+  --borde: rgba(255, 255, 255, 0.09);
+  --borde-fuerte: rgba(255, 255, 255, 0.16);
+  --texto: #f4f4f6;
+  --texto-2: rgba(244, 244, 246, 0.66);
+  --texto-3: rgba(244, 244, 246, 0.42);
+  --violeta: #8b5cf6;
+  --violeta-claro: #b9a4ff;
+  --verde: #34d399;
+  --ambar: #fbbf24;
+  --rojo: #f87171;
+  --azul: #60a5fa;
+  --naranja: #fb923c;
+  --gris: #9ca3af;
+  --font: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', Inter, Cantarell, Ubuntu, system-ui, sans-serif;
+  --num: 'Segoe UI Variable Display', 'Segoe UI', Inter, system-ui, sans-serif;
+  --mono: 'Cascadia Code', 'JetBrains Mono', 'Ubuntu Mono', Consolas, ui-monospace, monospace;
+  --resorte: cubic-bezier(0.2, 0.9, 0.25, 1.12);
+  --c: var(--gris);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  color: var(--texto);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+button { font: inherit; color: inherit; }
+.num { font-family: var(--num); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* Punto de estado con pulso. */
+.punto {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 10px var(--c);
+  flex: none;
+}
+.punto::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--c);
+  opacity: 0;
+}
+.pulso .punto::after { animation: pulso 1.8s ease-out infinite; }
+@keyframes pulso {
+  0% { transform: scale(0.5); opacity: 0.9; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+[data-estado='reservado'] { --c: var(--verde); }
+[data-estado='por_terminar'], [data-estado='gracia'], [data-estado='libre_en_uso'] { --c: var(--ambar); }
+[data-estado='libre'] { --c: var(--azul); }
+[data-estado='bloqueado'] { --c: var(--rojo); }
+[data-estado='desbloqueado'] { --c: var(--violeta-claro); }
+[data-estado='mantenimiento'], [data-estado='ocupado'] { --c: var(--naranja); }
+[data-estado='conectando'] { --c: var(--gris); }
+
+/* Botones. */
+.boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--borde);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  white-space: nowrap;
+}
+.boton:hover { background: rgba(255, 255, 255, 0.11); border-color: var(--borde-fuerte); }
+.boton:active { transform: scale(0.96); }
+.boton.principal {
+  background: linear-gradient(180deg, #9a72ff, #7c4dff);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  box-shadow: 0 6px 18px -6px rgba(124, 77, 255, 0.7);
+}
+.boton.principal:hover { background: linear-gradient(180deg, #a884ff, #8a5cff); }
+.boton svg { width: 15px; height: 15px; }
+.boton:disabled { opacity: 0.5; cursor: default; }
+
+.campo {
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid var(--borde-fuerte);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--texto);
+  font: 600 18px var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.campo:focus { border-color: var(--violeta); box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.22); }
+
+.qr {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 20px 50px -18px rgba(139, 92, 246, 0.6);
+}
+.qr svg { display: block; width: 100%; height: auto; }
+
+.error { color: #fca5a5; font-size: 13px; min-height: 18px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

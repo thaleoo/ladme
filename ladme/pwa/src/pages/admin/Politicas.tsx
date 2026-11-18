@@ -17,7 +17,11 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
   excepcion_max_horas: { titulo: 'Máximo que se puede pedir en una solicitud de reserva larga', unidad: 'horas', min: 1, max: 2160 },
   contacto_espera_min: { titulo: 'Espera entre mensajes al titular de un equipo', unidad: 'minutos', min: 1, max: 240 },
   reserva_max_absoluta_horas: { titulo: 'Tope absoluto de cualquier reserva (también para administradores)', unidad: 'horas', min: 24, max: 2160 },
-  recordatorio_fin_min: { titulo: 'Anticipación del recordatorio de fin', unidad: 'minutos', min: 10, max: 720 }
+  recordatorio_fin_min: { titulo: 'Anticipación del recordatorio de fin', unidad: 'minutos', min: 10, max: 720 },
+  faro_aviso_min: { titulo: 'Faro: aviso antes del fin de la reserva', unidad: 'minutos', min: 1, max: 60 },
+  faro_gracia_min: { titulo: 'Faro: gracia al terminar antes de bloquear', unidad: 'minutos', min: 0, max: 30 },
+  faro_desatendido_min: { titulo: 'Faro: inactividad para mostrar el aviso de proceso desatendido', unidad: 'minutos', min: 1, max: 120 },
+  faro_llegada_automatica: { titulo: 'Faro: registrar la llegada al detectar uso (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 }
 }
 
 /** Solo administradores. Los cambios aplican de inmediato a las reservas nuevas. */

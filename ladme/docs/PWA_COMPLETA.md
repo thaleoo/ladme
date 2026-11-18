@@ -174,6 +174,19 @@ Qué cambia:
   comparta. Si una copia falla, llega un correo a labdatos_paz. Pruebe una restauración una vez
   (Supabase → Table Editor → Insert → Import data from CSV) antes de necesitarla.
 
+## 11. Faro, el agente de los computadores (migración 0006)
+
+Guía completa en `ladme/faro/README.md`. En resumen:
+
+1. Ejecute `ladme/db/migrations/0006_faro.sql` en el SQL Editor de Supabase (después de 0005).
+2. Cree en GitHub las variables `FARO_SUPABASE_URL`, `FARO_SUPABASE_KEY` (clave pública) y `FARO_PWA_URL`.
+   Luego ejecute Actions → **Faro** para generar los instaladores de Windows y Linux.
+3. Instale Faro en cada PC junto con TI/OTIC y vincúlelo desde Administración → **Faro** → Vincular.
+4. Empiece con la sala en **Observar**. Con los datos de «uso sin reserva», pase a **Avisar** y luego a
+   **Bloquear**.
+5. Cree la clave de emergencia (Administración → Faro, solo administradores) y guárdela donde solo la vea
+   el personal.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

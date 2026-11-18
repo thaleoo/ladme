@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Las ventanas de Faro solo escuchan eventos y llaman a los comandos propios.",
+  "windows": ["isla", "vincular", "bloqueo-*"],
+  "permissions": ["core:default"]
+}

@@ -193,6 +193,67 @@ begin
   perform pg_temp.falla($q$select estadisticas(now() - interval '1 day', now())$q$, 'No autorizado');
 end $$;
 
+-- Faro (0006): vinculación, latido, llegada automática, modos y desbloqueos.
+do $$
+declare j jsonb; k jsonb; t text; v_clave text; n int;
+begin
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla($q$select faro_codigo_vinculo('UNAL-16')$q$, 'Solo el personal');
+  perform pg_temp.como('lab@unal.edu.co');
+  j := faro_codigo_vinculo('UNAL-16');
+  perform pg_temp.ok(j ->> 'codigo' ~ '^[A-Z2-9]{4}-[A-Z2-9]{4}$', 'el personal genera un código de vinculación');
+  k := faro_vincular(lower(j ->> 'codigo'), 'PC-SALA-16', 'Windows 11', '0.1.0');
+  t := k ->> 'token';
+  perform pg_temp.ok(length(t) = 64 and k ->> 'equipo' = 'UNAL-16', 'Faro canjea el código por un token');
+  perform pg_temp.falla(format('select faro_vincular(%L)', j ->> 'codigo'), 'no es válido');
+  perform pg_temp.ok((select token_hash from agentes a join equipos e on e.id = a.equipo_id where e.codigo = 'UNAL-16') <> t,
+                     'el token no se guarda en claro');
+
+  j := faro_estado(t, '{"inactivo_seg": 5, "bloqueado": false}');
+  perform pg_temp.ok(j ->> 'modo' = 'observar' and j -> 'actual' = 'null'::jsonb and j #>> '{equipo,codigo}' = 'UNAL-16',
+                     'el latido devuelve modo y equipo libre');
+  perform faro_estado(t, '{"inactivo_seg": 3}');
+  perform pg_temp.ok((select count(*) from agente_eventos v join equipos e on e.id = v.equipo_id
+                       where e.codigo = 'UNAL-16' and v.tipo = 'uso_sin_reserva') = 1, 'el uso sin reserva se marca una vez cada 30 min');
+  perform pg_temp.falla($q$select faro_estado('token-falso')$q$, 'no está vinculado');
+
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  select e.id, p.id, now() - interval '5 minutes', now() + interval '2 hours', 'PAE'
+    from equipos e, perfiles p where e.codigo = 'UNAL-16' and p.correo = 'ana@unal.edu.co';
+  j := faro_estado(t, '{"inactivo_seg": 400}');
+  perform pg_temp.ok(j #>> '{actual,titular}' = 'Ana' and (j #>> '{actual,llegada}')::boolean = false,
+                     'muestra la reserva vigente con el nombre de pila (sin llegada si nadie usa el PC)');
+  j := faro_estado(t, '{"inactivo_seg": 10}');
+  perform pg_temp.ok((j #>> '{actual,llegada}')::boolean, 'Faro registra la llegada al detectar uso');
+
+  n := faro_modo(null, 'bloquear');
+  perform pg_temp.ok(n = 1 and faro_estado(t) ->> 'modo' = 'bloquear', 'el personal cambia el modo de todos los equipos');
+  perform pg_temp.falla($q$select faro_modo(null, 'apagar')$q$, 'Modo no válido');
+  perform pg_temp.ok(faro_desbloquear('UNAL-16', 60) > now() + interval '59 minutes'
+                     and faro_estado(t) ->> 'desbloqueo_hasta' is not null, 'desbloqueo temporal desde la PWA');
+  perform faro_desbloquear('UNAL-16', 0);
+  perform pg_temp.ok(faro_estado(t) -> 'desbloqueo_hasta' = 'null'::jsonb, 'el desbloqueo se puede quitar');
+
+  perform pg_temp.falla($q$select faro_generar_clave()$q$, 'administrador');
+  perform pg_temp.como('admin@unal.edu.co');
+  v_clave := faro_generar_clave();
+  j := faro_estado(t) -> 'clave';
+  perform pg_temp.ok(v_clave ~ '^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$'
+                     and _faro_hash_clave(j ->> 'sal', lower(v_clave), (j ->> 'iteraciones')::int) = j ->> 'hash',
+                     'la clave de emergencia se verifica con su huella');
+  perform faro_evento(t, 'desbloqueo_emergencia', '{"motivo": "sin red"}');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where tipo = 'faro'), 'usar la clave de emergencia avisa al personal');
+  perform faro_evento(t, 'borrar_todo');
+  j := faro_panel();
+  perform pg_temp.ok(jsonb_array_length(j -> 'equipos') >= 16 and j -> 'clave_creada_en' <> 'null'::jsonb
+                     and exists (select 1 from jsonb_array_elements(j -> 'equipos') x where x ->> 'codigo' = 'UNAL-16' and (x ->> 'vinculado')::boolean),
+                     'el panel resume todos los equipos');
+  perform faro_desvincular('UNAL-16');
+  perform pg_temp.falla(format('select faro_estado(%L)', t), 'no está vinculado');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla($q$select faro_panel()$q$, 'Solo el personal');
+end $$;
+
 -- Permisos reales del rol que usa la PWA.
 select pg_temp.como('ana@unal.edu.co') \gset sin_
 set role authenticated;
@@ -211,5 +272,18 @@ do $$ begin
   perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id <> auth.uid()) = 0, 'cada quien ve solo sus avisos');
   perform pg_temp.ok((select count(*) from ocupacion_publica) > 0, 'la ocupación pública es visible');
+  perform pg_temp.falla($q$select * from agentes$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from faro_clave$q$, 'permission denied');
+end $$;
+reset role;
+
+-- Sin sesión (como Faro): solo puede latir con un token válido.
+select set_config('request.jwt.claim.sub', '', false);
+set role anon;
+do $$ begin
+  perform pg_temp.falla($q$select faro_estado('x')$q$, 'no está vinculado');
+  perform pg_temp.falla($q$select faro_panel()$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from agente_eventos$q$, 'permission denied');
+  perform pg_temp.ok(true, 'sin sesión solo se puede latir con un token válido');
 end $$;
 reset role;
