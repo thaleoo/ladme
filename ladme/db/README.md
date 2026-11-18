@@ -133,4 +133,3 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
   personal no pasan por este límite.
 - `crear_reserva` toma un candado por persona (`pg_advisory_xact_lock`), así que dos reservas enviadas al
   mismo tiempo no pueden pasar las dos.
-
