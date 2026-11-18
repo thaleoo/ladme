@@ -10,6 +10,7 @@ mod clave;
 mod config;
 mod decision;
 mod inactividad;
+mod isla;
 mod vigia;
 
 pub use vigia::ARG as ARG_VIGIA;
@@ -28,11 +29,11 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_opener::OpenerExt;
 
-const ISLA: &str = "isla";
+const ISLA: &str = isla::ETIQUETA;
 const VINCULAR: &str = "vincular";
 const PREFIJO_BLOQUEO: &str = "bloqueo-";
 /// Cuánto dura un desbloqueo con la clave de emergencia.
@@ -112,36 +113,6 @@ fn paquete(n: &Nucleo) -> Paquete {
 }
 
 // ------------------------------------------------------------------ ventanas
-
-fn crear_isla(app: &AppHandle) -> tauri::Result<WebviewWindow> {
-    if let Some(w) = app.get_webview_window(ISLA) {
-        return Ok(w);
-    }
-    let w = WebviewWindowBuilder::new(app, ISLA, WebviewUrl::App("isla.html".into()))
-        .title("Faro")
-        .inner_size(380.0, 64.0)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(true)
-        .visible_on_all_workspaces(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .focused(false)
-        .visible(false)
-        .build()?;
-    centrar_isla(&w);
-    Ok(w)
-}
-
-fn centrar_isla(w: &WebviewWindow) {
-    let Ok(Some(m)) = w.primary_monitor().or_else(|_| w.current_monitor()) else { return };
-    let Ok(t) = w.outer_size() else { return };
-    let escala = m.scale_factor();
-    let x = m.position().x + (m.size().width as i32 - t.width as i32) / 2;
-    let y = m.position().y + (6.0 * escala) as i32;
-    let _ = w.set_position(PhysicalPosition::new(x, y));
-}
 
 fn abrir_vincular(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(VINCULAR) {
@@ -486,26 +457,69 @@ fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Resu
     Ok(())
 }
 
+/// Async para no congelar las ventanas mientras se espera al navegador.
 #[tauri::command]
-fn abrir(app: AppHandle, estado: tauri::State<Compartido>, ruta: String) -> Result<(), String> {
+async fn abrir(app: AppHandle, estado: tauri::State<'_, Compartido>, ruta: String) -> Result<(), String> {
     let url = estado.lock().unwrap().config.url_pwa(&ruta).ok_or("Falta la dirección de LADME en la configuración de Faro.")?;
     abrir_url(&app, &url).map_err(|e| format!("No se pudo abrir el navegador: {e}"))
 }
 
-/// En Linux se llama a xdg-open con un entorno limpio: dentro de un AppImage (y con el modo
-/// XWayland de Faro) las variables propias de Faro hacían que el navegador no abriera.
+/// La dirección completa, para «Copiar enlace» cuando no se puede abrir el navegador.
+#[tauri::command]
+fn enlace(estado: tauri::State<Compartido>, ruta: String) -> Option<String> {
+    estado.lock().unwrap().config.url_pwa(&ruta)
+}
+
+/// En Linux, el AppImage pone su propia carpeta primero en PATH (con un xdg-open propio que
+/// falla en muchas distribuciones) y variables de bibliotecas que rompen al navegador. Por eso
+/// se usa el xdg-open (o gio) DEL SISTEMA, con un entorno limpio.
 #[cfg(target_os = "linux")]
 fn abrir_url(_app: &AppHandle, url: &str) -> Result<(), String> {
-    let mut c = std::process::Command::new("xdg-open");
-    c.arg(url);
-    for v in ["LD_LIBRARY_PATH", "LD_PRELOAD", "GDK_BACKEND", "GDK_PIXBUF_MODULE_FILE", "GIO_MODULE_DIR", "GTK_PATH",
-              "GTK_EXE_PREFIX", "GTK_DATA_PREFIX", "GSETTINGS_SCHEMA_DIR", "PYTHONHOME", "PYTHONPATH", "PERLLIB",
-              "QT_PLUGIN_PATH", "APPDIR", "APPIMAGE", "ARGV0", "OWD"] {
-        c.env_remove(v);
+    let appdir = std::env::var("APPDIR").unwrap_or_default();
+    let path: String = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty() && (appdir.is_empty() || !p.starts_with(&appdir)) && !p.starts_with("/tmp/.mount_"))
+        .collect::<Vec<_>>()
+        .join(":");
+    let candidatos: [(&str, &[&str]); 4] = [
+        ("/usr/bin/xdg-open", &[]),
+        ("/usr/bin/gio", &["open"]),
+        ("/bin/xdg-open", &[]),
+        ("/usr/local/bin/xdg-open", &[]),
+    ];
+    let mut ultimo = String::from("no se encontró xdg-open ni gio en el sistema");
+    for (programa, previos) in candidatos {
+        if !std::path::Path::new(programa).exists() {
+            continue;
+        }
+        let mut c = std::process::Command::new(programa);
+        c.args(previos).arg(url);
+        for v in ["LD_LIBRARY_PATH", "LD_PRELOAD", "GDK_BACKEND", "GDK_PIXBUF_MODULE_FILE", "GDK_PIXBUF_MODULEDIR",
+                  "GIO_MODULE_DIR", "GIO_EXTRA_MODULES", "GTK_PATH", "GTK_EXE_PREFIX", "GTK_DATA_PREFIX", "GTK_IM_MODULE_FILE",
+                  "GSETTINGS_SCHEMA_DIR", "PYTHONHOME", "PYTHONPATH", "PERLLIB", "QT_PLUGIN_PATH", "APPDIR", "APPIMAGE",
+                  "ARGV0", "OWD", "WEBKIT_EXEC_PATH"] {
+            c.env_remove(v);
+        }
+        c.env("PATH", if path.is_empty() { "/usr/local/bin:/usr/bin:/bin" } else { &path });
+        c.env("XDG_DATA_DIRS", "/usr/local/share:/usr/share:/var/lib/flatpak/exports/share");
+        c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+        match c.spawn() {
+            Ok(mut hijo) => {
+                // xdg-open devuelve enseguida; si falla rápido, se prueba el siguiente.
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                match hijo.try_wait() {
+                    Ok(Some(st)) if !st.success() => {
+                        ultimo = format!("{programa} terminó con {st}");
+                        continue;
+                    }
+                    _ => return Ok(()),
+                }
+            }
+            Err(e) => ultimo = e.to_string(),
+        }
     }
-    // XDG_DATA_DIRS del AppImage apunta a su carpeta interna; se vuelve al valor normal del sistema.
-    c.env("XDG_DATA_DIRS", "/usr/local/share:/usr/share");
-    c.spawn().map(|_| ()).map_err(|e| e.to_string())
+    Err(ultimo)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -516,14 +530,6 @@ fn abrir_url(app: &AppHandle, url: &str) -> Result<(), String> {
 #[tauri::command]
 fn qr(estado: tauri::State<Compartido>, ruta: String) -> Option<String> {
     estado.lock().unwrap().config.url_pwa(&ruta).as_deref().and_then(qr_svg)
-}
-
-#[tauri::command]
-fn isla_tamano(app: AppHandle, ancho: f64, alto: f64) {
-    if let Some(w) = app.get_webview_window(ISLA) {
-        let _ = w.set_size(tauri::LogicalSize::new(ancho.clamp(200.0, 640.0), alto.clamp(40.0, 520.0)));
-        centrar_isla(&w);
-    }
 }
 
 #[tauri::command]
@@ -582,7 +588,8 @@ pub fn run() {
                 }
             }
 
-            let isla = crear_isla(app.handle())?;
+            app.manage(isla::iniciar(&compartido.lock().unwrap().carpeta));
+            let isla = isla::crear(app.handle())?;
             if vinculado {
                 let _ = isla.show();
             } else {
@@ -590,6 +597,7 @@ pub fn run() {
             }
             tauri::async_runtime::spawn(ciclo(app.handle().clone(), compartido.clone()));
             tauri::async_runtime::spawn(actualizaciones(app.handle().clone(), compartido));
+            tauri::async_runtime::spawn(isla::vigilar_cursor(app.handle().clone(), app.state::<isla::Compartida>().inner().clone()));
             Ok(())
         })
         .on_window_event(|w, ev| {
@@ -612,7 +620,10 @@ pub fn run() {
             emergencia,
             abrir,
             qr,
-            isla_tamano,
+            enlace,
+            isla::isla_zona,
+            isla::isla_arrastre,
+            isla::isla_posicion,
             actualizar_ya
         ])
         .build(tauri::generate_context!())

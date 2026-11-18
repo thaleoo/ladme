@@ -84,20 +84,27 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.12s;
   white-space: nowrap;
+  /* Sin esto, WebKitGTK (Linux) dibuja el botón nativo de GTK encima: sale blanco y vacío. */
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: rgba(255, 255, 255, 0.06);
 }
-.boton:hover { background: rgba(255, 255, 255, 0.11); border-color: var(--borde-fuerte); }
+.boton:hover { background-color: rgba(255, 255, 255, 0.11); border-color: var(--borde-fuerte); }
 .boton:active { transform: scale(0.96); }
 .boton.principal {
-  background: linear-gradient(180deg, #9a72ff, #7c4dff);
+  background-color: #7c4dff;
+  background-image: linear-gradient(180deg, #9a72ff, #7c4dff);
   border-color: rgba(255, 255, 255, 0.18);
   color: #fff;
   box-shadow: 0 6px 18px -6px rgba(124, 77, 255, 0.7);
 }
-.boton.principal:hover { background: linear-gradient(180deg, #a884ff, #8a5cff); }
+.boton.principal:hover { background-image: linear-gradient(180deg, #a884ff, #8a5cff); }
 .boton svg { width: 15px; height: 15px; }
 .boton:disabled { opacity: 0.5; cursor: default; }
 
 .campo {
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
   height: 46px;
   padding: 0 14px;

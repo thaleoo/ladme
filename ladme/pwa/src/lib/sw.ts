@@ -6,6 +6,7 @@ import { registerSW } from 'virtual:pwa-register'
  */
 let actualizarSW: ((recargar?: boolean) => Promise<void>) | null = null
 let hayNueva = false
+let registroSW: ServiceWorkerRegistration | null = null
 
 export function iniciarServiceWorker(): void {
   actualizarSW = registerSW({
@@ -16,6 +17,7 @@ export function iniciarServiceWorker(): void {
     },
     onRegisteredSW(_url, registro) {
       if (!registro) return
+      registroSW = registro
       // Busca versiones nuevas cada hora y cada vez que la app vuelve a primer plano.
       const revisar = () => {
         if (navigator.onLine) void registro.update().catch(() => undefined)
@@ -28,6 +30,26 @@ export function iniciarServiceWorker(): void {
 
 export function hayActualizacion(): boolean {
   return hayNueva
+}
+
+/**
+ * Pide al servidor la última versión y espera unos segundos a que se descargue.
+ * Devuelve true si hay una versión nueva lista para activar.
+ */
+export async function buscarVersionNueva(esperaMs = 6000): Promise<boolean> {
+  if (hayNueva) return true
+  if (!registroSW || !navigator.onLine) return false
+  try {
+    await registroSW.update()
+  } catch {
+    return false
+  }
+  const fin = Date.now() + esperaMs
+  while (Date.now() < fin) {
+    if (hayNueva || registroSW.waiting) return true
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return hayNueva || !!registroSW.waiting
 }
 
 export async function aplicarActualizacion(): Promise<void> {

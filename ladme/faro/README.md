@@ -1,10 +1,26 @@
 # Faro · el agente de los computadores de LADME
 
-Faro corre en cada PC de la sala. Arriba al centro de la pantalla muestra una **isla** negra (como el
-notch de un celular) con el equipo, quién lo tiene reservado y cuánto falta. Al tocarla se abre un panel
-con la cuenta regresiva y accesos para extender, liberar, reservar o reportar una falla. Esas acciones
-abren un QR para hacerlas desde el celular, porque la cuenta «estudiantes» es compartida y Faro no sabe
-quién está sentado frente al PC.
+Faro corre en cada PC de la sala. Del borde superior de la pantalla cuelga una **isla** negra, como el
+notch de un celular, con tres tamaños:
+
+- **Mini.** Después de unos segundos sin usarla se encoge a un notch pequeño: el punto de estado y la hora
+  o la cuenta regresiva. Así casi no ocupa espacio.
+- **Compacta.** Al pasar el mouse muestra el equipo, el estado y la cuenta regresiva. También aparece sola
+  unos segundos cuando algo cambia (empieza la reserva, se libera el equipo…).
+- **Abierta.** Al hacer clic se abre un panel con la cuenta regresiva y accesos para extender, liberar,
+  reservar o reportar una falla. Esas acciones muestran un QR para hacerlas desde el celular, porque la
+  cuenta «estudiantes» es compartida y Faro no sabe quién está frente al PC. Se cierra sola al sacar el
+  mouse.
+
+Para que no estorbe:
+- **Solo la isla recibe clics.** Alrededor, aunque la ventana sea más grande, los clics pasan a la app de
+  abajo. La ventana tiene tamaño fijo y las transiciones son animación pura, con efecto resorte.
+- **Se puede arrastrar.** Al soltarla a la izquierda, al centro o a la derecha del borde superior, se
+  ajusta a ese lugar y cada PC lo recuerda.
+- **Pantalla completa.** Mientras una app está a pantalla completa (presentación, video, juego) la isla se
+  oculta. Solo vuelve para los avisos urgentes.
+
+Si «Abrir aquí» no logra abrir el navegador, la isla muestra el motivo y ofrece «Copiar enlace».
 
 Las acciones de la isla abren páginas directas en la PWA, sin pasar por la ficha del equipo:
 
@@ -142,7 +158,8 @@ En la base de datos solo queda su huella.
     Administrador de tareas para esa cuenta.
 - **Linux con Wayland.** Fedora y Ubuntu 22.04+ usan Wayland por defecto, y en Wayland una app no puede
   fijar su ventana arriba ni quedarse siempre encima. Por eso Faro arranca en modo XWayland y lee la
-  inactividad desde GNOME.
+  inactividad desde GNOME. Con apps nativas de Wayland, la detección de pantalla completa no siempre
+  funciona.
   - En escritorios que no son GNOME (KDE, XFCE con Wayland) no puede saber si el PC está en uso, así que
     el «uso sin reserva» no se registra ahí.
   - Si algo se ve mal, la sesión «en Xorg» de la pantalla de inicio es lo más fiable.

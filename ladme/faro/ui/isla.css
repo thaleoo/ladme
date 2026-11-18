@@ -1,41 +1,91 @@
-/* La isla: una píldora negra arriba al centro que se abre en un panel. */
-html, body { background: transparent; overflow: hidden; }
-body { display: flex; justify-content: center; align-items: flex-start; padding: 6px 12px 16px; }
+/* La isla: un notch negro que cuelga del borde superior y se transforma entre tres tamaños.
+   La ventana es fija y transparente; solo la isla recibe clics (ver isla.rs). */
+html, body { background: transparent; overflow: hidden; width: 100%; height: 100%; }
+
+:root {
+  /* Resorte suave con un leve rebote, al estilo de las islas dinámicas. */
+  --muelle: cubic-bezier(0.32, 1.25, 0.42, 1);
+  --suave: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --muelle: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 19.4%, 1.067, 1.099 24.3%,
+                     1.108 26%, 1.102 28.1%, 1.083 30.7%, 1.007 41%, 0.987 47%, 0.986 52%, 0.999 69.1%, 1);
+  }
+}
 
 .isla {
-  position: relative;
+  --w: 120px; --h: 30px; --r: 15px;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  translate: -50% 0;
+  width: var(--w);
+  height: var(--h);
+  border-radius: 0 0 var(--r) var(--r);
+  background: #040406;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 0;
+  box-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.8), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
   overflow: hidden;
-  background: var(--isla);
-  border: 1px solid var(--borde);
-  border-radius: 22px;
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transition: width 0.42s var(--resorte), height 0.42s var(--resorte), border-radius 0.42s var(--resorte),
-              box-shadow 0.3s;
   cursor: pointer;
+  transition: width 0.62s var(--muelle), height 0.62s var(--muelle), border-radius 0.5s var(--suave),
+              opacity 0.35s var(--suave), translate 0.5s var(--suave), scale 0.25s var(--suave), box-shadow 0.4s;
+  will-change: width, height;
+  touch-action: none;
 }
-.isla.abierta { border-radius: 28px; cursor: default; box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
-/* Resplandor del color del estado cuando hay algo urgente. */
-.isla.urgente { box-shadow: 0 10px 34px -8px color-mix(in srgb, var(--c) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
-.isla__contenido { position: absolute; top: 0; left: 0; }
-.isla--medida { position: absolute; visibility: hidden; left: -9999px; top: 0; width: auto; height: auto; transition: none; }
-.isla--medida .isla__contenido { position: static; }
+.isla[data-ui='compacta']:hover { scale: 1.02; }
+.isla[data-ui='mini']:hover { scale: 1.04; }
+.isla:active:not([data-ui='abierta']) { scale: 0.97; }
+.isla[data-ui='abierta'] { cursor: default; box-shadow: 0 28px 70px -20px rgba(0, 0, 0, 0.9), inset 0 -1px 0 rgba(255, 255, 255, 0.05); }
+.isla.urgente { box-shadow: 0 12px 38px -10px color-mix(in srgb, var(--c) 60%, transparent), inset 0 -1px 0 rgba(255, 255, 255, 0.06); }
+.isla.oculta { opacity: 0; translate: -50% -110%; pointer-events: none; }
+.isla.arrastrando { cursor: grabbing; scale: 1.03; transition: none; }
+
+/* Capas: la activa entra con fundido y desenfoque; las demás salen. */
+.capa {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  translate: -50% 0;
+  width: max-content;
+  opacity: 0;
+  filter: blur(7px);
+  scale: 0.92;
+  transform-origin: 50% 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, filter 0.22s ease, scale 0.5s var(--muelle);
+}
+.capa.activa {
+  opacity: 1;
+  filter: blur(0);
+  scale: 1;
+  pointer-events: auto;
+  transition: opacity 0.28s ease 0.1s, filter 0.34s ease 0.08s, scale 0.6s var(--muelle) 0.02s;
+}
+
+/* Mini */
+.mini { display: flex; align-items: center; justify-content: center; gap: 8px; height: 30px; padding: 0 14px 2px; white-space: nowrap; }
+.mini .valor { font-size: 12.5px; font-weight: 650; color: var(--texto); }
+.mini .punto { width: 7px; height: 7px; }
 
 /* Compacta */
-.compacta { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 14px; white-space: nowrap; }
+.compacta { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 2px 14px; white-space: nowrap; }
 .compacta .codigo { font-weight: 700; font-size: 13px; letter-spacing: 0.01em; }
-.compacta .etiqueta { color: var(--texto-2); font-size: 12.5px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.compacta .etiqueta { color: var(--texto-2); font-size: 12.5px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
 .compacta .valor { margin-left: auto; padding-left: 8px; font-size: 13.5px; font-weight: 650; color: var(--c); }
 .compacta .sep { width: 1px; height: 14px; background: var(--borde-fuerte); }
 .sin-red { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--gris);
            padding: 2px 7px; border-radius: 999px; border: 1px solid var(--borde); }
 
 /* Abierta */
-.abierta-c { width: 392px; padding: 14px 16px 14px; white-space: normal; }
+.abierta { width: 400px; padding: 14px 16px 14px; white-space: normal; }
 .cabeza { display: flex; align-items: center; gap: 9px; }
 .cabeza .codigo { font-weight: 700; font-size: 13px; }
 .cabeza .sistema { color: var(--texto-3); font-size: 12px; }
 .cabeza .cerrar { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; border: 0; background: rgba(255,255,255,0.06);
-                  display: grid; place-items: center; cursor: pointer; color: var(--texto-2); }
+                  display: grid; place-items: center; cursor: pointer; color: var(--texto-2); appearance: none; -webkit-appearance: none;
+                  transition: background 0.15s, color 0.15s; }
 .cabeza .cerrar:hover { background: rgba(255,255,255,0.12); color: var(--texto); }
 .cabeza .cerrar svg { width: 16px; height: 16px; }
 
@@ -53,14 +103,11 @@ body { display: flex; justify-content: center; align-items: flex-start; padding:
 .acciones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 
 .panel-qr { display: grid; grid-template-columns: 148px 1fr; gap: 16px; align-items: center; margin-top: 14px; }
-.panel-qr .qr { padding: 9px; border-radius: 14px; }
+.panel-qr .qr { padding: 9px; border-radius: 14px; min-height: 148px; }
 .panel-qr p { margin: 0 0 10px; font-size: 13px; color: var(--texto-2); line-height: 1.45; }
 .panel-qr p strong { color: var(--texto); display: block; font-size: 15px; margin-bottom: 4px; }
+.aviso-error { color: #fca5a5 !important; font-size: 12px !important; }
 
 .pie { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--borde);
        color: var(--texto-3); font-size: 11px; }
-
-/* Entrada suave del contenido al cambiar de tamaño */
-.isla__contenido > * { animation: aparecer 0.32s ease both; }
-@keyframes aparecer { from { opacity: 0; transform: translateY(-4px) scale(0.985); } to { opacity: 1; transform: none; } }
-.aviso-error { color: #fca5a5 !important; font-size: 12px !important; }
+.pie .mover { color: var(--texto-3); }
