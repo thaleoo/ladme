@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Faro · Vincular este equipo</title>
+  <link rel="stylesheet" href="faro.css" />
+  <style>
+    html, body { background: radial-gradient(120% 80% at 50% 0%, #1a1530 0%, var(--negro) 60%); }
+    main { display: flex; flex-direction: column; min-height: 100vh; padding: 34px 34px 28px; }
+    .logo { width: 56px; height: 56px; border-radius: 16px; background: url('icono.png') center / cover; box-shadow: 0 12px 30px -10px rgba(124,77,255,.6); }
+    h1 { margin: 22px 0 6px; font-size: 24px; letter-spacing: -0.015em; }
+    p { margin: 0; color: var(--texto-2); font-size: 14px; line-height: 1.55; }
+    ol { margin: 18px 0 22px; padding: 0; list-style: none; counter-reset: paso; display: grid; gap: 10px; }
+    li { counter-increment: paso; display: flex; gap: 12px; color: var(--texto-2); font-size: 13.5px; line-height: 1.45; }
+    li::before { content: counter(paso); flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+                 background: rgba(139,92,246,.18); color: var(--violeta-claro); font-size: 12px; font-weight: 700; }
+    li b { color: var(--texto); font-weight: 600; }
+    form { display: grid; gap: 12px; }
+    .boton { height: 44px; font-size: 14px; }
+    .listo { margin: auto 0; text-align: center; animation: aparecer .4s ease both; }
+    .listo .ok { width: 72px; height: 72px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center; background: rgba(52,211,153,.15); color: var(--verde); }
+    .listo .ok svg { width: 34px; height: 34px; }
+    .pie { margin-top: auto; padding-top: 18px; color: var(--texto-3); font-size: 12px; }
+    @keyframes aparecer { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+  </style>
+  <script type="module" src="vincular.js"></script>
+</head>
+<body>
+  <main>
+    <div class="logo"></div>
+    <h1>Vincular este equipo</h1>
+    <p>Faro muestra en la pantalla la reserva vigente de este PC. Solo el personal del laboratorio puede vincularlo.</p>
+    <ol>
+      <li><span>En LADME, abra <b>Administración → Faro</b>.</span></li>
+      <li><span>Busque este equipo y toque <b>Vincular</b>.</span></li>
+      <li><span>Escriba aquí el código de 8 caracteres (vence en 30 minutos).</span></li>
+    </ol>
+    <form id="form">
+      <input class="campo" id="codigo" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="9" />
+      <button class="boton principal" type="submit">Vincular</button>
+      <div class="error" id="error"></div>
+    </form>
+    <div class="pie">LADME · Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede La Paz</div>
+  </main>
+</body>
+</html>

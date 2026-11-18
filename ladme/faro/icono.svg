@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17151f"/>
+      <stop offset="1" stop-color="#07070a"/>
+    </linearGradient>
+    <linearGradient id="haz" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b9a4ff" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#7c5cff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="brillo" cx="0.5" cy="0.32" r="0.5">
+      <stop offset="0" stop-color="#8b6cff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#8b6cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#fondo)"/>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#brillo)"/>
+  <rect x="33.5" y="33.5" width="957" height="957" rx="222.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+  <path d="M432 330 L592 330 L800 900 L224 900 Z" fill="url(#haz)"/>
+  <rect x="272" y="226" width="480" height="132" rx="66" fill="#000000"/>
+  <rect x="272" y="226" width="480" height="132" rx="66" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="4"/>
+  <circle cx="352" cy="292" r="26" fill="#34d399"/>
+  <circle cx="352" cy="292" r="44" fill="#34d399" fill-opacity="0.18"/>
+  <rect x="412" y="276" width="180" height="32" rx="16" fill="#ffffff" fill-opacity="0.9"/>
+  <rect x="624" y="276" width="68" height="32" rx="16" fill="#ffffff" fill-opacity="0.35"/>
+</svg>

@@ -579,3 +579,77 @@ export async function listarErroresApp(): Promise<ErrorApp[]> {
   if (error) fail('No se pudieron cargar los errores', error)
   return (data ?? []) as ErrorApp[]
 }
+
+// ------------------------------------------------- Faro (agente de los PC de la sala)
+export type ModoFaro = 'observar' | 'avisar' | 'bloquear'
+
+export interface EquipoFaro {
+  codigo: string
+  nombre: string
+  categoria: string
+  estado: string
+  sistema_operativo: string | null
+  vinculado: boolean
+  vinculado_en: string | null
+  codigo_vinculo: string | null
+  codigo_vence: string | null
+  modo: ModoFaro
+  ultimo_latido: string | null
+  version: string | null
+  host: string | null
+  so: string | null
+  inactivo_seg: number | null
+  bloqueado: boolean
+  desbloqueo_hasta: string | null
+  usos_sin_reserva_7d: number
+}
+
+export interface EventoFaro {
+  id: number
+  equipo: string
+  tipo: string
+  detalle: Record<string, unknown>
+  actor: string | null
+  creado_en: string
+}
+
+export interface PanelFaro {
+  ahora: string
+  clave_creada_en: string | null
+  equipos: EquipoFaro[]
+  eventos: EventoFaro[]
+}
+
+export async function panelFaro(): Promise<PanelFaro> {
+  const { data, error } = await supabase.rpc('faro_panel')
+  if (error) fail('No se pudo cargar Faro', error)
+  return data as PanelFaro
+}
+
+export async function codigoVinculoFaro(equipo: string): Promise<{ codigo: string; vence: string; equipo: string }> {
+  const { data, error } = await supabase.rpc('faro_codigo_vinculo', { p_equipo: equipo })
+  if (error) fail('No se pudo generar el código', error)
+  return data as { codigo: string; vence: string; equipo: string }
+}
+
+export async function modoFaro(equipos: string[] | null, modo: ModoFaro): Promise<number> {
+  const { data, error } = await supabase.rpc('faro_modo', { p_equipos: equipos, p_modo: modo })
+  if (error) fail('No se pudo cambiar el modo', error)
+  return Number(data ?? 0)
+}
+
+export async function desbloquearFaro(equipo: string, minutos: number): Promise<void> {
+  const { error } = await supabase.rpc('faro_desbloquear', { p_equipo: equipo, p_minutos: minutos })
+  if (error) fail('No se pudo desbloquear', error)
+}
+
+export async function desvincularFaro(equipo: string): Promise<void> {
+  const { error } = await supabase.rpc('faro_desvincular', { p_equipo: equipo })
+  if (error) fail('No se pudo desvincular', error)
+}
+
+export async function generarClaveFaro(): Promise<string> {
+  const { data, error } = await supabase.rpc('faro_generar_clave')
+  if (error) fail('No se pudo generar la clave', error)
+  return String(data)
+}

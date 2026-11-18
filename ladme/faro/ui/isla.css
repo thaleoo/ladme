@@ -1,0 +1,65 @@
+/* La isla: una píldora negra arriba al centro que se abre en un panel. */
+html, body { background: transparent; overflow: hidden; }
+body { display: flex; justify-content: center; align-items: flex-start; padding: 6px 12px 16px; }
+
+.isla {
+  position: relative;
+  overflow: hidden;
+  background: var(--isla);
+  border: 1px solid var(--borde);
+  border-radius: 22px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: width 0.42s var(--resorte), height 0.42s var(--resorte), border-radius 0.42s var(--resorte),
+              box-shadow 0.3s;
+  cursor: pointer;
+}
+.isla.abierta { border-radius: 28px; cursor: default; box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+/* Resplandor del color del estado cuando hay algo urgente. */
+.isla.urgente { box-shadow: 0 10px 34px -8px color-mix(in srgb, var(--c) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+.isla__contenido { position: absolute; top: 0; left: 0; }
+.isla--medida { position: absolute; visibility: hidden; left: -9999px; top: 0; width: auto; height: auto; transition: none; }
+.isla--medida .isla__contenido { position: static; }
+
+/* Compacta */
+.compacta { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 14px; white-space: nowrap; }
+.compacta .codigo { font-weight: 700; font-size: 13px; letter-spacing: 0.01em; }
+.compacta .etiqueta { color: var(--texto-2); font-size: 12.5px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.compacta .valor { margin-left: auto; padding-left: 8px; font-size: 13.5px; font-weight: 650; color: var(--c); }
+.compacta .sep { width: 1px; height: 14px; background: var(--borde-fuerte); }
+.sin-red { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--gris);
+           padding: 2px 7px; border-radius: 999px; border: 1px solid var(--borde); }
+
+/* Abierta */
+.abierta-c { width: 392px; padding: 14px 16px 14px; white-space: normal; }
+.cabeza { display: flex; align-items: center; gap: 9px; }
+.cabeza .codigo { font-weight: 700; font-size: 13px; }
+.cabeza .sistema { color: var(--texto-3); font-size: 12px; }
+.cabeza .cerrar { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; border: 0; background: rgba(255,255,255,0.06);
+                  display: grid; place-items: center; cursor: pointer; color: var(--texto-2); }
+.cabeza .cerrar:hover { background: rgba(255,255,255,0.12); color: var(--texto); }
+.cabeza .cerrar svg { width: 16px; height: 16px; }
+
+.titulo { margin: 14px 0 2px; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
+.detalle { margin: 4px 0 0; color: var(--texto-2); font-size: 13px; line-height: 1.45; }
+.mensaje { margin: 10px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--borde);
+           color: var(--texto-2); font-size: 12.5px; }
+
+.reloj { display: flex; align-items: baseline; gap: 10px; margin-top: 12px; }
+.reloj .grande { font-size: 40px; font-weight: 300; line-height: 1; color: var(--texto); }
+.reloj .que { color: var(--texto-3); font-size: 12px; }
+.barra { position: relative; height: 4px; margin-top: 12px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.barra i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--violeta), var(--c)); transition: width 1s linear; }
+
+.acciones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+.panel-qr { display: grid; grid-template-columns: 148px 1fr; gap: 16px; align-items: center; margin-top: 14px; }
+.panel-qr .qr { padding: 9px; border-radius: 14px; }
+.panel-qr p { margin: 0 0 10px; font-size: 13px; color: var(--texto-2); line-height: 1.45; }
+.panel-qr p strong { color: var(--texto); display: block; font-size: 15px; margin-bottom: 4px; }
+
+.pie { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--borde);
+       color: var(--texto-3); font-size: 11px; }
+
+/* Entrada suave del contenido al cambiar de tamaño */
+.isla__contenido > * { animation: aparecer 0.32s ease both; }
+@keyframes aparecer { from { opacity: 0; transform: translateY(-4px) scale(0.985); } to { opacity: 1; transform: none; } }

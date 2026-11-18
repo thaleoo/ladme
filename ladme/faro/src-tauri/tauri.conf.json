@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LADME Faro",
+  "version": "0.1.0",
+  "identifier": "co.edu.unal.ladme.faro",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "deb", "appimage"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico", "icons/icon.png"],
+    "publisher": "Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede La Paz",
+    "shortDescription": "Faro: reservas del laboratorio en cada equipo",
+    "longDescription": "Muestra la reserva vigente del equipo en la parte superior de la pantalla y, según el modo que defina el laboratorio, avisa o bloquea el equipo cuando no hay reserva.",
+    "category": "Utility",
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "nsis": {
+        "installMode": "both",
+        "languages": ["Spanish"],
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": { "section": "utils" }
+    }
+  }
+}

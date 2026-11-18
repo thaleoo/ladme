@@ -83,3 +83,10 @@ ocurren en los dispositivos de los usuarios.
 `migrations/0005_so_tope_absoluto.sql`, después de 0004: columnas `sistema_operativo` y `so_version` en
 `equipos`, y un tope absoluto de 30 días (política `reserva_max_absoluta_horas`) que aplica incluso a los
 administradores. No afecta reservas importadas.
+
+## Migración 0006 — Faro
+
+`migrations/0006_faro.sql`, después de 0005: tablas `agentes`, `agente_eventos` y `faro_clave` (sin acceso
+directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vinculo`, `faro_modo`,
+`faro_desbloquear`, `faro_desvincular` y `faro_generar_clave`. Funciones de Faro, sin sesión y con token:
+`faro_vincular`, `faro_estado` y `faro_evento`. También agrega las políticas `faro_*`. Ver `ladme/faro/README.md`.

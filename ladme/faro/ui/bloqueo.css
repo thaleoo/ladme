@@ -1,0 +1,58 @@
+/* Pantalla de bloqueo: negro profundo con luces que se mueven despacio. */
+html { background: var(--negro); overflow: hidden; }
+body { background: transparent; overflow: hidden; position: relative; }
+body { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; }
+
+.fondo { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+.marca, main, .pie { position: relative; z-index: 1; }
+.fondo::before {
+  content: ''; position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse at 50% 40%, #000 20%, transparent 75%);
+}
+.fondo i { position: absolute; width: 60vmax; height: 60vmax; border-radius: 50%; filter: blur(80px); opacity: 0.38; }
+.fondo i:nth-child(1) { background: #6d28d9; left: -15vmax; top: -25vmax; animation: deriva 28s ease-in-out infinite alternate; }
+.fondo i:nth-child(2) { background: var(--c); right: -20vmax; bottom: -30vmax; opacity: 0.2; animation: deriva 34s ease-in-out infinite alternate-reverse; }
+.fondo i:nth-child(3) { background: #1d4ed8; left: 30vw; top: 50vh; width: 40vmax; height: 40vmax; opacity: 0.16; animation: deriva 40s ease-in-out infinite alternate; }
+@keyframes deriva { to { transform: translate(8vmax, 6vmax) scale(1.12); } }
+
+.marca { display: flex; align-items: center; gap: 10px; padding: 28px 36px; font-weight: 700; letter-spacing: 0.06em; font-size: 13px; }
+.marca .tenue { color: var(--texto-3); font-weight: 500; letter-spacing: 0.01em; }
+.marca .logo { width: 26px; height: 26px; border-radius: 8px; background: url('icono.png') center / cover; }
+
+main { display: grid; place-items: center; padding: 0 32px; }
+.centro { display: grid; grid-template-columns: auto auto; gap: 72px; align-items: center; max-width: 1100px; animation: entrar 0.6s ease both; }
+.centro.solo { grid-template-columns: auto; text-align: center; justify-items: center; }
+@keyframes entrar { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+.hora { font-size: clamp(72px, 11vw, 148px); font-weight: 200; line-height: 0.95; letter-spacing: -0.04em; }
+.hora small { font-size: 0.32em; font-weight: 300; letter-spacing: 0; margin-left: 0.18em; color: var(--texto-2); }
+.fecha { margin-top: 10px; color: var(--texto-2); font-size: 20px; }
+.estado { display: inline-flex; align-items: center; gap: 10px; margin-top: 34px; padding: 8px 14px 8px 12px; border-radius: 999px;
+          background: rgba(255,255,255,0.05); border: 1px solid var(--borde); font-size: 13px; font-weight: 650; }
+.titulo { margin: 18px 0 8px; font-size: 28px; font-weight: 650; letter-spacing: -0.015em; max-width: 560px; }
+.detalle { margin: 0; color: var(--texto-2); font-size: 16px; line-height: 1.55; max-width: 520px; }
+.mensaje { margin-top: 18px; padding: 14px 18px; border-radius: 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--borde);
+           color: var(--texto); font-size: 16px; max-width: 520px; }
+.icono-grande { width: 64px; height: 64px; color: var(--c); margin-bottom: 8px; }
+
+.tarjeta { width: 300px; padding: 22px; border-radius: 28px; background: rgba(15, 15, 20, 0.6); border: 1px solid var(--borde);
+           backdrop-filter: blur(24px); text-align: center; box-shadow: 0 30px 80px -30px rgba(0,0,0,0.9); }
+.tarjeta .qr { width: 220px; margin: 0 auto; }
+.tarjeta .que { margin: 16px 0 4px; font-weight: 650; font-size: 15px; }
+.tarjeta .url { color: var(--texto-3); font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.espera { display: flex; text-align: left; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; color: var(--texto-3); font-size: 12.5px; }
+.espera::before { content: ''; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--texto-3); border-top-color: transparent; animation: girar 0.9s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+
+.pie { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; padding: 24px 36px 30px; color: var(--texto-3); font-size: 13px; }
+.personal { display: flex; align-items: center; gap: 10px; }
+.personal .campo { width: 260px; height: 40px; font-size: 15px; }
+.personal .error { margin-left: 4px; }
+.enlace { background: none; border: 0; color: var(--texto-3); cursor: pointer; display: inline-flex; gap: 7px; align-items: center; padding: 6px 0; }
+.enlace:hover { color: var(--texto); }
+.enlace svg { width: 15px; height: 15px; }
+
+/* Monitores secundarios */
+.secundario main { place-items: center; }

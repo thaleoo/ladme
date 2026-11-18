@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   alternarAlerta, contactarTitular, crearReserva, listarReportes, obtenerEquipo, tengoAlerta, ocupacionPublica, mantenimientoDelEquipo, registrarLlegada,
   type EstadoMantenimientoEquipo
@@ -43,6 +43,13 @@ export default function FichaEquipo() {
   const navigate = useNavigate()
   const toast = useToast()
   const [dialogo, setDialogo] = useState<'rapida' | 'contacto' | 'falla' | null>(null)
+  // Faro abre la ficha con ?reportar=1 para ir directo al reporte de falla.
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    if (params.get('reportar') !== '1') return
+    setDialogo('falla')
+    setParams((p) => { p.delete('reportar'); return p }, { replace: true })
+  }, [params, setParams])
   const [alerta, setAlerta] = useState(false)
   const [reportes, setReportes] = useState<Reporte[]>([])
 
