@@ -187,6 +187,19 @@ Guía completa en `ladme/faro/README.md`. En resumen:
 5. Cree la clave de emergencia (Administración → Faro, solo administradores) y guárdela donde solo la vea
    el personal.
 
+## 12. Faro 0.2: actualizaciones, instalación masiva, uso real, modo clase y chat (migración 0007)
+
+1. SQL Editor → `ladme/db/migrations/0007_faro_uso_clase_chat.sql` (después de 0006).
+2. Vuelva a pegar `ladme/appsscript/Código.gs`. Si quiere avisos en un chat del personal, configure
+   `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`, o `GCHAT_WEBHOOK_URL`, y ejecute `probarChatPersonal`.
+3. Cree la clave de firma de Faro y publique la etiqueta `faro-v0.2.0` (ver `ladme/faro/README.md`).
+4. Instale en cada PC con `instalar-windows.ps1` o `instalar-linux.sh`, que vienen en la release.
+
+- Las acciones de la isla abren páginas directas: `/pc/UNAL-05/extender`, `/liberar`, `/reportar` y
+  `/reservar`. Al iniciar sesión, la PWA vuelve a la página que se abrió.
+- La pestaña Faro suma el uso real (mapa de calor y uso por equipo) y el modo clase.
+- El chat del personal recibe reportes, solicitudes y alertas de Faro, sin datos personales.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
+import { tomarDestino } from '../lib/rutas'
 import { useAuth } from '../context/AuthContext'
 import Icon from '../components/Icon'
 import Logo from '../components/Logo'
@@ -38,7 +39,8 @@ export default function Login() {
   }
 
   if (session) {
-    const destino = (location.state as { from?: string } | null)?.from ?? '/'
+    const desde = (location.state as { from?: string } | null)?.from
+    const destino = desde && desde.startsWith('/') && !desde.startsWith('//') ? (tomarDestino(), desde) : tomarDestino()
     return <Navigate to={destino} replace />
   }
 

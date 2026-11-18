@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { Suspense, type ReactNode } from 'react'
 import Shell from './components/Shell'
 import { esAdmin, esStaff, useAuth } from './context/AuthContext'
@@ -7,11 +7,11 @@ import Disponibilidad from './pages/Disponibilidad'
 import Login from './pages/Login'
 import NoEncontrada from './pages/NoEncontrada'
 import { PoliticasProvider } from './lib/politicas'
-import { Paginas } from './lib/rutas'
+import { Paginas, recordarDestino } from './lib/rutas'
 import CargaInicial from './components/CargaInicial'
 
 const {
-  Admin, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Reservar, Usuarios, Validar
+  AccionRapida, Admin, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Reservar, Usuarios, Validar
 } = Paginas
 
 function Cargando() {
@@ -37,8 +37,14 @@ function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
 
 function SoloAutenticado({ children }: { children: ReactNode }) {
   const { session, cargando, perfil, error, reintentar } = useAuth()
+  const ubicacion = useLocation()
   if (cargando) return <CargaInicial alReintentar={reintentar} />
-  if (!session) return <Navigate to="/login" replace />
+  if (!session) {
+    // Al volver de Google (o del código) se retoma el enlace que se abrió, p. ej. un QR de Faro.
+    const desde = ubicacion.pathname + ubicacion.search
+    recordarDestino(desde)
+    return <Navigate to="/login" replace state={{ from: desde }} />
+  }
   if (!perfil && error) {
     return (
       <Aviso titulo="Sin conexión con LADME">
@@ -109,6 +115,7 @@ export default function App() {
         <Route path="mis-reservas" element={<MisReservas />} />
         <Route path="credencial/:id" element={<Credencial />} />
         <Route path="equipo/:codigo" element={<FichaEquipo />} />
+        <Route path="pc/:codigo/:accion" element={<AccionRapida />} />
         <Route path="cuenta" element={<Cuenta />} />
         <Route path="avisos" element={<Avisos />} />
         <Route path="mi-uso" element={<MiUso />} />

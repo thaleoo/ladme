@@ -22,6 +22,9 @@ pub struct Config {
     pub token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equipo: Option<String>,
+    /// Código de vinculación dejado por el script de instalación: Faro se vincula solo con él.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codigo_vinculo: Option<String>,
 }
 
 impl Config {
@@ -31,6 +34,7 @@ impl Config {
         if !o.pwa_url.is_empty() { self.pwa_url = o.pwa_url; }
         if o.token.is_some() { self.token = o.token; }
         if o.equipo.is_some() { self.equipo = o.equipo; }
+        if o.codigo_vinculo.is_some() { self.codigo_vinculo = o.codigo_vinculo; }
     }
 
     pub fn completa(&self) -> bool {
@@ -77,6 +81,9 @@ pub fn guardar_vinculo(carpeta: &Path, token: Option<&str>, equipo: Option<&str>
     let mut actual = leer::<Config>(&carpeta.join("faro.json")).unwrap_or_default();
     actual.token = token.map(Into::into);
     actual.equipo = equipo.map(Into::into);
+    if token.is_some() {
+        actual.codigo_vinculo = None; // ya se usó
+    }
     escribir(&carpeta.join("faro.json"), &actual)
 }
 

@@ -90,3 +90,16 @@ administradores. No afecta reservas importadas.
 directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vinculo`, `faro_modo`,
 `faro_desbloquear`, `faro_desvincular` y `faro_generar_clave`. Funciones de Faro, sin sesión y con token:
 `faro_vincular`, `faro_estado` y `faro_evento`. También agrega las políticas `faro_*`. Ver `ladme/faro/README.md`.
+
+## Migración 0007 — Faro: uso real, modo clase y chat
+
+`migrations/0007_faro_uso_clase_chat.sql`, después de 0006.
+
+- `faro_uso`: tiempo encendido, en uso y en uso sin reserva por equipo y hora. Lo suma `faro_estado` en
+  cada latido, con un máximo de 2 minutos por latido. `faro_estadisticas` lo resume.
+- `faro_clase` / `faro_clase_terminar`: bloquean los equipos para reservas y los dejan libres para la
+  clase.
+- `cola_chat`: avisos sin datos personales para Telegram o Google Chat. Se llena con triggers en
+  `reportes` y `solicitudes_excepcion`, con `encolar_alertas_faro` y con los eventos de Faro. Apps Script
+  la lee con `chat_pendientes` y `marcar_chat_enviado` (`service_role`).
+- Eventos nuevos de Faro: `cierre_forzado`, `actualizado`, `clase_inicio` y `clase_fin`.

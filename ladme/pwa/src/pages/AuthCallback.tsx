@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { tomarDestino } from '../lib/rutas'
 import { supabase } from '../lib/supabase'
 import { mensajeError } from '../lib/errores'
 import Icon from '../components/Icon'
@@ -26,14 +27,15 @@ export default function AuthCallback() {
     }
 
     let vivo = true
+    const destino = tomarDestino()
     const { data: sub } = supabase.auth.onAuthStateChange((_evento, sesion) => {
-      if (sesion && vivo) navigate('/', { replace: true })
+      if (sesion && vivo) navigate(destino, { replace: true })
     })
 
     supabase.auth.getSession().then(({ data, error: err }) => {
       if (!vivo) return
       if (err) setError(mensajeError(err, 'No pudimos validar su enlace de acceso.'))
-      else if (data.session) navigate('/', { replace: true })
+      else if (data.session) navigate(destino, { replace: true })
     })
 
     const timer = window.setTimeout(() => {

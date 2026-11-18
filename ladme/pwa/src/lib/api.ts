@@ -653,3 +653,36 @@ export async function generarClaveFaro(): Promise<string> {
   if (error) fail('No se pudo generar la clave', error)
   return String(data)
 }
+
+export interface UsoEquipoFaro {
+  codigo: string
+  encendido_h: number
+  uso_h: number
+  sin_reserva_h: number
+  reservado_h: number
+  reservas_sin_uso: number
+}
+
+export interface EstadisticasFaro {
+  por_equipo: UsoEquipoFaro[]
+  /** dia: 1 = lunes … 7 = domingo; hora 0–23 en hora de Bogotá. */
+  por_hora: Array<{ dia: number; hora: number; uso_h: number; sin_reserva_h: number }>
+}
+
+export async function estadisticasFaro(desde: string, hasta: string): Promise<EstadisticasFaro> {
+  const { data, error } = await supabase.rpc('faro_estadisticas', { p_desde: desde, p_hasta: hasta })
+  if (error) fail('No se pudo calcular el uso real', error)
+  return data as EstadisticasFaro
+}
+
+export async function empezarClaseFaro(equipos: string[] | null, minutos: number, motivo: string): Promise<{ equipos: string[]; omitidos: string[]; fin: string }> {
+  const { data, error } = await supabase.rpc('faro_clase', { p_equipos: equipos, p_minutos: minutos, p_motivo: motivo })
+  if (error) fail('No se pudo empezar la clase', error)
+  return data as { equipos: string[]; omitidos: string[]; fin: string }
+}
+
+export async function terminarClaseFaro(equipos: string[] | null): Promise<number> {
+  const { data, error } = await supabase.rpc('faro_clase_terminar', { p_equipos: equipos })
+  if (error) fail('No se pudo terminar la clase', error)
+  return Number(data ?? 0)
+}
