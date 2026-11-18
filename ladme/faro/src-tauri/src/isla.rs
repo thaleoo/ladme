@@ -3,8 +3,13 @@
 //! Es una ventana transparente de tamaño FIJO (cabe el panel abierto) que nunca cambia de
 //! tamaño: así las transiciones son animación pura en CSS. Para que no estorbe, solo la
 //! píldora visible recibe clics; en el resto la ventana deja pasar el mouse a lo que hay
-//! debajo. La interfaz informa dónde está la píldora (`isla_zona`) y aquí, unas 30 veces por
-//! segundo, se compara con la posición del cursor y se activa o no el «paso de clics».
+//! debajo. La interfaz informa dónde está la píldora (`isla_zona`) y:
+//!
+//! - En Linux se fija la «forma de entrada» de la ventana a ese rectángulo (X11/XWayland la
+//!   respetan): fuera de él los clics pasan solos. Con XWayland no se puede leer el cursor
+//!   sobre ventanas nativas de Wayland, así que comparar posiciones no sirve allí.
+//! - En Windows, unas 30 veces por segundo se compara la posición del cursor con la zona y se
+//!   activa o no el «paso de clics» de toda la ventana.
 //!
 //! Además: se arrastra y se ajusta a la izquierda, al centro o a la derecha del borde superior
 //! (cada PC recuerda su lugar), y avisa a la interfaz cuando hay una app a pantalla completa.
@@ -120,8 +125,37 @@ async fn deslizar(w: WebviewWindow, destino: (i32, i32)) {
 
 /// La interfaz informa dónde está la píldora (ancho 0 = oculta, no recibe clics).
 #[tauri::command]
-pub fn isla_zona(estado: tauri::State<Compartida>, x: f64, y: f64, ancho: f64, alto: f64) {
-    estado.lock().unwrap().zona = (ancho > 0.0 && alto > 0.0).then_some((x, y, ancho, alto));
+pub fn isla_zona(app: AppHandle, estado: tauri::State<Compartida>, x: f64, y: f64, ancho: f64, alto: f64) {
+    let zona = (ancho > 0.0 && alto > 0.0).then_some((x, y, ancho, alto));
+    estado.lock().unwrap().zona = zona;
+    #[cfg(target_os = "linux")]
+    if let Some(w) = app.get_webview_window(ETIQUETA) {
+        forma_de_entrada(&w, zona);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+}
+
+/// Linux: solo el rectángulo de la isla recibe el mouse (vacío = la ventana no recibe nada).
+/// Las coordenadas son lógicas, igual que en GTK.
+#[cfg(target_os = "linux")]
+fn forma_de_entrada(w: &WebviewWindow, zona: Option<(f64, f64, f64, f64)>) {
+    let w2 = w.clone();
+    let _ = w.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let Ok(gtk_ventana) = w2.gtk_window() else { return };
+        let Some(gdk_ventana) = gtk_ventana.window() else { return }; // aún no se ha mostrado
+        let region = match zona {
+            Some((x, y, ancho, alto)) => gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+                x.floor() as i32,
+                y.floor() as i32,
+                ancho.ceil() as i32,
+                alto.ceil() as i32,
+            )),
+            None => gtk::cairo::Region::create(),
+        };
+        gdk_ventana.input_shape_combine_region(&region, 0, 0);
+    });
 }
 
 /// Arrastre horizontal: fase «inicio», «mover» (dx en píxeles lógicos desde el inicio) o «fin».
@@ -195,16 +229,23 @@ pub async fn vigilar_cursor(app: AppHandle, estado: Compartida) {
             }
         };
         let mut e = estado.lock().unwrap();
-        if e.pasa_clics != Some(!dentro) {
-            e.pasa_clics = Some(!dentro);
-            let _ = w.set_ignore_cursor_events(!dentro);
+        // En Linux la forma de entrada ya decide quién recibe el mouse (ver forma_de_entrada) y la
+        // interfaz detecta el paso del mouse por sí misma.
+        if cfg!(not(target_os = "linux")) {
+            if e.pasa_clics != Some(!dentro) {
+                e.pasa_clics = Some(!dentro);
+                let _ = w.set_ignore_cursor_events(!dentro);
+            }
+            if e.dentro != dentro {
+                e.dentro = dentro;
+                let _ = app.emit("faro://dentro", dentro);
+            }
         }
-        if e.dentro != dentro {
-            e.dentro = dentro;
-            let _ = app.emit("faro://dentro", dentro);
-        }
-        // Cada segundo: ¿hay una app a pantalla completa?
+        // Cada segundo: se reaplica la forma de entrada en Linux (por si la ventana aún no
+        // existía cuando la interfaz informó la zona) y se revisa si hay pantalla completa.
         if contador % 30 == 0 {
+            #[cfg(target_os = "linux")]
+            forma_de_entrada(&w, e.zona);
             let completa = pantalla_completa();
             if completa != e.completa {
                 e.completa = completa;

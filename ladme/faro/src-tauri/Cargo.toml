@@ -1,6 +1,6 @@
 [package]
 name = "ladme-faro"
-version = "0.3.0"
+version = "0.3.1"
 description = "Faro: agente de los computadores de la sala LADME"
 authors = ["Laboratorio de Datos y Modelamiento Estadístico, UNAL Sede La Paz"]
 edition = "2021"
@@ -34,6 +34,7 @@ windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse",
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2"
+gtk = "0.18"
 
 [profile.release]
 codegen-units = 1
