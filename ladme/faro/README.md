@@ -50,8 +50,12 @@ Más detalles:
    - **Windows 10/11:** el instalador puede instalar Faro solo para la cuenta «estudiantes» (sin
      permisos de administrador) o para todo el equipo (con permisos, lo hace TI). Faro se registra para
      arrancar al iniciar sesión. En Windows 10 sin WebView2, el instalador lo trae incluido.
-   - **Linux:** `sudo apt install ./ladme-faro_*.deb` (lo hace TI), o el `.AppImage` en la carpeta de la
-     cuenta. Faro se agrega solo al inicio de sesión (`~/.config/autostart`).
+   - **Linux:**
+     - Ubuntu o Debian: `sudo apt install ./LADME*Faro*.deb` (lo hace TI).
+     - Fedora: `sudo dnf install ./LADME*Faro*.rpm` (lo hace TI).
+     - Sin permisos de administrador: el `.AppImage` en la carpeta de la cuenta (`chmod +x` y abrirlo).
+
+     En cualquier caso, Faro se agrega solo al inicio de sesión (`~/.config/autostart`).
 4. **Vincular:** la primera vez Faro abre «Vincular este equipo». En la PWA, vaya a Administración → Faro
    → el equipo → **Vincular**, y escriba en el PC el código de 8 caracteres (vence en 30 min). Listo.
 5. **Fases:** deje la sala en **Observar** una o dos semanas y mire cuántos «uso sin reserva» aparecen.
@@ -81,9 +85,12 @@ En la base de datos solo queda su huella.
   - Para impedirlo de verdad hace falta una fase 3b con TI: un servicio de Windows (o de systemd en
     Linux) que corra como sistema y vuelva a abrir Faro si lo cierran, o una directiva que bloquee el
     Administrador de tareas para esa cuenta.
-- **Linux con Wayland.** Ubuntu 22.04+ usa Wayland por defecto. Ahí no se puede saber si el PC está en uso
-  (el «uso sin reserva» no se registra), y las ventanas «siempre encima» no están garantizadas. Para esos
-  equipos se recomienda la sesión «Ubuntu en Xorg».
+- **Linux con Wayland.** Fedora y Ubuntu 22.04+ usan Wayland por defecto, y en Wayland una app no puede
+  fijar su ventana arriba ni quedarse siempre encima. Por eso Faro arranca en modo XWayland y lee la
+  inactividad desde GNOME.
+  - En escritorios que no son GNOME (KDE, XFCE con Wayland) no puede saber si el PC está en uso, así que
+    el «uso sin reserva» no se registra ahí.
+  - Si algo se ve mal, la sesión «en Xorg» de la pantalla de inicio es lo más fiable.
 - **Combinaciones del sistema.** Ctrl+Alt+Supr y la tecla Windows no se pueden bloquear desde una
   aplicación normal. El bloqueo vuelve a ponerse delante cada segundo.
 
