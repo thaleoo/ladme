@@ -602,6 +602,25 @@ export interface EquipoFaro {
   bloqueado: boolean
   desbloqueo_hasta: string | null
   usos_sin_reserva_7d: number
+  canal: 'estable' | 'pruebas'
+  cpu_pct: number | null
+  software: string[]
+  comandos_pendientes: number
+  inventario: InventarioFaro | null
+  inventario_en: string | null
+}
+
+export interface InventarioFaro {
+  cpu?: string
+  nucleos?: number
+  ram_gb?: number
+  disco_gb?: number
+  disco_libre_gb?: number
+  mac?: string
+  so_tipo?: string
+  so_version?: string
+  arranque_h?: number
+  software?: string[]
 }
 
 export interface EventoFaro {
@@ -616,6 +635,7 @@ export interface EventoFaro {
 export interface PanelFaro {
   ahora: string
   clave_creada_en: string | null
+  anuncios: Array<{ id: number; texto: string; equipos: string[] | null; hasta: string }>
   equipos: EquipoFaro[]
   eventos: EventoFaro[]
 }
@@ -685,4 +705,81 @@ export async function terminarClaseFaro(equipos: string[] | null): Promise<numbe
   const { data, error } = await supabase.rpc('faro_clase_terminar', { p_equipos: equipos })
   if (error) fail('No se pudo terminar la clase', error)
   return Number(data ?? 0)
+}
+
+// ------------------------------------------------- 0008: llegada por QR, órdenes, espera, sala
+export async function registrarLlegadaPc(equipo: string, codigo: string): Promise<void> {
+  const { error } = await supabase.rpc('registrar_llegada_pc', { p_equipo: equipo, p_codigo: codigo })
+  if (error) fail('No se pudo registrar la llegada', error)
+}
+
+export type OrdenFaro = 'reiniciar' | 'actualizar' | 'apagar' | 'encender' | 'desinstalar'
+
+export async function ordenFaro(equipos: string[] | null, orden: OrdenFaro): Promise<number> {
+  const { data, error } = await supabase.rpc('faro_comando', { p_equipos: equipos, p_tipo: orden })
+  if (error) fail('No se pudo enviar la orden', error)
+  return Number(data ?? 0)
+}
+
+export async function anunciarFaro(texto: string, minutos: number, equipos: string[] | null = null): Promise<void> {
+  const { error } = await supabase.rpc('faro_anunciar', { p_texto: texto, p_minutos: minutos, p_equipos: equipos })
+  if (error) fail('No se pudo publicar el anuncio', error)
+}
+
+export async function quitarAnuncioFaro(id: number): Promise<void> {
+  const { error } = await supabase.rpc('faro_quitar_anuncio', { p_id: id })
+  if (error) fail('No se pudo quitar el anuncio', error)
+}
+
+export async function canalFaro(equipos: string[] | null, canal: 'estable' | 'pruebas'): Promise<void> {
+  const { error } = await supabase.rpc('faro_canal', { p_equipos: equipos, p_canal: canal })
+  if (error) fail('No se pudo cambiar el canal', error)
+}
+
+export interface Espera {
+  id: number
+  software: string | null
+  creado_en: string
+  vence: string
+  avisado_en: string | null
+}
+
+export async function miEspera(): Promise<Espera | null> {
+  const { data, error } = await supabase
+    .from('lista_espera')
+    .select('id, software, creado_en, vence, avisado_en')
+    .is('avisado_en', null)
+    .gt('vence', new Date().toISOString())
+    .maybeSingle()
+  if (error) return null
+  return (data as Espera | null) ?? null
+}
+
+export async function unirseEspera(software: string | null): Promise<void> {
+  const { error } = await supabase.rpc('unirse_espera', { p_software: software })
+  if (error) fail('No se pudo entrar a la lista de espera', error)
+}
+
+export async function salirEspera(): Promise<void> {
+  const { error } = await supabase.rpc('salir_espera')
+  if (error) fail('No se pudo salir de la lista de espera', error)
+}
+
+export interface EquipoSala {
+  codigo: string
+  categoria: string
+  x: number | null
+  y: number | null
+  sistema: string
+  estado: 'libre' | 'ocupado' | 'bloqueado' | 'mantenimiento'
+  hasta: string | null
+  proxima: string | null
+  faro: boolean | null
+}
+
+/** Estado de la sala sin datos personales; funciona sin iniciar sesión (pantalla del laboratorio). */
+export async function salaPublica(): Promise<EquipoSala[]> {
+  const { data, error } = await supabase.rpc('sala_publica')
+  if (error) fail('No se pudo cargar la sala', error)
+  return (data ?? []) as EquipoSala[]
 }

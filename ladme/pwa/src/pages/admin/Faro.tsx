@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, panelFaro, terminarClaseFaro,
+  anunciarFaro, canalFaro, codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, ordenFaro,
+  panelFaro, quitarAnuncioFaro, terminarClaseFaro, type OrdenFaro,
   type EquipoFaro, type ModoFaro, type PanelFaro
 } from '../../lib/api'
 import { esAdmin, useAuth } from '../../context/AuthContext'
@@ -56,6 +57,8 @@ export default function Faro() {
   const [clave, setClave] = useState<string | null>(null)
   const [, setTic] = useState(0)
   const [clase, setClase] = useState<{ motivo: string; minutos: number } | null>(null)
+  const [anuncio, setAnuncio] = useState<{ texto: string; minutos: number } | null>(null)
+  const [abiertoEquipo, setAbiertoEquipo] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -101,6 +104,28 @@ export default function Faro() {
     } finally {
       setOcupado(false)
     }
+  }
+
+  const NOMBRE_ORDEN: Record<OrdenFaro, string> = {
+    reiniciar: 'Reiniciar Faro', actualizar: 'Actualizar ahora', apagar: 'Apagar el PC', encender: 'Encender el PC', desinstalar: 'Desinstalar Faro'
+  }
+  const AYUDA_ORDEN: Record<OrdenFaro, string> = {
+    reiniciar: 'Faro se cierra y se vuelve a abrir en ese PC.',
+    actualizar: 'Faro busca ya una versión nueva y la instala si no hay una reserva en curso.',
+    apagar: 'El PC se apaga en un minuto (con aviso en pantalla). Los equipos con una reserva en curso se omiten.',
+    encender: 'Un Faro encendido de la sala despierta al PC por la red (Wake-on-LAN). El PC debe tenerlo activado en la BIOS.',
+    desinstalar: 'Faro se quita del PC: programa, arranque automático y configuración. El equipo queda desvinculado.'
+  }
+  function orden(equipos: string[] | null, o: OrdenFaro) {
+    const donde = equipos ? equipos.join(', ') : 'toda la sala'
+    setConfirmar({
+      titulo: `${NOMBRE_ORDEN[o]} · ${donde}`,
+      texto: AYUDA_ORDEN[o],
+      accion: () => hacer(async () => {
+        const n = await ordenFaro(equipos, o)
+        toast.mostrar(n ? `Orden enviada a ${n} ${n === 1 ? 'equipo' : 'equipos'}. Se aplica en menos de un minuto.` : 'Ningún equipo cumplía las condiciones para esa orden.')
+      })
+    })
   }
 
   function cambiarTodos(m: ModoFaro) {
@@ -149,6 +174,32 @@ export default function Faro() {
             ))}
           </div>
         </div>
+      </section>
+
+      <section className="card tight">
+        <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s3)' }}>
+          <div style={{ minWidth: 0 }}>
+            <strong>Toda la sala</strong>
+            <p className="tiny muted" style={{ margin: '2px 0 0' }}>Anuncios en las islas y órdenes para todos los equipos con Faro.</p>
+          </div>
+          <div className="row tight" style={{ flexWrap: 'wrap' }}>
+            <button className="btn sm" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>Anuncio</button>
+            <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>Encender</button>
+            <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>Apagar</button>
+            <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>Actualizar Faro</button>
+            <a className="btn ghost sm" href="/sala?kiosco=1" target="_blank" rel="noreferrer">Pantalla de la sala</a>
+          </div>
+        </div>
+        {panel.anuncios.length > 0 && (
+          <ul className="small" style={{ margin: 'var(--s2) 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
+            {panel.anuncios.map((a) => (
+              <li key={a.id} className="row between" style={{ gap: 'var(--s2)' }}>
+                <span>«{a.texto}» <span className="muted">· {a.equipos ? a.equipos.join(', ') : 'toda la sala'} · hasta {hora(a.hasta)}</span></span>
+                <button className="btn ghost sm" type="button" onClick={() => void hacer(() => quitarAnuncioFaro(a.id), 'Anuncio retirado.')}>Quitar</button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="card tight">
@@ -283,6 +334,12 @@ export default function Faro() {
                       Desvincular
                     </button>
                   </div>
+                  <button type="button" className="btn ghost sm" style={{ justifySelf: 'start' }}
+                          onClick={() => setAbiertoEquipo(abiertoEquipo === e.codigo ? null : e.codigo)} aria-expanded={abiertoEquipo === e.codigo}>
+                    {abiertoEquipo === e.codigo ? 'Ocultar detalles' : 'Equipo y órdenes remotas'}
+                  </button>
+                  {abiertoEquipo === e.codigo && <DetalleEquipo e={e} admin={admin} ocupado={ocupado} orden={orden}
+                    canal={(c) => void hacer(() => canalFaro([e.codigo], c), `${e.codigo} en el canal ${c}.`)} />}
                 </div>
               )}
             </article>
@@ -382,6 +439,40 @@ export default function Faro() {
         </div>
       </Modal>
 
+      <Modal abierto={!!anuncio} titulo="Anuncio en las islas" onCerrar={() => setAnuncio(null)}
+             pie={
+               <>
+                 <button className="btn gray" type="button" onClick={() => setAnuncio(null)}>Cancelar</button>
+                 <button className="btn" type="button" disabled={ocupado || (anuncio?.texto.trim().length ?? 0) < 3}
+                         onClick={() => {
+                           const a = anuncio
+                           setAnuncio(null)
+                           if (a) void hacer(() => anunciarFaro(a.texto.trim(), a.minutos), 'Anuncio publicado en las islas.')
+                         }}>
+                   Publicar
+                 </button>
+               </>
+             }>
+        <div className="stack">
+          <div className="field">
+            <label className="field__label" htmlFor="anuncio-texto">Mensaje (máximo 160 caracteres)</label>
+            <input id="anuncio-texto" maxLength={160} placeholder="La sala cierra hoy a las 5 p. m."
+                   value={anuncio?.texto ?? ''} onChange={(ev) => anuncio && setAnuncio({ ...anuncio, texto: ev.target.value })} />
+          </div>
+          <div className="field">
+            <span className="field__label">Visible durante</span>
+            <div className="chips" role="group" aria-label="Duración">
+              {[30, 60, 180, 480, 1440].map((m) => (
+                <button key={m} type="button" className="chip" aria-pressed={anuncio?.minutos === m}
+                        onClick={() => anuncio && setAnuncio({ ...anuncio, minutos: m })}>
+                  {m < 60 ? `${m} min` : m === 1440 ? 'Todo el día' : `${m / 60} h`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       <Modal abierto={!!confirmar} titulo={confirmar?.titulo ?? ''} onCerrar={() => setConfirmar(null)}
              pie={
                <>
@@ -395,5 +486,61 @@ export default function Faro() {
         <p className="small" style={{ margin: 0 }}>{confirmar?.texto}</p>
       </Modal>
     </>
+  )
+}
+
+/** Inventario que informa Faro, canal de actualizaciones y órdenes remotas de un equipo. */
+function DetalleEquipo({ e, admin, ocupado, orden, canal }: {
+  e: EquipoFaro
+  admin: boolean
+  ocupado: boolean
+  orden: (equipos: string[] | null, o: OrdenFaro) => void
+  canal: (c: 'estable' | 'pruebas') => void
+}) {
+  const inv = e.inventario
+  const libre = inv?.disco_gb && inv.disco_libre_gb !== undefined ? Math.round((inv.disco_libre_gb / inv.disco_gb) * 100) : null
+  return (
+    <div className="faro-detalle">
+      {inv ? (
+        <dl className="faro-detalle__datos small">
+          {inv.cpu && <><dt>Procesador</dt><dd>{inv.cpu}{inv.nucleos ? ` · ${inv.nucleos} núcleos` : ''}</dd></>}
+          {inv.ram_gb !== undefined && <><dt>Memoria</dt><dd>{inv.ram_gb} GB</dd></>}
+          {inv.disco_gb !== undefined && (
+            <><dt>Disco</dt><dd className={libre !== null && libre < 10 ? 'faro-detalle__alerta' : undefined}>
+              {inv.disco_libre_gb} GB libres de {inv.disco_gb} GB{libre !== null ? ` (${libre} %)` : ''}
+            </dd></>
+          )}
+          {e.cpu_pct !== null && <><dt>Uso del procesador</dt><dd>{e.cpu_pct} %</dd></>}
+          {inv.arranque_h !== undefined && <><dt>Encendido hace</dt><dd>{inv.arranque_h < 48 ? `${inv.arranque_h} h` : `${Math.round(inv.arranque_h / 24)} días`}</dd></>}
+          {inv.mac && <><dt>MAC</dt><dd className="num">{inv.mac}</dd></>}
+          <dt>Software</dt>
+          <dd>{(inv.software ?? []).length ? (inv.software ?? []).join(' · ') : 'Ninguno de la lista conocida'}</dd>
+        </dl>
+      ) : (
+        <p className="small muted" style={{ margin: 0 }}>Faro 0.4 o superior informa el inventario del equipo unas horas después de vincularse.</p>
+      )}
+      <div className="row tight" style={{ flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
+        <span className="small muted">Canal:</span>
+        {(['estable', 'pruebas'] as const).map((c) => (
+          <button key={c} type="button" className="chip" aria-pressed={e.canal === c} disabled={ocupado} onClick={() => e.canal !== c && canal(c)}>
+            {c === 'estable' ? 'Estable' : 'Pruebas'}
+          </button>
+        ))}
+      </div>
+      <div className="row tight" style={{ flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
+        {(['reiniciar', 'actualizar', 'apagar', 'encender'] as OrdenFaro[]).map((o) => (
+          <button key={o} type="button" className="btn ghost sm" disabled={ocupado} onClick={() => orden([e.codigo], o)}>
+            {o === 'reiniciar' ? 'Reiniciar Faro' : o === 'actualizar' ? 'Actualizar' : o === 'apagar' ? 'Apagar' : 'Encender'}
+          </button>
+        ))}
+        {admin && (
+          <button type="button" className="btn ghost sm" disabled={ocupado} onClick={() => orden([e.codigo], 'desinstalar')}
+                  style={{ color: 'var(--danger-600, #dc2626)' }}>
+            Desinstalar Faro
+          </button>
+        )}
+        {e.comandos_pendientes > 0 && <span className="tiny muted">{e.comandos_pendientes} orden(es) en camino</span>}
+      </div>
+    </div>
   )
 }

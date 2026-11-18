@@ -200,7 +200,24 @@ Guía completa en `ladme/faro/README.md`. En resumen:
 - La pestaña Faro suma el uso real (mapa de calor y uso por equipo) y el modo clase.
 - El chat del personal recibe reportes, solicitudes y alertas de Faro, sin datos personales.
 
+## 13. Faro 0.4: gestión remota, llegada por QR, inventario y mapa de la sala (migración 0008)
+
+1. SQL Editor → `ladme/db/migrations/0008_faro_gestion.sql` (después de 0007).
+2. Vuelva a pegar `ladme/appsscript/Código.gs` y ejecute `instalarDisparadores` (agrega el reporte
+   mensual). Para ver el reporte sin esperar, ejecute `probarReporteMensual`.
+3. Publique la etiqueta `faro-v0.4.0`; los Faro con AppImage o Windows se actualizan solos.
+
+- **Corrección:** los campos de texto dentro de ventanas (p. ej. el serial al editar un equipo) cerraban
+  el teclado al escribir una letra. Ya no.
+- **«Tu reserva» en la ficha:** quien tiene la reserva del equipo ve ahí la cuenta regresiva, registrar
+  llegada, extender, liberar y su pase.
+- Los QR de la isla abren `/reservar?equipo=…` y `/equipo/…?accion=…`; el enlace corto es `/e/UNAL-05`.
+- **Llegada en fases** con `llegada_modo`: empiece en `1` (solo personal) y con
+  `faro_llegada_automatica = 0`; después pase a `2` (QR rotativo de la isla, que solo sirve al titular).
+- Órdenes remotas, anuncios, inventario y salud, filtro por programa, sesión limpia, lista de espera,
+  mapa público `/sala` (y `?kiosco=1`), canal de pruebas y liberación por no-show (apagada por defecto).
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.
-- **Liberación automática por no-show**: solo se avisa al titular y al personal; liberar sigue siendo una decisión humana.
+- **Liberación automática por no-show**: existe desde 0.4 como política (`liberar_no_show_min`), apagada por defecto; mientras esté en `0`, solo se avisa al titular y al personal.

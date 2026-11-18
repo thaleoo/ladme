@@ -19,6 +19,8 @@ interface Borrador {
   categoria: string
   sistema_operativo: string
   so_version: string
+  plano_x: string
+  plano_y: string
   marca: string
   modelo: string
   ubicacion: string
@@ -39,6 +41,8 @@ function aBorrador(e?: Equipo): Borrador {
     categoria: e?.categoria ?? 'Estación de trabajo',
     sistema_operativo: e?.sistema_operativo ?? '',
     so_version: e?.so_version ?? '',
+    plano_x: e?.plano_x ? String(e.plano_x) : '',
+    plano_y: e?.plano_y ? String(e.plano_y) : '',
     marca: e?.marca ?? '',
     modelo: e?.modelo ?? '',
     ubicacion: e?.ubicacion ?? 'Sala LADME',
@@ -99,6 +103,8 @@ export default function Equipos() {
         categoria: b.categoria.trim(),
         sistema_operativo: (b.sistema_operativo || null) as Equipo['sistema_operativo'],
         so_version: b.so_version.trim() || null,
+        plano_x: b.plano_x ? Math.min(30, Math.max(1, Number(b.plano_x))) : null,
+        plano_y: b.plano_y ? Math.min(30, Math.max(1, Number(b.plano_y))) : null,
         marca: b.marca.trim() || null,
         modelo: b.modelo.trim() || null,
         ubicacion: b.ubicacion.trim() || null,
@@ -271,6 +277,16 @@ export default function Equipos() {
               {campo('marca', 'Marca')}
               {campo('modelo', 'Modelo')}
               {campo('ubicacion', 'Ubicación')}
+              <div className="field">
+                <span className="field__label">Lugar en el plano de la sala</span>
+                <div className="row tight">
+                  <input aria-label="Columna" type="number" min={1} max={30} placeholder="Columna" value={b.plano_x}
+                         onChange={(e) => setB({ ...b, plano_x: e.target.value })} style={{ width: '50%' }} />
+                  <input aria-label="Fila" type="number" min={1} max={30} placeholder="Fila" value={b.plano_y}
+                         onChange={(e) => setB({ ...b, plano_y: e.target.value })} style={{ width: '50%' }} />
+                </div>
+                <p className="help">Columna y fila desde 1, como se ven al entrar. Se usa en la pantalla de la sala (/sala).</p>
+              </div>
               {campo('placa_oficial', 'Placa de inventario')}
               {campo('serial', 'Serial')}
               {campo('nfc_uid', 'UID de la etiqueta NFC')}

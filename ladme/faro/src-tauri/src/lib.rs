@@ -10,7 +10,9 @@ mod clave;
 mod config;
 mod decision;
 mod inactividad;
+mod inventario;
 mod isla;
+mod ordenes;
 mod vigia;
 
 pub use vigia::ARG as ARG_VIGIA;
@@ -30,8 +32,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-#[cfg(not(target_os = "linux"))]
-use tauri_plugin_opener::OpenerExt;
 
 const ISLA: &str = isla::ETIQUETA;
 const VINCULAR: &str = "vincular";
@@ -49,7 +49,14 @@ struct Nucleo {
     forzar: bool,
     intentos_fallidos: u32,
     espera_hasta: Option<Instant>,
+    /// Aviso propio de Faro (p. ej. «se apagará en 1 minuto») hasta un momento.
+    aviso_local: Option<(String, Instant)>,
+    /// Inventario recolectado que falta enviar en el próximo latido.
+    inventario_pendiente: Option<Value>,
 }
+
+/// Despierta al ciclo de actualizaciones cuando el panel ordena «Actualizar ahora».
+struct ActualizarYa(Arc<tokio::sync::Notify>);
 
 type Compartido = Arc<Mutex<Nucleo>>;
 
@@ -62,6 +69,8 @@ struct Paquete {
     version: &'static str,
     vinculado: bool,
     clave_disponible: bool,
+    /// Dirección de la PWA, para mostrar el enlace corto (…/e/UNAL-05).
+    url_base: Option<String>,
 }
 
 /// systemd define INVOCATION_ID en los servicios que lanza.
@@ -109,6 +118,7 @@ fn paquete(n: &Nucleo) -> Paquete {
         version: env!("CARGO_PKG_VERSION"),
         vinculado: n.config.token.is_some(),
         clave_disponible: n.copia.remoto.as_ref().and_then(|r| r.clave.as_ref()).is_some(),
+        url_base: n.config.url_pwa(""),
     }
 }
 
@@ -168,7 +178,12 @@ fn quitar_bloqueo(app: &AppHandle) {
 }
 
 /// Lleva la vista a las ventanas: crea o quita el bloqueo y avisa a la isla.
-fn aplicar(app: &AppHandle, n: &mut Nucleo, nueva: Vista) {
+fn aplicar(app: &AppHandle, n: &mut Nucleo, mut nueva: Vista) {
+    if let Some((texto, hasta)) = &n.aviso_local {
+        if Instant::now() < *hasta {
+            nueva.anuncio = Some(texto.clone());
+        }
+    }
     let antes = n.vista.as_ref().map(|v| v.pantalla.clone());
     let cubre = nueva.pantalla != Pantalla::Ninguna;
     if antes.as_ref() != Some(&nueva.pantalla) {
@@ -210,16 +225,21 @@ fn aplicar(app: &AppHandle, n: &mut Nucleo, nueva: Vista) {
 
 // ------------------------------------------------------------------ ciclo
 
-async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Option<u64>) {
-    let (cfg, token, bloqueado) = {
+async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Option<u64>, cpu: u32) {
+    let (cfg, token, bloqueado, inventario) = {
         let n = compartido.lock().unwrap();
-        (n.config.clone(), n.config.token.clone(), n.copia.bloqueado)
+        (n.config.clone(), n.config.token.clone(), n.copia.bloqueado, n.inventario_pendiente.clone())
     };
     let Some(token) = token else { return };
-    let info = json!({ "inactivo_seg": inactivo, "bloqueado": bloqueado, "host": host(), "so": sistema(),
-                       "version": env!("CARGO_PKG_VERSION") });
+    let mut info = json!({ "inactivo_seg": inactivo, "bloqueado": bloqueado, "host": host(), "so": sistema(),
+                           "version": env!("CARGO_PKG_VERSION"), "cpu": cpu });
+    if let Some(inv) = inventario {
+        info["inventario"] = inv;
+    }
     match api.estado(&cfg, &token, info).await {
-        Ok(r) => {
+        Ok(mut r) => {
+            let comandos = std::mem::take(&mut r.comandos);
+            compartido.lock().unwrap().inventario_pendiente = None;
             let pendientes = {
                 let mut n = compartido.lock().unwrap();
                 let desfase = (r.ahora - Utc::now()).num_milliseconds();
@@ -238,6 +258,9 @@ async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Op
                     compartido.lock().unwrap().pendientes.extend(pendientes[i..].iter().cloned());
                     break;
                 }
+            }
+            for c in comandos {
+                ejecutar_orden(app, api, compartido, &cfg, &token, c).await;
             }
         }
         Err(Fallo::NoVinculado) => {
@@ -259,8 +282,56 @@ async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Op
     }
 }
 
+/// Ejecuta una orden del panel e informa el resultado.
+async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg: &Config, token: &str, c: decision::Comando) {
+    let carpeta = compartido.lock().unwrap().carpeta.clone();
+    let resultado: Result<String, String> = match c.tipo.as_str() {
+        "reiniciar" => Ok("reiniciando".into()),
+        "actualizar" => {
+            if let Some(a) = app.try_state::<ActualizarYa>() {
+                a.0.notify_one();
+            }
+            Ok("buscando actualización".into())
+        }
+        "apagar" => ordenes::apagar().map(|_| {
+            compartido.lock().unwrap().aviso_local = Some((
+                "El laboratorio apagará este equipo en 1 minuto. Guarda tu trabajo.".into(),
+                Instant::now() + Duration::from_secs(60),
+            ));
+            "se apaga en 1 minuto".into()
+        }),
+        "despertar" => {
+            let macs: Vec<String> = c.datos["macs"].as_array().map(|l| l.iter().filter_map(|m| m.as_str().map(String::from)).collect()).unwrap_or_default();
+            ordenes::despertar(&macs).map(|n| format!("paquete enviado a {n} equipos"))
+        }
+        "desinstalar" => ordenes::se_puede_retirar().map(|_| "retirándose".into()),
+        otro => Err(format!("orden desconocida: {otro}")),
+    };
+    let (ok, texto) = match &resultado {
+        Ok(t) => (true, t.clone()),
+        Err(e) => (false, e.clone()),
+    };
+    let _ = api.resultado(cfg, token, c.id, ok, &texto).await;
+    if !ok {
+        return;
+    }
+    match c.tipo.as_str() {
+        "reiniciar" => {
+            vigia::pausar(&carpeta, 30);
+            app.restart();
+        }
+        "desinstalar" => {
+            let _ = ordenes::retirar(app, &carpeta);
+        }
+        _ => {}
+    }
+}
+
 async fn ciclo(app: AppHandle, compartido: Compartido) {
     let api = Api::new();
+    let mut medidor = inventario::Medidor::new();
+    // El inventario se recolecta al minuto de arrancar y luego cada 6 horas.
+    let mut proximo_inventario = Instant::now() + Duration::from_secs(60);
     let mut ultimo_latido: Option<Instant> = None;
     let mut ultimo_intento_vinculo: Option<Instant> = None;
     let mut ultima_revision_vigia = Instant::now();
@@ -286,9 +357,18 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
             n.forzar = false;
             (n.config.token.is_some(), toca)
         };
+        if vinculado && Instant::now() >= proximo_inventario {
+            proximo_inventario = Instant::now() + Duration::from_secs(6 * 3600);
+            let c = compartido.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let inv = inventario::recolectar();
+                c.lock().unwrap().inventario_pendiente = Some(inv);
+            });
+        }
         if vinculado && toca {
             ultimo_latido = Some(Instant::now());
-            latir(&app, &api, &compartido, inactivo).await;
+            let cpu = medidor.cpu_pct();
+            latir(&app, &api, &compartido, inactivo, cpu).await;
         }
         {
             let mut n = compartido.lock().unwrap();
@@ -321,10 +401,18 @@ async fn actualizaciones(app: AppHandle, compartido: Compartido) {
     if clave.is_empty() || url.is_empty() || !matches!(bundle_type(), Some(BundleType::Nsis) | Some(BundleType::AppImage)) {
         return;
     }
-    let Ok(url) = url.parse::<tauri::Url>() else { return };
-    tokio::time::sleep(Duration::from_secs(120)).await;
+    let estable = url.to_string();
+    // Canal de pruebas: el manifiesto vive en la release fija «faro-pruebas».
+    let pruebas = estable.replace("/releases/latest/download/latest.json", "/releases/download/faro-pruebas/latest.json");
+    let despertador = app.state::<ActualizarYa>().0.clone();
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_secs(120)) => {}
+        _ = despertador.notified() => {}
+    }
     loop {
-        let actualizador = app.updater_builder().pubkey(clave).endpoints(vec![url.clone()]).and_then(|b| b.build());
+        let canal = compartido.lock().unwrap().copia.remoto.as_ref().and_then(|r| r.canal.clone()).unwrap_or_default();
+        let Ok(url) = (if canal == "pruebas" { &pruebas } else { &estable }).parse::<tauri::Url>() else { return };
+        let actualizador = app.updater_builder().pubkey(clave).endpoints(vec![url]).and_then(|b| b.build());
         if let Ok(actualizador) = actualizador {
             if let Ok(Some(nueva)) = actualizador.check().await {
                 // Espera un momento sin reserva vigente (máximo un día) para no interrumpir a nadie.
@@ -355,7 +443,10 @@ async fn actualizaciones(app: AppHandle, compartido: Compartido) {
                 vigia::quitar_pausa(&carpeta);
             }
         }
-        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(6 * 3600)) => {}
+            _ = despertador.notified() => {}
+        }
     }
 }
 
@@ -429,9 +520,8 @@ fn cerrar_vincular(app: AppHandle) {
     }
 }
 
-#[tauri::command]
-fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Result<(), String> {
-    let mut n = estado.lock().unwrap();
+/// Verifica la clave de emergencia, con pausa de un minuto tras 5 intentos fallidos.
+fn verificar_clave(n: &mut Nucleo, clave_ingresada: &str) -> Result<(), String> {
     if let Some(h) = n.espera_hasta {
         if Instant::now() < h {
             return Err("Demasiados intentos. Espere un minuto.".into());
@@ -440,7 +530,7 @@ fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Resu
     let Some(c) = n.copia.remoto.as_ref().and_then(|r| r.clave.clone()) else {
         return Err("El laboratorio aún no ha creado una clave de emergencia.".into());
     };
-    if clave::huella(&c.sal, &clave_ingresada, c.iteraciones) != c.hash {
+    if clave::huella(&c.sal, clave_ingresada, c.iteraciones) != c.hash {
         n.intentos_fallidos += 1;
         if n.intentos_fallidos >= 5 {
             n.intentos_fallidos = 0;
@@ -449,6 +539,13 @@ fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Resu
         return Err("Clave incorrecta.".into());
     }
     n.intentos_fallidos = 0;
+    Ok(())
+}
+
+#[tauri::command]
+fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Result<(), String> {
+    let mut n = estado.lock().unwrap();
+    verificar_clave(&mut n, &clave_ingresada)?;
     let hasta = Utc::now() + Dur::milliseconds(n.copia.desfase_ms) + Dur::hours(EMERGENCIA_HORAS);
     n.copia.memoria.emergencia_hasta = Some(hasta);
     n.pendientes.push(("desbloqueo_emergencia".into(), json!({ "horas": EMERGENCIA_HORAS.to_string() })));
@@ -457,74 +554,58 @@ fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Resu
     Ok(())
 }
 
-/// Async para no congelar las ventanas mientras se espera al navegador.
-#[tauri::command]
-async fn abrir(app: AppHandle, estado: tauri::State<'_, Compartido>, ruta: String) -> Result<(), String> {
-    let url = estado.lock().unwrap().config.url_pwa(&ruta).ok_or("Falta la dirección de LADME en la configuración de Faro.")?;
-    abrir_url(&app, &url).map_err(|e| format!("No se pudo abrir el navegador: {e}"))
+#[derive(Serialize)]
+struct QrLlegada {
+    svg: String,
+    /// Segundos hasta que cambia el código.
+    cambia_en: i64,
 }
 
-/// La dirección completa, para «Copiar enlace» cuando no se puede abrir el navegador.
+/// QR de llegada: abre la ficha del equipo con un código que cambia cada 30 s. Solo sirve a
+/// quien tiene la reserva de este equipo (lo verifica el servidor).
 #[tauri::command]
-fn enlace(estado: tauri::State<Compartido>, ruta: String) -> Option<String> {
-    estado.lock().unwrap().config.url_pwa(&ruta)
+fn qr_llegada(estado: tauri::State<Compartido>) -> Option<QrLlegada> {
+    let n = estado.lock().unwrap();
+    let r = n.copia.remoto.as_ref()?;
+    let secreto = &r.qr.as_ref()?.secreto;
+    let ahora = (Utc::now() + Dur::milliseconds(n.copia.desfase_ms)).timestamp();
+    let codigo = ordenes::codigo_llegada(secreto, &r.equipo.codigo, ahora.div_euclid(30));
+    let url = n.config.url_pwa(&format!("/equipo/{}?llegada={codigo}", r.equipo.codigo))?;
+    Some(QrLlegada { svg: qr_svg(&url)?, cambia_en: 30 - ahora.rem_euclid(30) })
 }
 
-/// En Linux, el AppImage pone su propia carpeta primero en PATH (con un xdg-open propio que
-/// falla en muchas distribuciones) y variables de bibliotecas que rompen al navegador. Por eso
-/// se usa el xdg-open (o gio) DEL SISTEMA, con un entorno limpio.
-#[cfg(target_os = "linux")]
-fn abrir_url(_app: &AppHandle, url: &str) -> Result<(), String> {
-    let appdir = std::env::var("APPDIR").unwrap_or_default();
-    let path: String = std::env::var("PATH")
-        .unwrap_or_default()
-        .split(':')
-        .filter(|p| !p.is_empty() && (appdir.is_empty() || !p.starts_with(&appdir)) && !p.starts_with("/tmp/.mount_"))
-        .collect::<Vec<_>>()
-        .join(":");
-    let candidatos: [(&str, &[&str]); 4] = [
-        ("/usr/bin/xdg-open", &[]),
-        ("/usr/bin/gio", &["open"]),
-        ("/bin/xdg-open", &[]),
-        ("/usr/local/bin/xdg-open", &[]),
-    ];
-    let mut ultimo = String::from("no se encontró xdg-open ni gio en el sistema");
-    for (programa, previos) in candidatos {
-        if !std::path::Path::new(programa).exists() {
-            continue;
-        }
-        let mut c = std::process::Command::new(programa);
-        c.args(previos).arg(url);
-        for v in ["LD_LIBRARY_PATH", "LD_PRELOAD", "GDK_BACKEND", "GDK_PIXBUF_MODULE_FILE", "GDK_PIXBUF_MODULEDIR",
-                  "GIO_MODULE_DIR", "GIO_EXTRA_MODULES", "GTK_PATH", "GTK_EXE_PREFIX", "GTK_DATA_PREFIX", "GTK_IM_MODULE_FILE",
-                  "GSETTINGS_SCHEMA_DIR", "PYTHONHOME", "PYTHONPATH", "PERLLIB", "QT_PLUGIN_PATH", "APPDIR", "APPIMAGE",
-                  "ARGV0", "OWD", "WEBKIT_EXEC_PATH"] {
-            c.env_remove(v);
-        }
-        c.env("PATH", if path.is_empty() { "/usr/local/bin:/usr/bin:/bin" } else { &path });
-        c.env("XDG_DATA_DIRS", "/usr/local/share:/usr/share:/var/lib/flatpak/exports/share");
-        c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
-        match c.spawn() {
-            Ok(mut hijo) => {
-                // xdg-open devuelve enseguida; si falla rápido, se prueba el siguiente.
-                std::thread::sleep(std::time::Duration::from_millis(400));
-                match hijo.try_wait() {
-                    Ok(Some(st)) if !st.success() => {
-                        ultimo = format!("{programa} terminó con {st}");
-                        continue;
-                    }
-                    _ => return Ok(()),
-                }
-            }
-            Err(e) => ultimo = e.to_string(),
-        }
+/// La isla no toma el foco al aparecer; lo pide cuando hay que escribir (clave del personal).
+#[tauri::command]
+fn isla_foco(app: AppHandle) {
+    if let Some(w) = app.get_webview_window(ISLA) {
+        let _ = w.set_focus();
     }
-    Err(ultimo)
 }
 
-#[cfg(not(target_os = "linux"))]
-fn abrir_url(app: &AppHandle, url: &str) -> Result<(), String> {
-    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+/// Borra los archivos que dejó la sesión que acaba de terminar (Descargas y Escritorio).
+#[tauri::command]
+fn limpiar_sesion(estado: tauri::State<Compartido>) -> Result<usize, String> {
+    let desde = estado.lock().unwrap().vista.as_ref().and_then(|v| v.limpieza_desde).ok_or("No hay una sesión reciente para limpiar.")?;
+    let n = ordenes::limpiar(desde)?;
+    let mut nucleo = estado.lock().unwrap();
+    nucleo.copia.memoria.inicio_reciente = None;
+    config::guardar_copia(&nucleo.carpeta, &nucleo.copia);
+    Ok(n)
+}
+
+/// Retira Faro de este PC con la clave de emergencia del laboratorio (sin internet también).
+#[tauri::command]
+async fn retirar(app: AppHandle, estado: tauri::State<'_, Compartido>, clave_ingresada: String) -> Result<(), String> {
+    let (carpeta, cfg, token) = {
+        let mut n = estado.lock().unwrap();
+        verificar_clave(&mut n, &clave_ingresada)?;
+        (n.carpeta.clone(), n.config.clone(), n.config.token.clone())
+    };
+    ordenes::se_puede_retirar()?;
+    if let Some(t) = token {
+        let _ = Api::new().evento(&cfg, &t, "retirado", json!({ "por": "clave de emergencia" })).await;
+    }
+    ordenes::retirar(&app, &carpeta)
 }
 
 #[tauri::command]
@@ -572,7 +653,10 @@ pub fn run() {
                 forzar: true,
                 intentos_fallidos: 0,
                 espera_hasta: None,
+                aviso_local: None,
+                inventario_pendiente: None,
             }));
+            app.manage(ActualizarYa(Arc::new(tokio::sync::Notify::new())));
             app.manage(compartido.clone());
 
             // Arranca solo al iniciar sesión en esta cuenta (no requiere permisos de administrador).
@@ -618,9 +702,11 @@ pub fn run() {
             vincular,
             cerrar_vincular,
             emergencia,
-            abrir,
             qr,
-            enlace,
+            qr_llegada,
+            isla_foco,
+            limpiar_sesion,
+            retirar,
             isla::isla_zona,
             isla::isla_arrastre,
             isla::isla_posicion,

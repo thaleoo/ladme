@@ -4,6 +4,8 @@ name: Faro
 #   - a mano: Actions → Faro → Run workflow (quedan como artefactos descargables), o
 #   - con una etiqueta faro-vX.Y.Z igual a la versión de tauri.conf.json: además se publican en
 #     Releases con latest.json, y los Faro instalados se actualizan solos.
+#   - canal de pruebas: una etiqueta faro-pruebas-vX.Y.Z publica en la release fija «faro-pruebas»
+#     (prelanzamiento). Solo la reciben los equipos marcados «pruebas» en Administración → Faro.
 # Variables del repositorio (Settings → Secrets and variables → Actions → Variables):
 #   FARO_SUPABASE_URL, FARO_SUPABASE_KEY (la clave pública/anon, la misma de la PWA), FARO_PWA_URL,
 #   FARO_UPDATER_PUBKEY (clave pública de firma, ver ladme/faro/README.md).
@@ -11,7 +13,7 @@ name: Faro
 on:
   push:
     branches: [main]
-    tags: ["faro-v*"]
+    tags: ["faro-v*", "faro-pruebas-v*"]
     paths:
       - "ladme/faro/**"
       - ".github/workflows/faro.yml"
@@ -42,7 +44,7 @@ jobs:
 
   instaladores:
     needs: pruebas
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/faro-v')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/faro-')
     strategy:
       fail-fast: false
       matrix:
@@ -114,7 +116,7 @@ jobs:
 
   publicar:
     needs: instaladores
-    if: startsWith(github.ref, 'refs/tags/faro-v')
+    if: startsWith(github.ref, 'refs/tags/faro-')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -126,14 +128,31 @@ jobs:
         id: version
         run: |
           v=$(node -p "require('./ladme/faro/src-tauri/tauri.conf.json').version")
-          if [ "${GITHUB_REF_NAME}" != "faro-v$v" ]; then
+          if [ "${GITHUB_REF_NAME}" = "faro-v$v" ]; then
+            echo "release=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_NAME}" = "faro-pruebas-v$v" ]; then
+            echo "release=faro-pruebas" >> "$GITHUB_OUTPUT"
+            echo "pruebas=true" >> "$GITHUB_OUTPUT"
+          else
             echo "::error::La etiqueta ${GITHUB_REF_NAME} no coincide con la versión $v de tauri.conf.json"; exit 1
           fi
           echo "v=$v" >> "$GITHUB_OUTPUT"
       - name: latest.json
-        run: node ladme/faro/scripts/latest-json.mjs salida "${{ steps.version.outputs.v }}" "${{ github.server_url }}/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
-      - uses: softprops/action-gh-release@v2
+        run: node ladme/faro/scripts/latest-json.mjs salida "${{ steps.version.outputs.v }}" "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ steps.version.outputs.release }}"
+      - name: Publicar versión estable
+        if: steps.version.outputs.pruebas != 'true'
+        uses: softprops/action-gh-release@v2
         with:
           name: Faro ${{ steps.version.outputs.v }}
           make_latest: true
+          files: salida/*
+      - name: Publicar en el canal de pruebas
+        if: steps.version.outputs.pruebas == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: faro-pruebas
+          name: Faro · canal de pruebas
+          body: "Última versión de prueba: ${{ steps.version.outputs.v }} (${{ github.ref_name }}). Solo la instalan los equipos en el canal «pruebas»."
+          prerelease: true
+          make_latest: false
           files: salida/*

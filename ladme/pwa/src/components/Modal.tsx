@@ -22,6 +22,11 @@ const ENFOCABLES =
 export default function Modal({ abierto, titulo, descripcion, onCerrar, children, pie }: Props) {
   const panel = useRef<HTMLDivElement>(null)
   const tituloId = useRef(`modal-${Math.random().toString(36).slice(2, 9)}`)
+  // onCerrar suele ser una función nueva en cada render del padre (p. ej. al escribir en un
+  // campo). Si fuera dependencia del efecto, el foco saltaría en cada letra y en el celular
+  // se cerraría el teclado. Se guarda en una referencia y el efecto depende solo de «abierto».
+  const cerrarRef = useRef(onCerrar)
+  cerrarRef.current = onCerrar
 
   useEffect(() => {
     if (!abierto) return
@@ -37,7 +42,7 @@ export default function Modal({ abierto, titulo, descripcion, onCerrar, children
     function alPulsar(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault()
-        onCerrar()
+        cerrarRef.current()
         return
       }
       if (e.key !== 'Tab' || !panel.current) return
@@ -63,7 +68,7 @@ export default function Modal({ abierto, titulo, descripcion, onCerrar, children
       document.body.style.overflow = overflow
       anterior?.focus?.()
     }
-  }, [abierto, onCerrar])
+  }, [abierto])
 
   if (!abierto) return null
 

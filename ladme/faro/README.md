@@ -20,18 +20,22 @@ Para que no estorbe:
 - **Pantalla completa.** Mientras una app está a pantalla completa (presentación, video, juego) la isla se
   oculta. Solo vuelve para los avisos urgentes.
 
-Si «Abrir aquí» no logra abrir el navegador, la isla muestra el motivo y ofrece «Copiar enlace».
+Las acciones de la isla muestran un QR que abre en el celular páginas que existen en cualquier versión de
+la PWA:
 
-Las acciones de la isla abren páginas directas en la PWA, sin pasar por la ficha del equipo:
+| Acción | Página | Qué hace |
+| --- | --- | --- |
+| Reservar | `/reservar?equipo=UNAL-05` | Formulario de reserva con el equipo ya elegido. |
+| Extender | `/equipo/UNAL-05?accion=extender` | Ficha del equipo con «Tu reserva» abierta en extender. |
+| Liberar | `/equipo/UNAL-05?accion=liberar` | Confirmar y liberar, con la pregunta «¿funcionó bien?». |
+| Reportar falla | `/equipo/UNAL-05?accion=reportar` | Ficha con el formulario de falla abierto. |
+| Registrar llegada | `/equipo/UNAL-05?llegada=CÓDIGO` | Registra la llegada (ver abajo). |
 
-| Página | Qué hace |
-| --- | --- |
-| `/pc/UNAL-05/extender` | Extender con un toque (+30 min, +1 h…), dentro de los límites. |
-| `/pc/UNAL-05/liberar` | Confirmar y liberar, con una pregunta rápida sobre si el equipo funcionó. |
-| `/pc/UNAL-05/reportar` | Reportar una falla. |
-| `/pc/UNAL-05/reservar` | Abrir el formulario de reserva con el equipo ya elegido. |
-
-Si la persona no ha iniciado sesión en el celular, después de entrar vuelve a esa misma página.
+Debajo del QR hay un **enlace corto** para escribir a mano si no hay cámara: `…/e/UNAL-05` abre la ficha
+del equipo. En la ficha, quien tiene la reserva de ese equipo ve la tarjeta **«Tu reserva»**: cuenta
+regresiva, registrar llegada, extender, liberar y su pase. Si la persona no ha iniciado sesión, después de
+entrar vuelve a la misma página. (La isla ya no tiene «Abrir aquí»: abrir el navegador del PC fallaba en
+varios sistemas y la cuenta del PC es compartida.)
 
 Según el **modo** que elija el laboratorio para cada equipo (Administración → Faro):
 
@@ -49,8 +53,22 @@ Más detalles:
   minutos de gracia antes de bloquear. Los dos tiempos se cambian en Políticas.
 - **Proceso desatendido.** Si la reserva dejó un proceso corriendo y nadie toca el PC, se muestra un aviso
   «No apagues ni cierres la sesión» con el mensaje del titular. Desaparece al mover el mouse.
-- **Llegada automática.** Si Faro detecta uso del equipo durante una reserva, registra la llegada. Así
-  nadie recibe el correo de «no registró su llegada» mientras está usando el PC.
+- **Registro de llegada en fases** (política `llegada_modo`, en Administración → Políticas):
+
+  | Valor | Quién registra la llegada |
+  | --- | --- |
+  | `0` | La misma persona, desde su pase o la ficha del equipo en la PWA. |
+  | `1` | Solo el personal (escaneando el pase). **Recomendado al empezar.** |
+  | `2` | La persona escanea con su celular el **QR de llegada** de la isla. |
+
+  El QR de llegada es seguro aunque lo escanee otra persona: el servidor solo registra la llegada de
+  **quien tiene la reserva vigente de ese equipo** y ha iniciado sesión con su cuenta; a cualquier otra
+  persona le responde «No tiene una reserva vigente en UNAL-05». El código cambia cada 30 s (vale cerca de
+  un minuto) y va atado al equipo, así que una foto del QR no sirve después ni en otro PC. El personal
+  siempre puede registrar la llegada.
+
+  Aparte, la **llegada automática** (política `faro_llegada_automatica`) registra la llegada cuando Faro
+  detecta uso del equipo durante la reserva. Déjela en `0` mientras la sala esté en las fases 1 y 2.
 - **Sin internet.** Faro sigue las mismas reglas con lo último que supo. Una reserva vale hasta su fin, y
   un equipo sin reserva sigue sin ella. Desconectar el cable no desbloquea nada.
 - **Desbloqueo del personal.** Desde la PWA, un equipo puede quedar libre por 30 min, 1 h o 4 h. Sin
@@ -71,6 +89,35 @@ Más detalles:
 - **Vigía.** Si alguien cierra Faro a la fuerza, un segundo proceso lo vuelve a abrir en unos 3 segundos
   y queda el registro «cierre forzado», con aviso al chat del personal. En Linux con el script de
   instalación, ese papel lo cumple un servicio de systemd de la cuenta.
+- **Órdenes remotas** (Administración → Faro). Para toda la sala o un equipo:
+  - **Anuncio**: un mensaje en la isla y en la pantalla de bloqueo hasta la hora que elija.
+  - **Encender** (Wake-on-LAN): otro Faro encendido de la sala envía el «paquete mágico» a las MAC
+    conocidas. Requiere que el BIOS tenga Wake-on-LAN activo.
+  - **Apagar**: avisa y apaga en 1 minuto. Nunca apaga un equipo con una reserva en curso.
+  - **Actualizar Faro** y **Reiniciar Faro**.
+  - **Desinstalar** (solo administradores): Faro se quita solo y desvincula el equipo.
+
+  Cada orden se entrega una sola vez y su resultado queda en «Actividad reciente».
+- **Quitar Faro desde el propio PC.** En la isla, «Personal» (al pie) pide la **clave de emergencia** del
+  laboratorio y ofrece «Desbloquear 2 h» o «Quitar Faro de este PC». Faro nunca pide ni guarda la
+  contraseña de administrador del sistema. Con instalación `.deb` o `.rpm` no puede quitarse solo (lo hace
+  TI con `dnf`/`apt`).
+- **Inventario y salud.** Al minuto de arrancar y cada 6 horas, Faro envía procesador, RAM, disco, MAC,
+  sistema y los programas de análisis instalados (R, RStudio, Python, MATLAB, SPSS, QGIS…). La PWA permite
+  filtrar la disponibilidad por programa y avisa al chat del personal si a un disco le queda menos del 10 %.
+- **Sesión limpia** (política `faro_sesion_limpia`). Al terminar una reserva, la isla ofrece borrar los
+  archivos guardados en Descargas y Escritorio durante esa reserva, con doble confirmación. No toca
+  accesos directos ni lo que ya estaba antes.
+- **Proceso desatendido verificado.** Si el PC lleva más de 30 min sin que nadie lo toque y el procesador
+  está casi en reposo (menos del 5 %), se avisa al titular de que quizá su proceso ya terminó.
+- **Mapa de la sala** (`/sala`, público y sin datos personales). Con `?kiosco=1` se convierte en una
+  pantalla para un televisor en la entrada. La posición de cada equipo se ajusta en Equipos (columna/fila).
+- **Lista de espera.** Si no hay equipos libres, la persona se anota y recibe un aviso al liberarse uno.
+- **Liberación por no-show** (política `liberar_no_show_min`, `0` = apagada). Si se activa, libera la
+  reserva cuando pasan esos minutos sin llegada y sin que Faro vea uso del PC.
+- **Reporte mensual.** El día 1, Apps Script envía al personal un resumen del mes anterior.
+- **Canal de pruebas.** En el detalle de un equipo puede marcarse «pruebas»: recibe las versiones
+  publicadas con etiquetas `faro-pruebas-vX.Y.Z` antes que el resto de la sala.
 - **Actualizaciones automáticas.** Cada 6 horas, Faro revisa si hay una versión nueva firmada en los
   Releases de GitHub. Si la hay, la instala cuando no hay una reserva en curso y se reinicia solo. Funciona
   en Windows y con el AppImage de Linux; los `.deb` y `.rpm` pedirían contraseña de administrador, así que

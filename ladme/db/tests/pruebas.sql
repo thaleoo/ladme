@@ -291,6 +291,114 @@ begin
                      'los avisos enviados salen de la cola');
 end $$;
 
+-- Faro 0008: llegada por QR, órdenes, inventario, anuncios, no-show, lista de espera, sala.
+do $$
+declare j jsonb; t8 text; t16 text; t7 text; sec text; cod text; r reservas; n int;
+        v_vent bigint := floor(extract(epoch from now()) / 30)::bigint;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  t8 := faro_vincular(faro_codigo_vinculo('UNAL-08') ->> 'codigo', 'PC-08', 'Windows 11', '0.4.0') ->> 'token';
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  select e.id, p.id, now() - interval '1 minute', now() + interval '1 hour', 'PAE'
+    from equipos e, perfiles p where e.codigo = 'UNAL-08' and p.correo = 'beto@unal.edu.co';
+  update politicas set valor = '0' where clave = 'faro_llegada_automatica';
+
+  -- Modos de llegada.
+  perform pg_temp.como('beto@unal.edu.co');
+  select * into r from reservas x where x.equipo_id = (select id from equipos where codigo = 'UNAL-08') and x.estado = 'activa' and x.tipo = 'reserva';
+  perform pg_temp.falla(format('select registrar_llegada(%L)', r.id), 'personal');
+  update politicas set valor = '2' where clave = 'llegada_modo';
+  perform pg_temp.falla(format('select registrar_llegada(%L)', r.id), 'QR que muestra la isla');
+
+  j := faro_estado(t8, '{"inactivo_seg": 900}');
+  sec := j #>> '{qr,secreto}';
+  perform pg_temp.ok(length(sec) = 32 and (j #>> '{politicas,llegada_modo}')::int = 2, 'Faro recibe el secreto del QR y el modo de llegada');
+  cod := _faro_codigo_llegada(sec, 'UNAL-08', v_vent);
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla(format($q$select registrar_llegada_pc('UNAL-08', %L)$q$, cod), 'No tiene una reserva vigente');
+  perform pg_temp.como('beto@unal.edu.co');
+  perform pg_temp.falla($q$select registrar_llegada_pc('UNAL-08', 'abcdef0123')$q$, 'venció');
+  perform pg_temp.falla(format($q$select registrar_llegada_pc('UNAL-08', %L)$q$, _faro_codigo_llegada(sec, 'UNAL-08', v_vent - 3)), 'venció');
+  perform pg_temp.ok((registrar_llegada_pc('UNAL-08', upper(cod))).llegada_en is not null,
+                     'quien reservó registra su llegada con el QR de la isla (otra persona no puede)');
+  update politicas set valor = '1' where clave = 'llegada_modo';
+  perform pg_temp.falla(format($q$select registrar_llegada_pc('UNAL-08', %L)$q$, cod), 'personal');
+
+  -- Órdenes remotas.
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.ok(faro_comando(array['UNAL-08'], 'reiniciar') = 1, 'el personal envía una orden a un equipo');
+  j := faro_estado(t8);
+  perform pg_temp.ok(j #>> '{comandos,0,tipo}' = 'reiniciar', 'Faro recibe la orden');
+  perform pg_temp.ok(jsonb_array_length(faro_estado(t8) -> 'comandos') = 0,
+                     'Faro recibe la orden una sola vez');
+  perform pg_temp.ok(faro_comando(array['UNAL-08'], 'apagar') = 0, 'no se apaga un equipo con una reserva en curso');
+  perform pg_temp.falla($q$select faro_comando(array['UNAL-08'], 'desinstalar')$q$, 'administrador');
+  perform pg_temp.falla($q$select faro_comando(null, 'formatear')$q$, 'no válida');
+
+  -- Inventario y salud.
+  j := faro_estado(t8, '{"inactivo_seg": 5, "cpu": 40, "inventario": {"cpu": "Intel i5", "ram_gb": 16, "disco_gb": 100, "disco_libre_gb": 5,
+                          "mac": "aa:bb:cc:dd:ee:08", "so_tipo": "Windows", "so_version": "Windows 11 Pro", "software": ["R", "RStudio", "Python"]}}');
+  perform pg_temp.ok((select software @> array['R', 'Python'] from equipos where codigo = 'UNAL-08'), 'el software de Faro llega al equipo para filtrar');
+  perform pg_temp.ok(exists (select 1 from cola_chat where tipo = 'faro_disco' and texto like 'UNAL-08%'), 'disco casi lleno avisa al chat');
+
+  -- Encender (Wake-on-LAN): un Faro encendido despierta a uno apagado.
+  t16 := faro_vincular(faro_codigo_vinculo('UNAL-16') ->> 'codigo', 'PC-16', 'Linux', '0.4.0') ->> 'token';
+  perform faro_estado(t16, '{"inventario": {"mac": "aa:bb:cc:dd:ee:16"}}');
+  update agentes set ultimo_latido = now() - interval '1 hour' where token_hash = _faro_hash_token(t16);
+  n := faro_comando(array['UNAL-16'], 'encender');
+  j := faro_estado(t8);
+  perform pg_temp.ok(n = 1 and (j #>> '{comandos,0,datos,macs,0}') = 'aa:bb:cc:dd:ee:16',
+                     'encender pide a un Faro encendido que despierte a los apagados');
+
+  -- Anuncios y canal.
+  perform faro_anunciar('La sala cierra hoy a las 5 p. m.', 60, null);
+  perform faro_canal(array['UNAL-08'], 'pruebas');
+  j := faro_estado(t8);
+  perform pg_temp.ok(j #>> '{anuncio,texto}' like 'La sala cierra%' and j ->> 'canal' = 'pruebas', 'anuncio en la isla y canal de pruebas');
+
+  -- Proceso desatendido que ya terminó.
+  update reservas set desatendido = true where id = r.id;
+  perform faro_estado(t8, '{"inactivo_seg": 2000, "cpu": 2}');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where tipo = 'desatendido_inactivo'), 'avisa si el proceso desatendido parece terminado');
+
+  -- Liberación por no presentarse (desactivada por defecto).
+  t7 := faro_vincular(faro_codigo_vinculo('UNAL-07') ->> 'codigo', 'PC-07', 'Windows 11', '0.4.0') ->> 'token';
+  perform faro_estado(t7, '{"inactivo_seg": 5000}');
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  select e.id, p.id, now() - interval '25 minutes', now() + interval '1 hour', 'PAE'
+    from equipos e, perfiles p where e.codigo = 'UNAL-07' and p.correo = 'ana@unal.edu.co';
+  perform pg_temp.ok(liberar_no_show() = 0, 'sin la política activa no se libera nada');
+  update politicas set valor = '20' where clave = 'liberar_no_show_min';
+  n := liberar_no_show();
+  perform pg_temp.ok(n = 1 and exists (select 1 from cola_notificaciones where tipo = 'no_show_liberada'),
+                     'con la política activa se libera la reserva sin uso medido por Faro');
+  update politicas set valor = '0' where clave = 'liberar_no_show_min';
+
+  -- Lista de espera.
+  update equipos set software = array['SPSS'] where codigo = 'UNAL-05';
+  perform pg_temp.como('ana@unal.edu.co');
+  perform unirse_espera('SPSS');
+  perform pg_temp.ok((select count(*) from lista_espera) = 1, 'la persona entra a la lista de espera');
+  n := encolar_avisos_espera();
+  perform pg_temp.ok(n = 1 and exists (select 1 from cola_notificaciones where tipo = 'espera' and titulo like 'UNAL-05%'),
+                     'avisa cuando hay un equipo libre con el software pedido');
+
+  -- Sala pública y reporte mensual.
+  j := sala_publica();
+  perform pg_temp.ok(jsonb_array_length(j) >= 16 and j::text not ilike '%beto%' and j::text not ilike '%ana%',
+                     'la sala pública no expone datos personales');
+  j := reporte_mensual(now() - interval '30 days', now() + interval '1 day');
+  perform pg_temp.ok((j ->> 'reservas')::int > 0 and jsonb_array_length(j -> 'destinatarios') = 2, 'reporte mensual para el personal');
+
+  -- Desinstalar desde el panel (solo administrador) desvincula el equipo al confirmarse.
+  perform pg_temp.como('admin@unal.edu.co');
+  perform pg_temp.ok(faro_comando(array['UNAL-07'], 'desinstalar') = 1, 'el administrador ordena desinstalar');
+  j := faro_estado(t7);
+  perform faro_comando_resultado(t7, (j #>> '{comandos,0,id}')::bigint, true, 'desinstalado');
+  perform pg_temp.falla(format('select faro_estado(%L)', t7), 'no está vinculado');
+  update politicas set valor = '1' where clave = 'faro_llegada_automatica';
+end $$;
+
 -- Permisos reales del rol que usa la PWA.
 select pg_temp.como('ana@unal.edu.co') \gset sin_
 set role authenticated;
@@ -322,6 +430,8 @@ set role anon;
 do $$ begin
   perform pg_temp.falla($q$select faro_estado('x')$q$, 'no está vinculado');
   perform pg_temp.falla($q$select faro_panel()$q$, 'permission denied');
+  perform pg_temp.falla($q$select faro_comando(null, 'reiniciar')$q$, 'permission denied');
+  perform pg_temp.ok(jsonb_array_length(sala_publica()) > 0, 'la pantalla de la sala funciona sin sesión');
   perform pg_temp.falla($q$select * from agente_eventos$q$, 'permission denied');
   perform pg_temp.ok(true, 'sin sesión solo se puede latir con un token válido');
 end $$;

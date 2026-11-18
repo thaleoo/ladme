@@ -7,6 +7,7 @@ import {
 import { esStaff, useAuth } from '../context/AuthContext'
 import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
+import MiReserva from '../components/MiReserva'
 import { conPunto, dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -43,12 +44,18 @@ export default function FichaEquipo() {
   const navigate = useNavigate()
   const toast = useToast()
   const [dialogo, setDialogo] = useState<'rapida' | 'contacto' | 'falla' | null>(null)
-  // Faro abre la ficha con ?reportar=1 para ir directo al reporte de falla.
+  // La isla de Faro abre la ficha con ?accion=extender|liberar|reportar o con ?llegada=<código>.
+  // (?reportar=1 se mantiene por compatibilidad con Faro 0.1–0.3.)
   const [params, setParams] = useSearchParams()
+  const [accion] = useState(() => params.get('accion'))
+  const [codigoLlegada] = useState(() => params.get('llegada'))
+  const [recarga, setRecarga] = useState(0)
+  const [mia, setMia] = useState<{ inicio: string; fin: string } | null>(null)
   useEffect(() => {
-    if (params.get('reportar') !== '1') return
-    setDialogo('falla')
-    setParams((p) => { p.delete('reportar'); return p }, { replace: true })
+    if (params.get('reportar') === '1' || params.get('accion') === 'reportar') setDialogo('falla')
+    if (params.has('reportar') || params.has('accion') || params.has('llegada')) {
+      setParams((p) => { p.delete('reportar'); p.delete('accion'); p.delete('llegada'); return p }, { replace: true })
+    }
   }, [params, setParams])
   const [alerta, setAlerta] = useState(false)
   const [reportes, setReportes] = useState<Reporte[]>([])
@@ -129,7 +136,7 @@ export default function FichaEquipo() {
 
   useEffect(() => {
     let vivo = true
-    setCargando(true)
+    if (recarga === 0) setCargando(true) // tras extender o liberar se recarga sin pantalla de carga
     setError(null)
     obtenerEquipo(codigo)
       .then(async (eq) => {
@@ -151,10 +158,12 @@ export default function FichaEquipo() {
     return () => {
       vivo = false
     }
-  }, [codigo, perfil])
+  }, [codigo, perfil, recarga])
 
   const ahora = new Date()
   const enCurso = ocupacion.find((o) => new Date(o.inicio) <= ahora && new Date(o.fin) > ahora)
+  // La reserva en curso es la de quien mira: ya tiene «Tu reserva», no tiene sentido preguntarse a sí mismo.
+  const esMia = !!mia && !!enCurso && new Date(mia.inicio).getTime() === new Date(enCurso.inicio).getTime()
   const libre = !enCurso && equipo?.estado === 'activo'
   const proximoLibre = useMemo(() => (enCurso ? proximaLibertad(ocupacion) : new Date()), [ocupacion, enCurso])
   const dias = useMemo(() => Array.from({ length: 7 }, (_, i) => sumarDias(inicioDia(ahora), i)), []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -256,6 +265,14 @@ export default function FichaEquipo() {
         </div>
       </div>
 
+      <MiReserva
+        equipo={equipo.codigo}
+        accion={accion}
+        codigoLlegada={codigoLlegada}
+        alCambiar={() => setRecarga((n) => n + 1)}
+        alVer={setMia}
+      />
+
       {libre && (
         <section className="card accent">
           <div className="row between" style={{ gap: 'var(--s3)' }}>
@@ -286,7 +303,7 @@ export default function FichaEquipo() {
         </section>
       )}
 
-      {enCurso && enCurso.tipo === 'reserva' && (
+      {enCurso && enCurso.tipo === 'reserva' && !esMia && (
         <section className="card">
           <div className="row between" style={{ gap: 'var(--s3)' }}>
             <div style={{ minWidth: 0, flex: '1 1 220px' }}>

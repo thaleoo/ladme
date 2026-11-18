@@ -21,7 +21,10 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
   faro_aviso_min: { titulo: 'Faro: aviso antes del fin de la reserva', unidad: 'minutos', min: 1, max: 60 },
   faro_gracia_min: { titulo: 'Faro: gracia al terminar antes de bloquear', unidad: 'minutos', min: 0, max: 30 },
   faro_desatendido_min: { titulo: 'Faro: inactividad para mostrar el aviso de proceso desatendido', unidad: 'minutos', min: 1, max: 120 },
-  faro_llegada_automatica: { titulo: 'Faro: registrar la llegada al detectar uso (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 }
+  faro_llegada_automatica: { titulo: 'Faro: registrar la llegada al detectar uso (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
+  llegada_modo: { titulo: 'Quién registra la llegada (0 = la persona desde la app · 1 = solo el personal · 2 = con el QR de la isla de Faro)', unidad: '', min: 0, max: 2 },
+  liberar_no_show_min: { titulo: 'Liberar sola una reserva sin llegada ni uso del PC (0 = nunca)', unidad: 'minutos', min: 0, max: 120 },
+  faro_sesion_limpia: { titulo: 'Faro ofrece borrar los archivos de la persona al terminar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 }
 }
 
 /** Solo administradores. Los cambios aplican de inmediato a las reservas nuevas. */

@@ -103,3 +103,23 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
   `reportes` y `solicitudes_excepcion`, con `encolar_alertas_faro` y con los eventos de Faro. Apps Script
   la lee con `chat_pendientes` y `marcar_chat_enviado` (`service_role`).
 - Eventos nuevos de Faro: `cierre_forzado`, `actualizado`, `clase_inicio` y `clase_fin`.
+
+## Migración 0008 — Faro 0.4: gestión remota, llegada por QR, inventario y sala
+
+`migrations/0008_faro_gestion.sql`, después de 0007.
+
+- Políticas nuevas: `llegada_modo` (0 la persona, 1 solo el personal, 2 QR de la isla; por defecto 1),
+  `liberar_no_show_min` (0 = apagada) y `faro_sesion_limpia` (1).
+- `registrar_llegada` respeta `llegada_modo`. `registrar_llegada_pc(equipo, código)` valida el código
+  rotativo (`_faro_codigo_llegada`, ventanas de 30 s, ±1) y solo registra la reserva vigente **de quien
+  llama** en ese equipo.
+- `agente_comandos` y `faro_comando` / `faro_comando_resultado`: órdenes remotas (reiniciar, actualizar,
+  apagar, despertar por Wake-on-LAN, desinstalar). Apagar omite equipos con reserva en curso; desinstalar
+  es solo para administradores.
+- `faro_anuncios` (`faro_anunciar`, `faro_quitar_anuncio`) y `faro_canal` (estable/pruebas).
+- `faro_estado` recibe inventario y uso del procesador, copia los programas a `equipos.software`, avisa
+  por disco casi lleno y por proceso desatendido verificado, y entrega órdenes y anuncios.
+- `lista_espera` (`unirse_espera`, `salir_espera`, `encolar_avisos_espera`), `liberar_no_show`,
+  `sala_publica` (anónima, sin datos personales) y `reporte_mensual` (`service_role`).
+- `equipos.plano_x` / `plano_y` para el mapa de la sala.
+

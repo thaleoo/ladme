@@ -31,6 +31,11 @@ export interface Equipo {
   fecha_adquisicion: string | null
   sistema_operativo: 'Windows' | 'Linux' | 'macOS' | 'Otro' | null
   so_version: string | null
+  /** Programas detectados por Faro (para filtrar al reservar). */
+  software?: string[]
+  /** Posición en el plano de la sala (columna y fila, desde 1). */
+  plano_x?: number | null
+  plano_y?: number | null
 }
 
 export interface Reserva {

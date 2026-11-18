@@ -2180,7 +2180,7 @@ function enviarRecordatorioFin_(r) {
  * Es idempotente: borra los disparadores previos de estas mismas funciones.
  */
 function instalarDisparadores() {
-  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_", "respaldarSupabase_"];
+  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_", "respaldarSupabase_", "reporteMensual_"];
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (handlers.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
@@ -2189,7 +2189,9 @@ function instalarDisparadores() {
   instalarWorkerCorreo_();
   // Copia de seguridad semanal de Supabase: domingos a las 3 a. m.
   ScriptApp.newTrigger("respaldarSupabase_").timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
-  return { ok: true, mensaje: "Disparadores instalados: mantenimientos (07:00), recordatorios (30 min), correo de la PWA (5 min) y copia de seguridad (domingos 03:00)." };
+  // Resumen del mes anterior para el personal: el día 1 a las 8 a. m.
+  ScriptApp.newTrigger("reporteMensual_").timeBased().onMonthDay(1).atHour(8).create();
+  return { ok: true, mensaje: "Disparadores instalados: mantenimientos (07:00), recordatorios (30 min), correo de la PWA (5 min), copia de seguridad (domingos 03:00) y reporte mensual (día 1, 08:00)." };
 }
 
 /** Diagnóstico de disparadores (para el editor). */
@@ -2964,6 +2966,8 @@ function enviarCorreosSupabase_() {
       supabaseRpc_("encolar_recordatorios_fin", { p_minutos: 30 });
       supabaseRpc_("encolar_avisos_no_show", {});
       supabaseRpc_("encolar_alertas_liberacion", {});
+      supabaseRpc_("liberar_no_show", {});         // solo actúa si la política liberar_no_show_min > 0
+      supabaseRpc_("encolar_avisos_espera", {});   // avisa a la lista de espera cuando se libera un equipo
       if (new Date().getHours() >= 7) supabaseRpc_("encolar_recordatorios_mantenimiento", {});   // una vez al día por persona (lo garantiza la base)
     } catch (err) { Logger.log(err); }
 
@@ -3244,4 +3248,50 @@ function enviarChatPersonal_() {
 function probarChatPersonal() {
   enviarMensajeChat_("LADME · Prueba: los avisos del laboratorio llegarán a este chat.");
   Logger.log("Mensaje de prueba enviado.");
+}
+
+/* =========================================================================
+ * REPORTE MENSUAL (Faro 0.4)
+ * El día 1 de cada mes envía al personal (laboratoristas y administración) un
+ * resumen del mes anterior: reservas, horas, uso real medido por Faro, horas pico,
+ * equipos más usados y reportes de fallas. No incluye datos personales.
+ * Para probarlo: ejecutar probarReporteMensual() desde el editor (se lo envía solo a usted).
+ * ========================================================================= */
+function reporteMensual_(soloA) {
+  if (!prop_("SUPABASE_URL") || !prop_("SUPABASE_SECRET_KEY")) return;
+  var hoy = new Date();
+  var hasta = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  var desde = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  var r = supabaseRpc_("reporte_mensual", { p_desde: desde.toISOString(), p_hasta: hasta.toISOString() });
+  if (!r) return;
+  var mes = Utilities.formatDate(desde, Session.getScriptTimeZone(), "MMMM yyyy");
+  var fila = function (k, v) { return '<tr><td style="padding:6px 12px 6px 0;color:#64748b">' + escHtml_(k) + '</td><td style="padding:6px 0;font-weight:600">' + escHtml_(v) + "</td></tr>"; };
+  var lista = function (xs, f) { return (xs || []).length ? (xs || []).map(f).join(" · ") : "—"; };
+  var html =
+    '<div style="font-family:Arial,sans-serif;max-width:560px;color:#0f172a">' +
+    '<h2 style="margin:0 0 4px">LADME · Resumen de ' + escHtml_(mes) + "</h2>" +
+    '<p style="margin:0 0 16px;color:#64748b">Uso del laboratorio el mes pasado.</p>' +
+    '<table style="border-collapse:collapse;font-size:14px">' +
+    fila("Reservas", r.reservas) +
+    fila("Personas distintas", r.personas) +
+    fila("Horas reservadas", r.horas_reservadas) +
+    fila("Horas de uso real (Faro)", r.horas_uso_real) +
+    fila("Horas de uso sin reserva", r.horas_sin_reserva) +
+    fila("Reservas sin llegada", r.sin_llegada) +
+    fila("Horas pico", lista(r.horas_pico, function (h) { return h.hora + ":00 (" + h.horas + " h)"; })) +
+    fila("Equipos más usados", lista(r.equipos_mas_usados, function (e) { return e.codigo + " (" + e.horas + " h)"; })) +
+    fila("Reportes de fallas", r.reportes) +
+    fila("Equipos con más reportes", lista(r.equipos_con_mas_reportes, function (e) { return e.codigo + " (" + e.reportes + ")"; })) +
+    "</table>" +
+    ((urlPwa_() || prop_("PWA_URL_PRUEBAS")) ? '<p style="margin-top:18px"><a href="' + (urlPwa_() || prop_("PWA_URL_PRUEBAS")) + '/admin">Ver más en Administración</a></p>' : "") +
+    "</div>";
+  var para = soloA ? [soloA] : (r.destinatarios || []).filter(function (c) { return /@unal\.edu\.co$/i.test(String(c)); });
+  if (!para.length) return;
+  MailApp.sendEmail({ to: para.join(","), subject: "LADME · Resumen de " + mes, htmlBody: html, name: NOMBRE_REMITENTE });
+  return { ok: true, enviados: para.length };
+}
+
+/** Ejecutar desde el editor: envía el reporte del mes anterior solo a su cuenta. */
+function probarReporteMensual() {
+  return reporteMensual_(Session.getActiveUser().getEmail());
 }

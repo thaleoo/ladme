@@ -17,6 +17,35 @@ pub struct Remoto {
     pub siguiente: Option<Siguiente>,
     pub politicas: Politicas,
     pub clave: Option<Clave>,
+    /// Desde la 0008: secreto del QR de llegada, canal, órdenes pendientes y anuncio.
+    #[serde(default)]
+    pub qr: Option<QrLlegada>,
+    #[serde(default)]
+    pub canal: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub comandos: Vec<Comando>,
+    #[serde(default)]
+    pub anuncio: Option<Anuncio>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QrLlegada {
+    pub secreto: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Comando {
+    pub id: i64,
+    pub tipo: String,
+    #[serde(default)]
+    pub datos: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Anuncio {
+    pub id: i64,
+    pub texto: String,
+    pub hasta: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -62,6 +91,14 @@ pub struct Politicas {
     pub aviso_min: i64,
     pub gracia_min: i64,
     pub desatendido_min: i64,
+    #[serde(default)]
+    pub llegada_modo: i64,
+    #[serde(default = "uno")]
+    pub sesion_limpia: i64,
+}
+
+fn uno() -> i64 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -78,6 +115,9 @@ pub struct Memoria {
     pub fin_reciente: Option<DateTime<Utc>>,
     /// Hasta cuándo vale un desbloqueo hecho con la clave de emergencia.
     pub emergencia_hasta: Option<DateTime<Utc>>,
+    /// Inicio de la última reserva vista (para ofrecer borrar solo los archivos de esa sesión).
+    #[serde(default)]
+    pub inicio_reciente: Option<DateTime<Utc>>,
 }
 
 pub struct Entrada<'a> {
@@ -132,6 +172,11 @@ pub struct Vista {
     pub siguiente: Option<DateTime<Utc>>,
     pub titular: Option<String>,
     pub mensaje: Option<String>,
+    /// Hay una reserva sin llegada registrada y la llegada se hace con el QR de la isla.
+    pub llegada_pendiente: bool,
+    pub anuncio: Option<String>,
+    /// Ofrecer borrar los archivos creados desde este momento (la sesión que terminó).
+    pub limpieza_desde: Option<DateTime<Utc>>,
 }
 
 const USO_RECIENTE_SEG: u64 = 120;
@@ -158,6 +203,9 @@ pub fn decidir(e: &Entrada) -> Vista {
             siguiente: None,
             titular: None,
             mensaje: None,
+            llegada_pendiente: false,
+            anuncio: None,
+            limpieza_desde: None,
         };
     };
 
@@ -185,6 +233,9 @@ pub fn decidir(e: &Entrada) -> Vista {
         siguiente,
         titular: None,
         mensaje: None,
+        llegada_pendiente: false,
+        anuncio: r.anuncio.as_ref().filter(|a| a.hasta > ahora).map(|a| a.texto.clone()),
+        limpieza_desde: None,
     };
 
     // La ocupación vigente según la copia (sin conexión, una reserva vale hasta su fin).
@@ -247,6 +298,7 @@ pub fn decidir(e: &Entrada) -> Vista {
             let aviso = Duration::minutes(r.politicas.aviso_min.max(1));
             v.titular = o.titular.clone();
             v.mensaje = o.mensaje.clone();
+            v.llegada_pendiente = !o.llegada && r.politicas.llegada_modo == 2 && r.qr.is_some();
             v.cuenta_hasta = Some(o.fin);
             v.desde = Some(o.inicio);
             v.ruta_qr = ruta_ficha;
@@ -275,6 +327,14 @@ pub fn decidir(e: &Entrada) -> Vista {
         }
         // 5) Sin ocupación vigente.
         None => {
+            // Recién terminó una reserva: ofrecer borrar los archivos de esa sesión (15 min).
+            if r.politicas.sesion_limpia == 1 {
+                if let (Some(fin), Some(ini)) = (e.memoria.fin_reciente, e.memoria.inicio_reciente) {
+                    if fin <= ahora && ahora < fin + Duration::minutes(15) {
+                        v.limpieza_desde = Some(ini);
+                    }
+                }
+            }
             let gracia = Duration::minutes(r.politicas.gracia_min.max(0));
             if let Some(fin) = e.memoria.fin_reciente.filter(|f| *f <= ahora && ahora < *f + gracia) {
                 v.estado = Estado::Gracia;
@@ -322,7 +382,10 @@ pub fn recordar(m: &mut Memoria, antes: Option<&Remoto>, ahora_remoto: Option<&R
     match (reserva(antes), reserva(ahora_remoto)) {
         // La reserva desapareció (terminó o se liberó antes): la gracia cuenta desde ese momento.
         (Some(a), None) => m.fin_reciente = Some(a.fin.min(ahora)),
-        (_, Some(b)) => m.fin_reciente = Some(b.fin),
+        (_, Some(b)) => {
+            m.fin_reciente = Some(b.fin);
+            m.inicio_reciente = Some(b.inicio);
+        }
         _ => {}
     }
 }
@@ -343,8 +406,12 @@ mod pruebas {
             desbloqueo_hasta: None,
             actual,
             siguiente: None,
-            politicas: Politicas { aviso_min: 10, gracia_min: 3, desatendido_min: 10 },
+            politicas: Politicas { aviso_min: 10, gracia_min: 3, desatendido_min: 10, llegada_modo: 0, sesion_limpia: 1 },
             clave: None,
+            qr: None,
+            canal: None,
+            comandos: vec![],
+            anuncio: None,
         }
     }
 
@@ -444,6 +511,23 @@ mod pruebas {
         let r = remoto(Modo::Avisar, Some(d));
         assert_eq!(ver(&r, 0, Some(700), &Memoria::default()).pantalla, Pantalla::Desatendido);
         assert_eq!(ver(&r, 0, Some(30), &Memoria::default()).pantalla, Pantalla::Ninguna);
+    }
+
+    #[test]
+    fn llegada_por_qr_y_sesion_limpia() {
+        let mut r = remoto(Modo::Observar, Some(Ocupacion { llegada: false, ..reserva(-5, 60) }));
+        assert!(!ver(&r, 0, None, &Memoria::default()).llegada_pendiente);
+        r.politicas.llegada_modo = 2;
+        r.qr = Some(QrLlegada { secreto: "x".into() });
+        assert!(ver(&r, 0, None, &Memoria::default()).llegada_pendiente);
+
+        let antes = remoto(Modo::Observar, Some(reserva(-60, 0)));
+        let despues = remoto(Modo::Observar, None);
+        let mut m = Memoria::default();
+        recordar(&mut m, Some(&antes), Some(&antes), t(-1));
+        recordar(&mut m, Some(&antes), Some(&despues), t(0));
+        assert_eq!(ver(&despues, 5, None, &m).limpieza_desde, Some(t(-60)));
+        assert_eq!(ver(&despues, 20, None, &m).limpieza_desde, None);
     }
 
     #[test]

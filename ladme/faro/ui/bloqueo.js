@@ -53,7 +53,7 @@ function pintar() {
       ${v.siguiente ? `<p class="detalle" style="margin-top:10px">Hay una reserva desde ${cuando(v.siguiente)}: puedes reservar hasta esa hora.</p>` : ''}`;
   }
   main.innerHTML = `<div class="centro ${conQr ? '' : 'solo'}">
-      <div>${reloj()}${texto}</div>
+      <div>${reloj()}${texto}${v.anuncio ? `<div class="anuncio">${ICONOS.megafono}<span>${esc(v.anuncio)}</span></div>` : ''}</div>
       ${conQr ? `<div class="tarjeta">
           <div class="qr">${paquete.qr}</div>
           <div class="que">${desatendido ? '¿Necesitas este equipo? Escríbele al titular' : 'Escanea para reservar'}</div>

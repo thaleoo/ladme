@@ -73,4 +73,11 @@ impl Api {
     pub async fn evento(&self, c: &Config, token: &str, tipo: &str, detalle: Value) -> Result<(), Fallo> {
         self.rpc(c, "faro_evento", json!({ "p_token": token, "p_tipo": tipo, "p_detalle": detalle })).await.map(|_| ())
     }
+
+    /// Informa cómo terminó una orden del panel.
+    pub async fn resultado(&self, c: &Config, token: &str, id: i64, ok: bool, texto: &str) -> Result<(), Fallo> {
+        self.rpc(c, "faro_comando_resultado", json!({ "p_token": token, "p_id": id, "p_ok": ok, "p_resultado": texto }))
+            .await
+            .map(|_| ())
+    }
 }

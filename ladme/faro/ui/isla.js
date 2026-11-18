@@ -6,9 +6,13 @@ const capas = Object.fromEntries([...isla.querySelectorAll('.capa')].map((c) => 
 
 let paquete = null;
 let ui = 'compacta';          // 'mini' | 'compacta' | 'abierta'
-let accion = null;            // panel de QR: 'reservar' | 'extender' | 'liberar' | 'reportar'
-let aviso = '';               // error al abrir el navegador
-let enlaceVisible = '';       // dirección para copiar si no se pudo abrir
+let accion = null;            // panel: 'reservar' | 'extender' | 'liberar' | 'reportar' | 'llegada' | 'personal'
+let aviso = '';               // mensaje bajo el panel (error o confirmación)
+let confirmar = '';           // botón que pide un segundo clic ('retirar' | 'limpiar')
+let qrLlegada = null;         // { svg, cambia_en } del QR de llegada (cambia cada 30 s)
+let anuncioVisto = '';
+let limpiezaDescartada = '';
+let fijaHasta = 0;            // la isla abierta no se cierra sola antes de este momento
 let dentro = false;           // el cursor está sobre la isla (lo informa isla.rs)
 let completa = false;         // hay una app a pantalla completa
 let arrastrando = false;
@@ -22,20 +26,31 @@ const timers = {};
 const PAUSA_MINI = 3500;      // compacta → mini sin el cursor encima
 const PAUSA_CERRAR = 2600;    // abierta → se cierra sola sin el cursor encima
 const AVISO_CAMBIO = 5000;    // al cambiar de estado se muestra compacta un rato
+const PAUSA_PANEL = 60_000;   // con un QR o la clave en pantalla: hay tiempo para sacar el celular
 
 const ACCIONES = {
   reservar: { texto: 'Reservar este equipo', titulo: 'Reserva desde tu celular', cuerpo: 'Escanea, elige hasta qué hora y el equipo queda a tu nombre.', icono: ICONOS.mas, principal: true },
   extender: { texto: 'Extender', titulo: 'Extiende tu reserva', cuerpo: 'Escanea y elige cuánto tiempo más necesitas. Un toque y listo.', icono: ICONOS.reloj, principal: true },
   liberar:  { texto: 'Liberar', titulo: 'Libera el equipo', cuerpo: 'Si ya terminaste, escanea y confirma: el equipo queda libre para otra persona.', icono: ICONOS.salir },
   reportar: { texto: 'Reportar falla', titulo: 'Reporta una falla', cuerpo: 'Cuéntale al laboratorio qué pasa con este equipo.', icono: ICONOS.falla },
+  llegada:  { texto: 'Registrar llegada', titulo: 'Registra tu llegada', cuerpo: 'Escanéalo con tu celular, con tu sesión de LADME abierta. Solo funciona para quien hizo la reserva y el código cambia cada 30 s.', icono: ICONOS.check, principal: true },
 };
-const ruta = (a, codigo) => `/pc/${encodeURIComponent(codigo)}/${a}`;
+// Rutas que existen en la PWA: la reserva va con ?equipo= y lo demás abre la ficha del equipo.
+const ruta = (a, codigo) => {
+  const c = encodeURIComponent(codigo);
+  return a === 'reservar' ? `/reservar?equipo=${c}` : `/equipo/${c}?accion=${a}`;
+};
+// «ladme.app/e/UNAL-05» para escribir a mano si no hay cámara a mano.
+const enlaceCorto = (codigo) => {
+  const base = (paquete?.url_base ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return base && codigo ? `${base}/e/${codigo}` : '';
+};
 
 const vista = () => paquete?.vista ?? { estado: 'conectando', titulo: 'Conectando con LADME', detalle: '', en_linea: false };
 const urgente = (v = vista()) => !!v.insistir || ['por_terminar', 'gracia', 'libre_en_uso'].includes(v.estado);
 
-function accionesDe(estado) {
-  if (estado === 'reservado' || estado === 'por_terminar') return ['extender', 'liberar', 'reportar'];
+function accionesDe(estado, v = vista()) {
+  if (estado === 'reservado' || estado === 'por_terminar') return [...(v.llegada_pendiente ? ['llegada'] : []), 'extender', 'liberar', 'reportar'];
   if (estado === 'libre' || estado === 'libre_en_uso' || estado === 'gracia') return ['reservar', 'reportar'];
   return ['reportar'];
 }
@@ -77,7 +92,7 @@ function htmlCompacta(v) {
       <span class="punto"></span>
       <span class="codigo">${esc(v.equipo ?? 'Faro')}</span>
       <span class="sep"></span>
-      <span class="etiqueta">${etiqueta(v)}</span>
+      <span class="etiqueta">${v.anuncio ? `<span class="megafono">${ICONOS.megafono}</span>` : ''}${v.llegada_pendiente ? 'Registra tu llegada' : etiqueta(v)}</span>
       ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
       <span class="valor num" data-vivo="valor">${valorCorto(v)}</span>
     </div>`;
@@ -87,19 +102,31 @@ function htmlAbierta(v) {
   const codigo = v.equipo ?? '';
   const p = progreso(v.desde, v.cuenta_hasta);
   let cuerpo;
-  if (accion) {
+  if (accion === 'personal') {
+    cuerpo = `<div class="panel-personal">
+        <p><strong>Personal del laboratorio</strong>Con la clave de emergencia puedes desbloquear este equipo 2 horas o quitar Faro de este PC.</p>
+        <input class="campo" data-clave type="password" autocomplete="off" placeholder="Clave de emergencia" aria-label="Clave de emergencia" />
+        ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
+        <div class="acciones">
+          <button class="boton principal" data-desbloquear>${ICONOS.candado} Desbloquear 2 h</button>
+          <button class="boton ${confirmar === 'retirar' ? 'peligro' : ''}" data-retirar>${ICONOS.papelera} ${confirmar === 'retirar' ? '¿Seguro? Quitar Faro' : 'Quitar Faro de este PC'}</button>
+          <button class="boton" data-volver title="Volver">${ICONOS.volver}</button>
+        </div>
+      </div>`;
+  } else if (accion) {
     const a = ACCIONES[accion];
     const r = ruta(accion, codigo);
+    const svg = accion === 'llegada' ? qrLlegada?.svg : qrCache[r];
+    const corto = accion === 'llegada' ? '' : enlaceCorto(codigo);
     cuerpo = `<div class="panel-qr">
-        <div class="qr">${qrCache[r] ?? ''}</div>
+        <div class="qr">${svg ?? ''}</div>
         <div>
           <p><strong>${a.titulo}</strong>${a.cuerpo}</p>
+          ${corto ? `<p class="corto">¿Sin cámara? Entra a <span class="num">${esc(corto)}</span></p>` : ''}
+          ${accion === 'llegada' ? `<div class="barra fina"><i data-vivo="qr-llegada"></i></div>` : ''}
           ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
           <div class="acciones" style="margin-top:0">
-            ${enlaceVisible
-              ? `<button class="boton" data-copiar>${ICONOS.enlace} Copiar enlace</button>`
-              : `<button class="boton" data-abrir="${esc(r)}">${ICONOS.enlace} Abrir aquí</button>`}
-            <button class="boton" data-volver title="Volver">${ICONOS.volver}</button>
+            <button class="boton" data-volver title="Volver">${ICONOS.volver} Volver</button>
           </div>
         </div>
       </div>`;
@@ -108,10 +135,18 @@ function htmlAbierta(v) {
       <h2 class="titulo">${esc(v.titulo)}</h2>
       ${v.detalle ? `<p class="detalle">${esc(v.detalle)}</p>` : ''}
       ${v.mensaje ? `<div class="mensaje">«${esc(v.mensaje)}»</div>` : ''}
+      ${v.limpieza_desde && limpiezaDescartada !== v.limpieza_desde ? `<div class="limpieza">
+          <p><strong>¿Borrar tus archivos?</strong>Se borrarán los archivos que se guardaron en Descargas y Escritorio durante la reserva, para que el siguiente no los vea.</p>
+          ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
+          <div class="acciones">
+            <button class="boton ${confirmar === 'limpiar' ? 'peligro' : 'principal'}" data-limpiar>${ICONOS.papelera} ${confirmar === 'limpiar' ? '¿Seguro? No se puede deshacer' : 'Borrar mis archivos'}</button>
+            <button class="boton" data-no-limpiar>No, gracias</button>
+          </div>
+        </div>` : ''}
       ${v.cuenta_hasta ? `<div class="reloj"><span class="grande num" data-vivo="grande">${cuenta(v.cuenta_hasta)}</span>
           <span class="que">${queCuenta(v)}<br>${textoHora(v.cuenta_hasta)}</span></div>` : ''}
       ${p !== null ? `<div class="barra"><i data-vivo="barra" style="width:${(p * 100).toFixed(1)}%"></i></div>` : ''}
-      <div class="acciones">${accionesDe(v.estado).map((k) => {
+      <div class="acciones">${accionesDe(v.estado, v).map((k) => {
         const a = ACCIONES[k];
         return `<button class="boton ${a.principal ? 'principal' : ''}" data-accion="${k}">${a.icono} ${a.texto}</button>`;
       }).join('')}</div>`;
@@ -124,8 +159,10 @@ function htmlAbierta(v) {
         ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
         <button class="cerrar" data-cerrar title="Cerrar">${ICONOS.cerrar}</button>
       </div>
+      ${v.anuncio ? `<div class="anuncio">${ICONOS.megafono}<span>${esc(v.anuncio)}</span></div>` : ''}
       ${cuerpo}
-      <div class="pie"><span>Faro · LADME ${esc(paquete?.version ?? '')}</span><span class="num" data-vivo="hora">${textoReloj()}</span></div>
+      <div class="pie"><span>Faro · LADME ${esc(paquete?.version ?? '')}${paquete?.clave_disponible && accion !== 'personal'
+        ? ` · <button class="link-pie" data-personal title="Personal del laboratorio">${ICONOS.llave} Personal</button>` : ''}</span><span class="num" data-vivo="hora">--</span></div>
     </div>`;
 }
 
@@ -145,9 +182,21 @@ function dibujar() {
   // Solo se reemplaza el HTML de una capa si cambió (las cifras vivas se actualizan aparte).
   const nuevo = { mini: htmlMini(v), compacta: htmlCompacta(v), abierta: htmlAbierta(v) };
   for (const k of Object.keys(capas)) {
-    if (nuevo[k] !== html[k]) { capas[k].innerHTML = nuevo[k]; html[k] = nuevo[k]; }
+    if (nuevo[k] !== html[k]) {
+      // Lo escrito en la clave sobrevive a que se redibuje la isla.
+      const campo = capas[k].querySelector('input[data-clave]');
+      const valor = campo?.value ?? '';
+      const conFoco = campo && document.activeElement === campo;
+      capas[k].innerHTML = nuevo[k];
+      html[k] = nuevo[k];
+      const otro = capas[k].querySelector('input[data-clave]');
+      if (otro) { otro.value = valor; if (conFoco || accion === 'personal') otro.focus(); }
+    }
     capas[k].classList.toggle('activa', k === ui);
   }
+
+  for (const el of isla.querySelectorAll('[data-vivo="hora"]')) el.textContent = textoReloj();
+  if (qrLlegada) for (const el of isla.querySelectorAll('[data-vivo="qr-llegada"]')) el.style.width = `${(Math.max(0, qrLlegada.cambia_en) / 30) * 100}%`;
 
   const activa = capas[ui];
   const w = Math.ceil(activa.offsetWidth);
@@ -166,7 +215,7 @@ function dibujar() {
 function cambiar(nuevo) {
   clearTimeout(timers.crecer);
   if (nuevo === ui) return;
-  if (nuevo !== 'abierta') { accion = null; aviso = ''; enlaceVisible = ''; }
+  if (nuevo !== 'abierta') { accion = null; aviso = ''; confirmar = ''; fijaHasta = 0; }
   ui = nuevo;
   dibujar();
 }
@@ -176,7 +225,8 @@ function programar() {
   clearTimeout(timers.reposo);
   if (arrastrando || dentro) return;
   if (ui === 'abierta') {
-    timers.reposo = setTimeout(() => cambiar(urgente() ? 'compacta' : 'mini'), PAUSA_CERRAR);
+    const pausa = Math.max(accion ? PAUSA_PANEL : PAUSA_CERRAR, fijaHasta - Date.now());
+    timers.reposo = setTimeout(() => cambiar(urgente() ? 'compacta' : 'mini'), pausa);
   } else if (ui === 'compacta' && !urgente()) {
     timers.reposo = setTimeout(() => cambiar('mini'), PAUSA_MINI);
   }
@@ -194,16 +244,25 @@ async function alRecibir(p) {
   paquete = p;
   fijarDesfase(p.desfase_ms);
   const v = vista();
+  const anuncioNuevo = v.anuncio && v.anuncio !== anuncioVisto;
+  const limpiezaNueva = v.limpieza_desde && v.limpieza_desde !== limpiezaDescartada && html.abierta.indexOf('data-limpiar') < 0;
+  if (v.anuncio) anuncioVisto = v.anuncio;
   if (v.insistir && (!insistiaAntes || Date.now() - ultimaInsistencia > 5 * 60_000)) {
     ultimaInsistencia = Date.now();
     accion = null;
     ui = 'abierta';
+  } else if ((anuncioNuevo || limpiezaNueva) && accion !== 'personal') {
+    // Un anuncio del laboratorio o la oferta de borrar archivos: se muestra abierta un rato.
+    accion = null;
+    ui = 'abierta';
+    fijaHasta = Date.now() + 20_000;
   } else if (estadoAntes !== null && estadoAntes !== v.estado && ui === 'mini') {
     ui = 'compacta'; // anuncia el cambio y vuelve a encogerse después
     clearTimeout(timers.reposo);
     setTimeout(programar, AVISO_CAMBIO - PAUSA_MINI);
   }
-  if (estadoAntes !== v.estado) accion = null;
+  if (estadoAntes !== v.estado && accion !== 'personal') accion = null;
+  if (accion === 'llegada' && !v.llegada_pendiente) accion = null;
   insistiaAntes = !!v.insistir;
   estadoAntes = v.estado;
   dibujar();
@@ -218,7 +277,18 @@ setInterval(() => {
   for (const el of isla.querySelectorAll('[data-vivo="hora"]')) el.textContent = textoReloj();
   const p = progreso(v.desde, v.cuenta_hasta);
   for (const el of isla.querySelectorAll('[data-vivo="barra"]')) if (p !== null) el.style.width = `${(p * 100).toFixed(1)}%`;
+  if (accion === 'llegada' && qrLlegada) {
+    qrLlegada.cambia_en -= 1;
+    if (qrLlegada.cambia_en <= 0) refrescarLlegada();
+    for (const el of isla.querySelectorAll('[data-vivo="qr-llegada"]')) el.style.width = `${(Math.max(0, qrLlegada.cambia_en) / 30) * 100}%`;
+  }
 }, 1000);
+
+async function refrescarLlegada() {
+  qrLlegada = await invocar('qr_llegada');
+  if (!qrLlegada) aviso = 'No se pudo generar el código. Pide al personal que registre tu llegada.';
+  dibujar();
+}
 
 // ------------------------------------------------------------------ clics y arrastre
 let presion = null;
@@ -266,39 +336,65 @@ isla.addEventListener('click', async (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   const codigo = vista().equipo ?? '';
-  if (b.dataset.cerrar !== undefined) { cambiar(urgente() ? 'compacta' : 'mini'); return; }
-  if (b.dataset.volver !== undefined) { accion = null; aviso = ''; enlaceVisible = ''; }
-  else if (b.dataset.accion) {
-    accion = b.dataset.accion; aviso = ''; enlaceVisible = '';
+  const d = b.dataset;
+  if (d.cerrar !== undefined) { cambiar(urgente() ? 'compacta' : 'mini'); return; }
+  const otroConfirmar = confirmar;
+  confirmar = '';
+  if (d.volver !== undefined) { accion = null; aviso = ''; }
+  else if (d.accion) {
+    accion = d.accion; aviso = '';
+    if (accion === 'llegada') { await refrescarLlegada(); programar(); return; }
     const r = ruta(accion, codigo);
     if (!(r in qrCache)) qrCache[r] = await invocar('qr', { ruta: r });
-  } else if (b.dataset.abrir) {
-    b.disabled = true;
-    try {
-      await invocar('abrir', { ruta: b.dataset.abrir });
-      cambiar(urgente() ? 'compacta' : 'mini');
-      return;
-    } catch (err) {
-      aviso = String(err);
-      enlaceVisible = (await invocar('enlace', { ruta: b.dataset.abrir })) ?? '';
+  } else if (d.personal !== undefined) {
+    accion = 'personal'; aviso = '';
+    invocar('isla_foco');
+  } else if (d.desbloquear !== undefined || d.retirar !== undefined) {
+    const clave = isla.querySelector('input[data-clave]')?.value ?? '';
+    if (!clave) { aviso = 'Escribe la clave de emergencia.'; }
+    else if (d.retirar !== undefined && otroConfirmar !== 'retirar') { confirmar = 'retirar'; aviso = ''; }
+    else {
+      b.disabled = true;
+      try {
+        if (d.retirar !== undefined) { await invocar('retirar', { claveIngresada: clave }); return; }
+        await invocar('emergencia', { claveIngresada: clave });
+        cambiar('compacta');
+        return;
+      } catch (err) { aviso = String(err); }
     }
-  } else if (b.dataset.copiar !== undefined) {
-    copiar(enlaceVisible);
-    aviso = 'Enlace copiado. Pégalo en el navegador.';
+  } else if (d.limpiar !== undefined) {
+    if (otroConfirmar !== 'limpiar') { confirmar = 'limpiar'; aviso = ''; }
+    else {
+      b.disabled = true;
+      try {
+        const n = await invocar('limpiar_sesion');
+        limpiezaDescartada = vista().limpieza_desde ?? '';
+        aviso = '';
+        mostrarBreve(n === 1 ? 'Se borró 1 archivo.' : `Se borraron ${n} archivos.`);
+      } catch (err) { aviso = String(err); }
+    }
+  } else if (d.noLimpiar !== undefined) {
+    limpiezaDescartada = vista().limpieza_desde ?? '';
+    aviso = '';
   }
+  programar();
   dibujar();
 });
 
-function copiar(texto) {
-  const campo = document.createElement('textarea');
-  campo.value = texto;
-  campo.style.position = 'fixed';
-  campo.style.opacity = '0';
-  document.body.appendChild(campo);
-  campo.select();
-  try { document.execCommand('copy'); } catch { /* sin portapapeles */ }
-  campo.remove();
+// Confirmación corta que reemplaza el detalle un momento.
+function mostrarBreve(texto) {
+  const v = paquete?.vista;
+  if (!v) return;
+  const antes = v.detalle;
+  v.detalle = texto;
+  dibujar();
+  setTimeout(() => { if (paquete?.vista === v) { v.detalle = antes; dibujar(); } }, 4000);
 }
+
+// Al escribir la clave, Enter desbloquea.
+isla.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input[data-clave]')) isla.querySelector('[data-desbloquear]')?.click();
+});
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui === 'abierta') cambiar(urgente() ? 'compacta' : 'mini'); });
 

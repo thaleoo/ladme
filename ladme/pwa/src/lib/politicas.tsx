@@ -13,6 +13,8 @@ export interface Limites {
   excepcionMaxHoras: number
   /** Ninguna reserva lo supera, ni siquiera la de un administrador. */
   maxAbsolutoHoras: number
+  /** 0 = la persona desde la app · 1 = solo el personal · 2 = con el QR de la isla de Faro. */
+  llegadaModo: number
   recargar: () => Promise<void>
 }
 
@@ -25,6 +27,7 @@ const POR_DEFECTO: Limites = {
   toleranciaMin: 30,
   excepcionMaxHoras: 720,
   maxAbsolutoHoras: 720,
+  llegadaModo: 0,
   recargar: async () => {}
 }
 
@@ -49,6 +52,7 @@ export function PoliticasProvider({ children }: { children: ReactNode }) {
   const limites = useMemo<Limites>(
     () => ({
       maxHoras: valores.duracion_max_horas ?? POR_DEFECTO.maxHoras,
+      llegadaModo: valores.llegada_modo ?? POR_DEFECTO.llegadaModo,
       maxExtension: valores.extension_max_horas ?? POR_DEFECTO.maxExtension,
       maxTotal: valores.duracion_max_total_horas ?? POR_DEFECTO.maxTotal,
       extensionesMax: valores.extensiones_max ?? POR_DEFECTO.extensionesMax,

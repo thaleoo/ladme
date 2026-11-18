@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { listarEquipos, listarOcupacion } from '../lib/api'
+import { listarEquipos, listarOcupacion, miEspera, salirEspera, unirseEspera, type Espera } from '../lib/api'
 import { etiquetaSO, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { dia as textoDia, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
 import { esStaff, useAuth } from '../context/AuthContext'
@@ -102,6 +102,10 @@ export default function Disponibilidad() {
   const [filtro, setFiltro] = useState<Filtro>('TODOS')
   const [categoria, setCategoria] = useState('TODAS')
   const [so, setSo] = useState('TODOS')
+  const [programa, setPrograma] = useState('TODOS')
+  const [espera, setEspera] = useState<Espera | null>(null)
+  const [esperaOcupado, setEsperaOcupado] = useState(false)
+  useEffect(() => { void miEspera().then(setEspera) }, [])
   const [texto, setTexto] = useState('')
   const [abierto, setAbierto] = useState<string | null>(null)
   const [vista, setVista] = useState<'cuadricula' | 'linea'>(() =>
@@ -184,6 +188,8 @@ export default function Disponibilidad() {
 
   const categorias = useMemo(() => [...new Set(equipos.map((e) => e.categoria))].sort(), [equipos])
   const sistemas = useMemo(() => [...new Set(equipos.map((e) => e.sistema_operativo).filter(Boolean) as string[])].sort(), [equipos])
+  // Programas que Faro detectó en los equipos (R, Python, SPSS…), para filtrar.
+  const programas = useMemo(() => [...new Set(equipos.flatMap((e) => e.software ?? []))].sort((a, b) => a.localeCompare(b, 'es')), [equipos])
   const cuenta = (s: Situacion) => celdas.filter((c) => c.situacion === s).length
   const libres = cuenta('libre')
   const ocupados = celdas.length - libres
@@ -191,10 +197,11 @@ export default function Disponibilidad() {
   const visibles = celdas.filter((c) => {
     if (categoria !== 'TODAS' && c.equipo.categoria !== categoria) return false
     if (so !== 'TODOS' && c.equipo.sistema_operativo !== so) return false
+    if (programa !== 'TODOS' && !(c.equipo.software ?? []).includes(programa)) return false
     if (filtro === 'LIBRES' && c.situacion !== 'libre') return false
     if (filtro === 'OCUPADOS' && c.situacion === 'libre') return false
     const q = texto.trim().toLowerCase()
-    return !q || [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo, c.equipo.sistema_operativo, c.equipo.so_version].some((v) => v?.toLowerCase().includes(q))
+    return !q || [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo, c.equipo.sistema_operativo, c.equipo.so_version, ...(c.equipo.software ?? [])].some((v) => v?.toLowerCase().includes(q))
   })
   const grupos = (categoria === 'TODAS' ? categorias : [categoria])
     .map((cat) => ({ cat, lista: visibles.filter((c) => c.equipo.categoria === cat) }))
@@ -292,6 +299,45 @@ export default function Disponibilidad() {
           ))}
         </div>
       )}
+
+      {programas.length > 0 && (
+        <div className="field" style={{ maxWidth: 320 }}>
+          <label className="field__label" htmlFor="filtro-programa">Programa instalado</label>
+          <select id="filtro-programa" value={programa} onChange={(e) => setPrograma(e.target.value)}>
+            <option value="TODOS">Cualquier programa</option>
+            {programas.map((p) => (
+              <option key={p} value={p}>{p} ({equipos.filter((e) => (e.software ?? []).includes(p)).length})</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {!staff && (espera ? (
+        <div className="alert info">
+          <Icon nombre="campana" />
+          <div className="alert__body">
+            Está en la lista de espera{espera.software ? ` para un equipo con ${espera.software}` : ''}. Le avisaremos en cuanto haya uno libre.{' '}
+            <button className="link-btn" type="button" disabled={esperaOcupado}
+                    onClick={() => { setEsperaOcupado(true); void salirEspera().then(() => setEspera(null)).finally(() => setEsperaOcupado(false)) }}>
+              Salir de la lista
+            </button>
+          </div>
+        </div>
+      ) : libres === 0 || (programa !== 'TODOS' && visibles.every((c) => c.situacion !== 'libre')) ? (
+        <div className="alert warn">
+          <Icon nombre="reloj" />
+          <div className="alert__body">
+            No hay equipos libres{programa !== 'TODOS' ? ` con ${programa}` : ''} en este momento.{' '}
+            <button className="link-btn" type="button" disabled={esperaOcupado}
+                    onClick={() => {
+                      setEsperaOcupado(true)
+                      void unirseEspera(programa !== 'TODOS' ? programa : null).then(() => miEspera()).then(setEspera).finally(() => setEsperaOcupado(false))
+                    }}>
+              Avísenme cuando haya uno
+            </button>
+          </div>
+        </div>
+      ) : null)}
 
       {categorias.length > 1 && (
         <Pestanas
