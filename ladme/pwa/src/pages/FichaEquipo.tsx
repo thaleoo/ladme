@@ -7,7 +7,7 @@ import {
 import { esStaff, useAuth } from '../context/AuthContext'
 import { ACTIVIDADES, perfilCompleto, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
-import { dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
+import { conPunto, dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
@@ -250,7 +250,7 @@ export default function FichaEquipo() {
               </h3>
               <p className="small muted" style={{ margin: '2px 0 0' }}>
                 {rapidas.length
-                  ? `Resérvelo desde ya, sin llenar el formulario.${siguiente ? ` Libre hasta ${fecha(siguiente.inicio)}.` : ''}`
+                  ? `Resérvelo desde ya, sin llenar el formulario.${siguiente ? ` ${conPunto(`Libre hasta ${fecha(siguiente.inicio)}`)}` : ''}`
                   : `Hay otra reserva a las ${hora(siguiente!.inicio)}: no alcanza para una reserva rápida.`}
               </p>
             </div>
@@ -307,7 +307,7 @@ export default function FichaEquipo() {
         <div className="alert warn">
           <Icon nombre="llave" />
           <div className="alert__body">
-            <strong>Equipo bloqueado hasta {fecha(enCurso.fin)}.</strong> {enCurso.motivo}
+            <strong>{conPunto(`Equipo bloqueado hasta ${fecha(enCurso.fin)}`)}</strong> {enCurso.motivo}
           </div>
         </div>
       )}

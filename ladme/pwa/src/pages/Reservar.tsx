@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { crearReserva, equiposDisponibles, listarEquipos, solicitarExcepcion } from '../lib/api'
 import { ACTIVIDADES, perfilCompleto, type Equipo } from '../lib/types'
-import { aIso, aInputLocal, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
+import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
@@ -288,7 +288,7 @@ export default function Reservar() {
             </div>
             {fin && !Number.isNaN(duracion) && duracion > 0 && (
               <p className="help" style={{ marginBottom: 0 }}>
-                Termina el {fecha(aIso(fin))}.
+                {conPunto(`Termina el ${fecha(aIso(fin))}`)}
               </p>
             )}
           </div>
