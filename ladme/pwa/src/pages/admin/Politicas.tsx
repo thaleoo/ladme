@@ -16,6 +16,7 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
   reservas_activas_max: { titulo: 'Reservas vigentes por persona (0 = sin límite)', unidad: 'reservas', min: 0, max: 20 },
   excepcion_max_horas: { titulo: 'Máximo que se puede pedir en una solicitud de reserva larga', unidad: 'horas', min: 1, max: 2160 },
   contacto_espera_min: { titulo: 'Espera entre mensajes al titular de un equipo', unidad: 'minutos', min: 1, max: 240 },
+  reserva_max_absoluta_horas: { titulo: 'Tope absoluto de cualquier reserva (también para administradores)', unidad: 'horas', min: 24, max: 2160 },
   recordatorio_fin_min: { titulo: 'Anticipación del recordatorio de fin', unidad: 'minutos', min: 10, max: 720 }
 }
 

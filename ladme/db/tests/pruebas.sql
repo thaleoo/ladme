@@ -177,7 +177,15 @@ begin
   perform registrar_error('otro', 'tipo inválido');
   perform pg_temp.ok((select count(*) from errores_app) = 20, 'errores registrados con límite de 20 cada 10 minutos');
 
-  -- Estadísticas.
+  -- 0005: tope absoluto de 30 días, incluso para el administrador.
+  perform pg_temp.como('admin@unal.edu.co');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-13', %L, %L, 'Investigación')$q$, t0, t0 + interval '721 hours'), 'tope absoluto');
+  r := crear_reserva('UNAL-13', t0, t0 + interval '700 hours', 'Investigación');
+  perform pg_temp.falla(format($q$select extender_reserva(%L, %L)$q$, r.id, t0 + interval '730 hours'), 'tope absoluto');
+  perform pg_temp.ok((extender_reserva(r.id, t0 + interval '720 hours')).fin = t0 + interval '720 hours', 'el administrador puede llegar justo al tope');
+  update equipos set sistema_operativo = 'Linux', so_version = 'Ubuntu 24.04 LTS' where codigo = 'UNAL-14';
+  perform pg_temp.falla($q$update equipos set sistema_operativo = 'DOS' where codigo = 'UNAL-14'$q$, 'check');
+
   perform pg_temp.como('lab@unal.edu.co');
   j := estadisticas(now() - interval '30 days', now() + interval '60 days');
   perform pg_temp.ok((j ->> 'total')::int >= 5 and (j ->> 'canceladas')::int >= 1 and jsonb_array_length(j -> 'por_programa') >= 2, 'estadísticas agregadas (incluye lo importado)');

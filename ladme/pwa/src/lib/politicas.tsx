@@ -11,6 +11,8 @@ export interface Limites {
   anticipacionDias: number
   toleranciaMin: number
   excepcionMaxHoras: number
+  /** Ninguna reserva lo supera, ni siquiera la de un administrador. */
+  maxAbsolutoHoras: number
   recargar: () => Promise<void>
 }
 
@@ -22,6 +24,7 @@ const POR_DEFECTO: Limites = {
   anticipacionDias: 30,
   toleranciaMin: 30,
   excepcionMaxHoras: 720,
+  maxAbsolutoHoras: 720,
   recargar: async () => {}
 }
 
@@ -52,6 +55,7 @@ export function PoliticasProvider({ children }: { children: ReactNode }) {
       anticipacionDias: valores.anticipacion_max_dias ?? POR_DEFECTO.anticipacionDias,
       toleranciaMin: valores.tolerancia_llegada_min ?? POR_DEFECTO.toleranciaMin,
       excepcionMaxHoras: valores.excepcion_max_horas ?? POR_DEFECTO.excepcionMaxHoras,
+      maxAbsolutoHoras: valores.reserva_max_absoluta_horas ?? POR_DEFECTO.maxAbsolutoHoras,
       recargar
     }),
     [valores, recargar]

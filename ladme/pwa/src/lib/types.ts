@@ -29,6 +29,8 @@ export interface Equipo {
   serial: string | null
   nfc_uid: string | null
   fecha_adquisicion: string | null
+  sistema_operativo: 'Windows' | 'Linux' | 'macOS' | 'Otro' | null
+  so_version: string | null
 }
 
 export interface Reserva {
@@ -200,4 +202,26 @@ export interface EstadisticasSoporte {
   valoradas: number
   con_problemas: number
   reportes_por_equipo: Conteo[]
+}
+
+export const SISTEMAS = ['Windows', 'Linux', 'macOS', 'Otro'] as const
+
+/** «Windows 11 Pro», «Linux · Ubuntu 24.04 LTS» o null si no está registrado. */
+export function textoSO(e: Pick<Equipo, 'sistema_operativo' | 'so_version'>): string | null {
+  if (!e.sistema_operativo && !e.so_version) return null
+  const v = e.so_version?.trim()
+  if (!v) return e.sistema_operativo
+  if (e.sistema_operativo && v.toLowerCase().startsWith(e.sistema_operativo.toLowerCase())) return v
+  return e.sistema_operativo === 'Linux' ? `Linux · ${v}` : [e.sistema_operativo, v].filter(Boolean).join(' ')
+}
+
+/** Etiqueta corta para la cuadrícula: «Win 11», «Ubuntu 24.04», «Linux». */
+export function etiquetaSO(e: Pick<Equipo, 'sistema_operativo' | 'so_version'>): string | null {
+  const v = e.so_version?.trim() ?? ''
+  if (e.sistema_operativo === 'Windows') {
+    const n = v.match(/\b(7|8\.1|8|10|11|12)\b/)
+    return n ? `Win ${n[1]}` : 'Windows'
+  }
+  if (e.sistema_operativo === 'Linux') return v ? v.split(/\s+/).slice(0, 2).join(' ').replace(/LTS$/i, '').trim() : 'Linux'
+  return e.sistema_operativo ?? null
 }

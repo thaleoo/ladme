@@ -3,6 +3,7 @@ import { cancelarReserva, extenderReserva, liberarReserva, registrarLlegada } fr
 import type { Reserva } from '../../lib/types'
 import { aInputLocal, fecha, rango } from '../../lib/format'
 import Icon from '../../components/Icon'
+import { useLimites } from '../../lib/politicas'
 import Modal from '../../components/Modal'
 import { useToast } from '../../components/Toast'
 
@@ -21,6 +22,8 @@ export default function AccionesReserva({
   alTerminar: () => void
 }) {
   const toast = useToast()
+  const lim = useLimites()
+  const [confirma, setConfirma] = useState(false)
   const [motivo, setMotivo] = useState('')
   const [nuevoFin, setNuevoFin] = useState('')
   const [ocupado, setOcupado] = useState(false)
@@ -36,6 +39,7 @@ export default function AccionesReserva({
           : 'Registrar llegada'
 
   function cerrar() {
+    setConfirma(false)
     setMotivo('')
     setNuevoFin('')
     setError(null)
@@ -51,6 +55,13 @@ export default function AccionesReserva({
     const fin = accion.tipo === 'extender' ? new Date(nuevoFin || aInputLocal(new Date(new Date(r.fin).getTime() + 86400000))) : null
     if (fin && (Number.isNaN(fin.getTime()) || fin <= new Date(r.fin))) {
       return setError('El nuevo fin debe ser posterior al actual.')
+    }
+    const totalH = fin ? (fin.getTime() - new Date(r.inicio).getTime()) / 3600000 : 0
+    if (fin && totalH > lim.maxAbsolutoHoras) {
+      return setError(`Ninguna reserva puede superar ${Math.round(lim.maxAbsolutoHoras / 24)} días (tope absoluto).`)
+    }
+    if (fin && admin && totalH > lim.maxTotal && !confirma) {
+      return setError(`Supera el límite de ${lim.maxTotal} h. Marque la confirmación para continuar como administrador.`)
     }
     setOcupado(true)
     try {
@@ -118,9 +129,20 @@ export default function AccionesReserva({
           />
           <p className="help">
             {admin
-              ? 'Como administrador puede superar los límites; queda registrado en el historial.'
+              ? `Como administrador puede superar los límites (hasta ${Math.round(lim.maxAbsolutoHoras / 24)} días en total); queda registrado en el historial.`
               : 'Se aplican los mismos límites que al titular. Solo un administrador puede superarlos.'}
           </p>
+          {admin &&
+            (new Date(nuevoFin || aInputLocal(new Date(new Date(r.fin).getTime() + 86400000))).getTime() - new Date(r.inicio).getTime()) / 3600000 >
+              lim.maxTotal && (
+              <label className="check-row" style={{ marginTop: 'var(--s2)' }}>
+                <input type="checkbox" checked={confirma} onChange={(e) => setConfirma(e.target.checked)} />
+                <span>
+                  <strong>Confirmo que supero el límite de {lim.maxTotal} h</strong>
+                  El equipo quedará ocupado para todos hasta la nueva fecha.
+                </span>
+              </label>
+            )}
         </div>
       )}
       {error && (

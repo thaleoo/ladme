@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listarEquipos, listarOcupacion } from '../lib/api'
-import type { Equipo, Ocupacion } from '../lib/types'
+import { etiquetaSO, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { dia as textoDia, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
 import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
@@ -101,6 +101,7 @@ export default function Disponibilidad() {
   const [error, setError] = useState<string | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('TODOS')
   const [categoria, setCategoria] = useState('TODAS')
+  const [so, setSo] = useState('TODOS')
   const [texto, setTexto] = useState('')
   const [abierto, setAbierto] = useState<string | null>(null)
   const [vista, setVista] = useState<'cuadricula' | 'linea'>(() =>
@@ -182,16 +183,18 @@ export default function Disponibilidad() {
   }, [equipos, porEquipo])
 
   const categorias = useMemo(() => [...new Set(equipos.map((e) => e.categoria))].sort(), [equipos])
+  const sistemas = useMemo(() => [...new Set(equipos.map((e) => e.sistema_operativo).filter(Boolean) as string[])].sort(), [equipos])
   const cuenta = (s: Situacion) => celdas.filter((c) => c.situacion === s).length
   const libres = cuenta('libre')
   const ocupados = celdas.length - libres
 
   const visibles = celdas.filter((c) => {
     if (categoria !== 'TODAS' && c.equipo.categoria !== categoria) return false
+    if (so !== 'TODOS' && c.equipo.sistema_operativo !== so) return false
     if (filtro === 'LIBRES' && c.situacion !== 'libre') return false
     if (filtro === 'OCUPADOS' && c.situacion === 'libre') return false
     const q = texto.trim().toLowerCase()
-    return !q || [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo].some((v) => v?.toLowerCase().includes(q))
+    return !q || [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo, c.equipo.sistema_operativo, c.equipo.so_version].some((v) => v?.toLowerCase().includes(q))
   })
   const grupos = (categoria === 'TODAS' ? categorias : [categoria])
     .map((cat) => ({ cat, lista: visibles.filter((c) => c.equipo.categoria === cat) }))
@@ -273,11 +276,22 @@ export default function Disponibilidad() {
               type="search"
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              placeholder="Buscar: UNAL-05, GPU…"
+              placeholder="Buscar: UNAL-05, Ubuntu…"
             />
           </div>
         )}
       </section>
+
+      {sistemas.length > 1 && (
+        <div className="chips" role="group" aria-label="Sistema operativo">
+          {['TODOS', ...sistemas].map((s) => (
+            <button key={s} type="button" className="chip" aria-pressed={so === s} onClick={() => setSo(s)}>
+              {s === 'TODOS' ? 'Cualquier sistema' : s}
+              <span className="chip__n">{s === 'TODOS' ? equipos.length : equipos.filter((e) => e.sistema_operativo === s).length}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {categorias.length > 1 && (
         <Pestanas
@@ -325,6 +339,7 @@ export default function Disponibilidad() {
                   aria-label={`${c.equipo.codigo}: ${TEXTO[c.situacion]} ${c.situacion === 'libre' && !c.proxima ? '' : c.detalle}`}
                 >
                   <span className="mosaico__codigo">{c.equipo.codigo}</span>
+                  {etiquetaSO(c.equipo) && <span className="mosaico__so">{etiquetaSO(c.equipo)}</span>}
                   <span className="mosaico__estado">
                     <span className="mosaico__punto" aria-hidden="true" />
                     {TEXTO[c.situacion]}
@@ -342,7 +357,7 @@ export default function Disponibilidad() {
       <Modal
         abierto={!!sel}
         titulo={sel ? sel.equipo.codigo : ''}
-        descripcion={sel ? [sel.equipo.nombre, sel.equipo.marca, sel.equipo.ubicacion].filter(Boolean).join(' · ') : undefined}
+        descripcion={sel ? [textoSO(sel.equipo), sel.equipo.nombre, sel.equipo.marca, sel.equipo.ubicacion].filter(Boolean).join(' · ') : undefined}
         onCerrar={() => setAbierto(null)}
         pie={
           sel && (

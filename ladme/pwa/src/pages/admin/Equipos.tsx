@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { guardarEquipo, listarEquipos } from '../../lib/api'
-import type { Equipo } from '../../lib/types'
+import { SISTEMAS, textoSO, type Equipo } from '../../lib/types'
 import { Cargando } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
 import Modal from '../../components/Modal'
@@ -17,6 +17,8 @@ interface Borrador {
   codigo: string
   nombre: string
   categoria: string
+  sistema_operativo: string
+  so_version: string
   marca: string
   modelo: string
   ubicacion: string
@@ -35,6 +37,8 @@ function aBorrador(e?: Equipo): Borrador {
     codigo: e?.codigo ?? '',
     nombre: e?.nombre ?? '',
     categoria: e?.categoria ?? 'Estación de trabajo',
+    sistema_operativo: e?.sistema_operativo ?? '',
+    so_version: e?.so_version ?? '',
     marca: e?.marca ?? '',
     modelo: e?.modelo ?? '',
     ubicacion: e?.ubicacion ?? 'Sala LADME',
@@ -93,6 +97,8 @@ export default function Equipos() {
         codigo,
         nombre: b.nombre.trim(),
         categoria: b.categoria.trim(),
+        sistema_operativo: (b.sistema_operativo || null) as Equipo['sistema_operativo'],
+        so_version: b.so_version.trim() || null,
         marca: b.marca.trim() || null,
         modelo: b.modelo.trim() || null,
         ubicacion: b.ubicacion.trim() || null,
@@ -161,7 +167,7 @@ export default function Equipos() {
                     {e.archivado && <span className="badge gray">Archivado</span>}
                   </div>
                   <p className="small muted" style={{ margin: '2px 0 0' }}>
-                    {[e.categoria, e.nombre, e.marca, e.ubicacion].filter(Boolean).join(' · ')}
+                    {[e.categoria, textoSO(e) ?? 'Sistema sin registrar', e.nombre, e.ubicacion].filter(Boolean).join(' · ')}
                   </p>
                   {(e.serial || e.placa_oficial) && (
                     <p className="tiny muted" style={{ margin: '2px 0 0' }}>
@@ -231,6 +237,36 @@ export default function Equipos() {
                   ))}
                 </datalist>
                 <p className="help">El inicio agrupa los recursos por categoría.</p>
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor="eq-so">
+                  Sistema operativo
+                </label>
+                <select id="eq-so" value={b.sistema_operativo} onChange={(e) => setB({ ...b, sistema_operativo: e.target.value })}>
+                  <option value="">Sin registrar</option>
+                  {SISTEMAS.map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor="eq-sov">
+                  Versión o distribución
+                </label>
+                <input
+                  id="eq-sov"
+                  list="eq-versiones"
+                  value={b.so_version}
+                  maxLength={60}
+                  onChange={(e) => setB({ ...b, so_version: e.target.value })}
+                  placeholder={b.sistema_operativo === 'Linux' ? 'Ubuntu 24.04 LTS' : 'Windows 11 Pro'}
+                />
+                <datalist id="eq-versiones">
+                  {['Windows 10 Pro', 'Windows 11 Pro', 'Ubuntu 22.04 LTS', 'Ubuntu 24.04 LTS', 'Debian 12', 'Fedora 41', 'Linux Mint 22'].map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+                </datalist>
+                <p className="help">Los usuarios la ven antes de reservar.</p>
               </div>
               {campo('marca', 'Marca')}
               {campo('modelo', 'Modelo')}

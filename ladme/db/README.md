@@ -77,3 +77,9 @@ cola de correo con equipo y horario para la plantilla nueva.
 `migrations/0004_errores_app.sql`, después de 0003: tabla `errores_app` y la función
 `registrar_error` (con límites por persona y por hora) para ver en Administración los fallos que
 ocurren en los dispositivos de los usuarios.
+
+## Migración 0005 — sistema operativo y tope absoluto
+
+`migrations/0005_so_tope_absoluto.sql`, después de 0004: columnas `sistema_operativo` y `so_version` en
+`equipos`, y un tope absoluto de 30 días (política `reserva_max_absoluta_horas`) que aplica incluso a los
+administradores. No afecta reservas importadas.
