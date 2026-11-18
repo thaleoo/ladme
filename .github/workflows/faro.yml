@@ -82,7 +82,15 @@ jobs:
       - name: Compilar
         run: |
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            npx tauri build --bundles ${{ matrix.paquetes }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+            if [ -z "$FARO_UPDATER_PUBKEY" ]; then
+              echo "::error::Falta la variable FARO_UPDATER_PUBKEY (contenido de faro.key.pub)."; exit 1
+            fi
+            # Con firma, Tauri exige la sección plugins.updater; se arma aquí con la clave pública.
+            node -e 'require("fs").writeFileSync("actualizador.conf.json", JSON.stringify({
+              bundle: { createUpdaterArtifacts: true },
+              plugins: { updater: { pubkey: process.env.FARO_UPDATER_PUBKEY.trim(), endpoints: [process.env.FARO_UPDATER_URL] } }
+            }))'
+            npx tauri build --bundles ${{ matrix.paquetes }} --config actualizador.conf.json
           else
             echo "::warning::Sin TAURI_SIGNING_PRIVATE_KEY: los instaladores no traen firma y Faro no se actualizará solo."
             npx tauri build --bundles ${{ matrix.paquetes }}
