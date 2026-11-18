@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { crearReserva, equiposDisponibles, listarEquipos, solicitarExcepcion } from '../lib/api'
-import { ACTIVIDADES, perfilCompleto, type Equipo } from '../lib/types'
+import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo } from '../lib/types'
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { esAdmin, useAuth } from '../context/AuthContext'
@@ -79,11 +79,18 @@ export default function Reservar() {
 
   // Más de lo permitido: en vez de bloquear, se ofrece pedir una excepción.
   const esLarga = !admin && Number.isFinite(duracion) && duracion > lim.maxHoras
+  // El administrador puede superar el límite, pero debe confirmarlo explícitamente.
+  const adminExcede = admin && Number.isFinite(duracion) && duracion > lim.maxHoras
+  const [confirmaExceso, setConfirmaExceso] = useState(false)
+  useEffect(() => setConfirmaExceso(false), [inicio, fin])
 
   const problema = useMemo(() => {
     if (!inicio || !fin) return 'Indique el inicio y el fin de la reserva.'
     if (Number.isNaN(duracion) || duracion <= 0) return 'El fin debe ser posterior al inicio.'
     if (new Date(inicio).getTime() < Date.now() - 5 * 60000) return 'La hora de inicio no puede estar en el pasado.'
+    if (duracion > lim.maxAbsolutoHoras) {
+      return `Ninguna reserva puede superar ${Math.round(lim.maxAbsolutoHoras / 24)} días (tope absoluto del laboratorio).`
+    }
     if (esLarga && duracion > lim.excepcionMaxHoras) {
       return `Ni siquiera con solicitud se puede superar ${lim.excepcionMaxHoras} h (${Math.round(lim.excepcionMaxHoras / 24)} días).`
     }
@@ -203,14 +210,14 @@ export default function Reservar() {
                       <optgroup key={c} label={c}>
                         {equipos.filter((e) => e.categoria === c).map((e) => (
                           <option key={e.id} value={e.codigo}>
-                            {e.codigo} · {e.nombre}
+                            {e.codigo} · {textoSO(e) ?? e.nombre}
                           </option>
                         ))}
                       </optgroup>
                     ))
                   : equipos.map((e) => (
                       <option key={e.id} value={e.codigo}>
-                        {e.codigo} · {e.nombre}
+                        {e.codigo} · {textoSO(e) ?? e.nombre}
                       </option>
                     ))}
               </select>
@@ -218,6 +225,7 @@ export default function Reservar() {
                 <p className="help">
                   {[equipoActual.marca, equipoActual.modelo].filter(Boolean).join(' ')} ·{' '}
                   {equipoActual.ubicacion || 'LADME'}
+                  {textoSO(equipoActual) ? ` · ${textoSO(equipoActual)}` : ''}
                 </p>
               )}
             </div>
@@ -272,7 +280,7 @@ export default function Reservar() {
 
           <div>
             <div className="row between" style={{ marginBottom: 6 }}>
-              <span className={`badge ${esLarga ? 'warn' : 'ok'}`}>
+              <span className={`badge ${esLarga || adminExcede ? 'warn' : 'ok'}`}>
                 <Icon nombre="reloj" /> {Number.isFinite(duracion) ? `${duracion.toFixed(1)} h` : '—'}
               </span>
               <span className="tiny muted">
@@ -297,6 +305,24 @@ export default function Reservar() {
             <div className="alert warn">
               <Icon nombre="alerta" />
               <div className="alert__body">{problema}</div>
+            </div>
+          )}
+
+          {adminExcede && !problema && (
+            <div className="alert warn">
+              <Icon nombre="alerta" />
+              <div className="alert__body">
+                <strong>Supera el límite de {lim.maxHoras} h.</strong> Como administrador puede reservar hasta{' '}
+                {Math.round(lim.maxAbsolutoHoras / 24)} días, pero revise que las fechas sean las correctas: el equipo
+                quedará ocupado para todos durante {Math.round(duracion / 24)} días.
+                <label className="check-row" style={{ marginTop: 'var(--s3)' }}>
+                  <input type="checkbox" checked={confirmaExceso} onChange={(e) => setConfirmaExceso(e.target.checked)} />
+                  <span>
+                    <strong>Confirmo que supero el límite como administrador</strong>
+                    Termina el {fecha(aIso(fin))}
+                  </span>
+                </label>
+              </div>
             </div>
           )}
 
@@ -363,7 +389,7 @@ export default function Reservar() {
           )}
 
           <div className="row" style={{ gap: 'var(--s2)' }}>
-            <button type="submit" disabled={enviando || cargando || !!problema}>
+            <button type="submit" disabled={enviando || cargando || !!problema || (adminExcede && !confirmaExceso)}>
               {enviando ? (
                 <>
                   <span className="spinner" aria-hidden="true" /> Enviando…
@@ -435,6 +461,12 @@ export default function Reservar() {
                 <span className="muted">Tope sin solicitud</span>
                 <strong className="num">{lim.maxTotal} h</strong>
               </div>
+              {admin && (
+                <div className="row between small">
+                  <span className="muted">Tope para administradores</span>
+                  <strong className="num">{Math.round(lim.maxAbsolutoHoras / 24)} días</strong>
+                </div>
+              )}
               <div className="row between small">
                 <span className="muted">Con solicitud aprobada</span>
                 <strong className="num">hasta {Math.round(lim.excepcionMaxHoras / 24)} días</strong>

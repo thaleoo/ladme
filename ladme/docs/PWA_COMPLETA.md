@@ -157,6 +157,23 @@ Qué cambia:
   el icono, copia sin conexión de la disponibilidad, Mis reservas y el pase, y deslizar para actualizar
   en la app instalada.
 
+## 10. Cuarta tanda: sistema operativo, tope de 30 días y copias de seguridad (migración 0005)
+
+1. SQL Editor → ejecute `ladme/db/migrations/0005_so_tope_absoluto.sql` (después de 0004).
+2. Vuelva a pegar `ladme/appsscript/Código.gs` en Apps Script, ejecute `respaldarAhora` una vez
+   (pedirá permiso para usar Google Drive) y luego `instalarDisparadores`.
+3. En Administración → Equipos, registre el **sistema operativo** y la **versión o distribución** de cada
+   equipo (p. ej. «Windows 11 Pro», «Ubuntu 24.04 LTS»). Se muestra en el inicio, en la ficha y al
+   reservar, y permite filtrar por sistema.
+
+- **Tope absoluto**: ninguna reserva puede durar más de 30 días, ni la de un administrador. Cuando un
+  administrador supera el límite normal, la app le pide confirmarlo antes de reservar o extender. El
+  tope se cambia en Administración → Políticas.
+- **Copias de seguridad**: cada domingo a las 3 a. m. se guardan todas las tablas como CSV en la carpeta
+  de Drive «LADME · Copias de Supabase» (se conservan 12 semanas). Contiene datos personales: no la
+  comparta. Si una copia falla, llega un correo a labdatos_paz. Pruebe una restauración una vez
+  (Supabase → Table Editor → Insert → Import data from CSV) antes de necesitarla.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

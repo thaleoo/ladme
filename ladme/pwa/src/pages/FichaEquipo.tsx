@@ -5,7 +5,7 @@ import {
   type EstadoMantenimientoEquipo
 } from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { ACTIVIDADES, perfilCompleto, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
+import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
 import { conPunto, dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
@@ -183,6 +183,14 @@ export default function FichaEquipo() {
             {equipo.nombre}
             {equipo.marca ? ` · ${equipo.marca}` : ''} {equipo.modelo ?? ''}
             {equipo.ubicacion ? ` · ${equipo.ubicacion}` : ''}
+            {textoSO(equipo) && (
+              <>
+                <br />
+                <span className="badge outline" style={{ marginTop: 6 }}>
+                  <Icon nombre="monitor" width={13} height={13} /> {textoSO(equipo)}
+                </span>
+              </>
+            )}
           </>
         }
         volver={{ a: '/', texto: 'Disponibilidad' }}

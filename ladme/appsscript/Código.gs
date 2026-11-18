@@ -2180,14 +2180,16 @@ function enviarRecordatorioFin_(r) {
  * Es idempotente: borra los disparadores previos de estas mismas funciones.
  */
 function instalarDisparadores() {
-  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_"];
+  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_", "respaldarSupabase_"];
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (handlers.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger("revisarMantenimientos_").timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger("recordarFinReservas_").timeBased().everyMinutes(30).create();
   instalarWorkerCorreo_();
-  return { ok: true, mensaje: "Disparadores instalados: revisión diaria de mantenimientos (07:00) y recordatorios de fin cada 30 min." };
+  // Copia de seguridad semanal de Supabase: domingos a las 3 a. m.
+  ScriptApp.newTrigger("respaldarSupabase_").timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
+  return { ok: true, mensaje: "Disparadores instalados: mantenimientos (07:00), recordatorios (30 min), correo de la PWA (5 min) y copia de seguridad (domingos 03:00)." };
 }
 
 /** Diagnóstico de disparadores (para el editor). */
@@ -3068,4 +3070,119 @@ function probarConexionSupabase() {
   var n = (supabaseRpc_("correos_pendientes", { p_limite: 100 }) || []).length;
   Logger.log("Conexión correcta. Correos pendientes en la cola: " + n);
   return n;
+}
+
+
+/* ============================================================================
+ * COPIA DE SEGURIDAD SEMANAL DE SUPABASE → GOOGLE DRIVE
+ * ----------------------------------------------------------------------------
+ * El plan gratuito de Supabase no guarda copias automáticas. Cada domingo esta
+ * función descarga todas las tablas (con la clave secreta, que ignora RLS) y
+ * las guarda como CSV en una carpeta de Drive con la fecha:
+ *
+ *   LADME · Copias de Supabase / 2026-11-22 / reservas.csv, perfiles.csv, …
+ *
+ * Se conservan las últimas 12 semanas; las más viejas van a la papelera.
+ * La carpeta queda en el Drive de la cuenta que instaló los disparadores y
+ * contiene datos personales: NO la comparta con nadie fuera del equipo.
+ *
+ * Restaurar una tabla: Supabase → Table Editor → la tabla → Insert →
+ * «Import data from CSV». Pruébelo una vez antes de necesitarlo.
+ *
+ * Propiedades opcionales:
+ *   RESPALDO_CARPETA_ID   id de una carpeta propia (si no, se crea una).
+ * ========================================================================== */
+
+var TABLAS_RESPALDO = [
+  "perfiles", "equipos", "politicas", "reservas", "reservas_historial", "reservas_importadas",
+  "mantenimientos", "solicitudes_excepcion", "reportes", "contactos", "alertas_liberacion",
+  "cola_notificaciones", "push_suscripciones", "errores_app"
+];
+var SEMANAS_RESPALDO = 12;
+
+function carpetaRespaldos_() {
+  var id = prop_("RESPALDO_CARPETA_ID");
+  if (id) return DriveApp.getFolderById(id);
+  var nombre = "LADME · Copias de Supabase";
+  var it = DriveApp.getFoldersByName(nombre);
+  var carpeta = it.hasNext() ? it.next() : DriveApp.createFolder(nombre);
+  PropertiesService.getScriptProperties().setProperty("RESPALDO_CARPETA_ID", carpeta.getId());
+  return carpeta;
+}
+
+/** Descarga una tabla completa de Supabase, de 1000 en 1000 filas. */
+function leerTablaSupabase_(tabla) {
+  var base = prop_("SUPABASE_URL").replace(/\/+$/, ""), clave = prop_("SUPABASE_SECRET_KEY");
+  var filas = [], desde = 0, tam = 1000;
+  while (true) {
+    var r = UrlFetchApp.fetch(base + "/rest/v1/" + tabla + "?select=*", {
+      headers: { apikey: clave, Authorization: "Bearer " + clave, Range: desde + "-" + (desde + tam - 1), "Range-Unit": "items" },
+      muteHttpExceptions: true
+    });
+    var codigo = r.getResponseCode();
+    if (codigo === 404) return null;                       // la tabla no existe (migración no aplicada)
+    if (codigo >= 300) throw new Error(tabla + ": Supabase respondió " + codigo + " " + r.getContentText().slice(0, 200));
+    var lote = JSON.parse(r.getContentText() || "[]");
+    filas = filas.concat(lote);
+    if (lote.length < tam) break;
+    desde += tam;
+  }
+  return filas;
+}
+
+function aCSV_(filas) {
+  if (!filas.length) return "";
+  var columnas = [];
+  filas.forEach(function (f) { Object.keys(f).forEach(function (k) { if (columnas.indexOf(k) === -1) columnas.push(k); }); });
+  var celda = function (v) {
+    if (v === null || v === undefined) return "";
+    var t = typeof v === "object" ? JSON.stringify(v) : String(v);
+    return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  return [columnas.join(",")].concat(filas.map(function (f) {
+    return columnas.map(function (c) { return celda(f[c]); }).join(",");
+  })).join("\n");
+}
+
+function respaldarSupabase_() {
+  if (!prop_("SUPABASE_URL") || !prop_("SUPABASE_SECRET_KEY")) return;
+  var raiz = carpetaRespaldos_();
+  var nombre = Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd");
+  var previas = raiz.getFoldersByName(nombre);
+  while (previas.hasNext()) previas.next().setTrashed(true);   // repetir el mismo día reemplaza la copia
+  var carpeta = raiz.createFolder(nombre);
+  var resumen = [];
+  TABLAS_RESPALDO.forEach(function (tabla) {
+    try {
+      var filas = leerTablaSupabase_(tabla);
+      if (filas === null) { resumen.push(tabla + ": no existe"); return; }
+      carpeta.createFile(tabla + ".csv", aCSV_(filas), MimeType.CSV);
+      resumen.push(tabla + ": " + filas.length + " filas");
+    } catch (err) {
+      resumen.push(tabla + ": ERROR " + err);
+    }
+  });
+  carpeta.createFile("LEAME.txt",
+    "Copia de seguridad de LADME (Supabase) del " + nombre + ".\n\n" + resumen.join("\n") +
+    "\n\nContiene datos personales. Restaurar: Supabase → Table Editor → tabla → Insert → Import data from CSV.",
+    MimeType.PLAIN_TEXT);
+
+  // Conserva solo las últimas semanas.
+  var todas = [], it = raiz.getFolders();
+  while (it.hasNext()) { var f = it.next(); if (/^\d{4}-\d{2}-\d{2}$/.test(f.getName())) todas.push(f); }
+  todas.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });
+  todas.slice(SEMANAS_RESPALDO).forEach(function (f) { f.setTrashed(true); });
+
+  if (resumen.some(function (l) { return l.indexOf("ERROR") !== -1; })) {
+    MailApp.sendEmail(CUENTA_REMITENTE, "LADME · La copia de seguridad tuvo errores", resumen.join("\n"));
+  }
+  Logger.log(resumen.join("\n"));
+  return resumen;
+}
+
+/** Ejecutar desde el editor para hacer una copia ahora mismo y comprobar que funciona. */
+function respaldarAhora() {
+  var r = respaldarSupabase_();
+  Logger.log("Carpeta: " + carpetaRespaldos_().getUrl());
+  return r;
 }

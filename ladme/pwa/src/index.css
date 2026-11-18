@@ -3522,3 +3522,16 @@ button:active:not(:disabled),
 .btn-enlace {
   --btn-fg: var(--ink-500);
 }
+
+/* Sistema operativo en la cuadrícula del inicio: una línea discreta bajo el código. */
+.mosaico__so {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: -1px 0 2px;
+  color: var(--ink-500);
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
