@@ -3351,7 +3351,7 @@ function telegramComandos_() {
     var cmd = partes[0].toLowerCase().replace(/@.*$/, "");
     var resp;
     try {
-      resp = responderComando_(cmd, partes.slice(1));
+      resp = accionTelegram_(cmd, partes.slice(1), m.from || {}) || responderComando_(cmd, partes.slice(1));
     } catch (e) {
       resp = "No pude responder: " + String(e.message || e).slice(0, 200);
     }
@@ -3382,8 +3382,11 @@ function codigoEquipo_(txt) {
 
 function responderComando_(cmd, args) {
   if (cmd === "/ayuda" || cmd === "/start" || cmd === "/help") {
-    return "Comandos de LADME:\n/estado: resumen de la sala\n/equipos: estado de cada equipo\n/agenda 5 [mañana]: horarios de un equipo\n" +
-           "/reservas [5]: reservas de hoy\n/clases: solicitudes de sala pendientes";
+    return "Comandos de LADME\n" +
+           "Consultas: /estado · /equipos · /agenda 5 [mañana] · /reservas [5] · /clases\n" +
+           "Acciones (personal con cuenta vinculada): /aprobar 12 · /rechazar 12 motivo · /liberar 7 · /bloquear 5 2h motivo · " +
+           "/desbloquear 5 [1h] · /anuncio 3h texto · /encender 3 4 · /apagar sala · /reiniciar 5 · /actualizar sala\n" +
+           "Vincular la cuenta: en la app, Administración → Herramientas → Consola → Vincular, y luego /vincular CÓDIGO.";
   }
   if (cmd === "/estado" || cmd === "/equipos") {
     var sala = supabaseRpc_("sala_publica", {}) || [];
@@ -3433,4 +3436,128 @@ function responderComando_(cmd, args) {
     }).join("\n") + "\nSe aprueban en Administración → Reservas → Solicitudes y clases.";
   }
   return null; // otros comandos: silencio
+}
+
+/* -------------------------------------------------------------------------
+ * Acciones desde Telegram. Solo para personas del personal que vincularon su cuenta: la base de
+ * datos ejecuta cada acción COMO esa persona (mismas reglas y permisos que la app) y la deja en el
+ * Registro. Las órdenes para toda la sala, los apagados y las liberaciones piden /si.
+ * ------------------------------------------------------------------------- */
+function minutosTexto_(t) {
+  var s = String(t || "").toLowerCase(), total = 0, m, re = /(\d+(?:[.,]\d+)?)\s*(d|h|m)/g, visto = false;
+  if (/^\d+$/.test(s)) return Number(s);
+  while ((m = re.exec(s))) { visto = true; var n = Number(m[1].replace(",", ".")); total += m[2] === "d" ? n * 1440 : m[2] === "h" ? n * 60 : n; }
+  return visto && total > 0 ? Math.round(total) : null;
+}
+
+function equiposTexto_(args) {
+  if (!args.length) return undefined;
+  if (args.some(function (a) { return /^(sala|todos|todo)$/i.test(a); })) return null;
+  return args.join(",").split(",").filter(String).map(codigoEquipo_);
+}
+
+var MOTIVOS_ORDEN_ = {
+  sin_faro: ["no tiene Faro vinculado", "sin Faro"], ya_encendido: ["ya está encendido", "ya encendidos"],
+  sin_mac: ["Faro aún no envió su dirección de red (MAC)", "sin dirección de red"], apagado: ["ya está apagado o sin señal", "ya apagados o sin señal"],
+  compartido: ["tiene un uso compartido en curso", "con uso compartido"], clase: ["tiene una clase en curso", "con clase en curso"],
+  bloqueo: ["tiene un bloqueo en curso", "con bloqueo"], reserva: ["tiene una reserva en curso", "con reserva en curso"],
+  en_espera: ["está sin señal: la recibirá al conectarse", "sin señal (la recibirán al conectarse)"]
+};
+var VERBO_ORDEN_ = { encender: "Señal de encendido enviada", apagar: "Apagado ordenado", reiniciar: "Reinicio de Faro ordenado", actualizar: "Actualización de Faro ordenada" };
+
+/** Mismo criterio que la app: un equipo explica su caso; la sala agrupa los motivos. */
+function textoOrden_(r) {
+  var omit = (r.omitidos || []).filter(function (o) { return o.motivo !== "en_espera"; });
+  var espera = (r.omitidos || []).filter(function (o) { return o.motivo === "en_espera"; });
+  var desde = r.tipo === "encender" && r.ayudante ? " (desde " + r.ayudante + ")" : "";
+  if (!r.sala && r.enviados.length + omit.length === 1) {
+    if (r.enviados.length) return VERBO_ORDEN_[r.tipo] + " a " + r.enviados[0] + desde + "." + (espera.length ? " " + MOTIVOS_ORDEN_.en_espera[0] + "." : "");
+    return omit[0].codigo + " " + MOTIVOS_ORDEN_[omit[0].motivo][0] + ": no se envió la orden.";
+  }
+  var partes = [r.enviados.length ? VERBO_ORDEN_[r.tipo] + " a " + r.enviados.length + " equipo(s)" + desde + "." : "Ningún equipo recibió la orden."];
+  var grupos = {};
+  omit.forEach(function (o) { (grupos[o.motivo] = grupos[o.motivo] || []).push(o.codigo); });
+  var g = Object.keys(grupos).map(function (k) { var l = grupos[k]; return l.length + " " + MOTIVOS_ORDEN_[k][1] + (l.length <= 3 ? " (" + l.join(", ") + ")" : ""); });
+  if (g.length) partes.push("Sin enviar: " + g.join(" · ") + ".");
+  if (espera.length) partes.push(espera.length + " " + MOTIVOS_ORDEN_.en_espera[1] + ".");
+  return partes.join(" ");
+}
+
+function ejecutarAccion_(de, accion, args) {
+  var r = supabaseRpc_("telegram_accion", { p_telegram_id: de.id, p_accion: accion, p_args: args });
+  if (!r || !r.ok) return "No se pudo: " + ((r && r.error) || "error desconocido");
+  var d = r.datos || {};
+  switch (accion) {
+    case "aprobar":
+      return "Clase " + d.clase + " (grupo " + d.grupo + ") aprobada con " + (d.equipos || []).length + " equipos: " + (d.equipos || []).join(", ") +
+             ". " + d.creadas + " bloqueos creados" + ((d.omitidas || []).length ? ", " + d.omitidas.length + " sesiones omitidas por choque" : "") + ". El docente ya recibió el aviso.";
+    case "rechazar": return "Solicitud #" + d.id + " rechazada; el docente recibe el motivo.";
+    case "liberar": return "Reserva " + d.codigo + " en " + d.equipo + " liberada.";
+    case "bloquear": return args.equipo + " bloqueado " + args.minutos + " min" + (d.canceladas ? " (" + d.canceladas + " reservas canceladas)" : "") + ".";
+    case "desbloquear": return d.hasta ? args.equipo + " libre hasta " + Utilities.formatDate(new Date(d.hasta), "America/Bogota", "h:mm a") + "." : "Desbloqueo retirado en " + args.equipo + ".";
+    case "anuncio": return "Anuncio publicado por " + args.minutos + " min.";
+    case "orden": return textoOrden_(d);
+  }
+  return "Hecho.";
+}
+
+function accionTelegram_(cmd, args, de) {
+  var cache = CacheService.getScriptCache(), clave = "tg_pend_" + de.id;
+  if (cmd === "/vincular") {
+    if (!args[0]) return "Uso: /vincular CÓDIGO (el código se genera en la app: Administración → Herramientas → Consola).";
+    try {
+      var nombre = supabaseRpc_("telegram_vincular", { p_telegram_id: de.id, p_nombre: de.username ? "@" + de.username : (de.first_name || ""), p_codigo: args[0] });
+      return "Listo" + (nombre ? ", " + nombre : "") + ": su cuenta quedó vinculada. Ya puede usar las acciones del bot.";
+    } catch (e) {
+      var m = /"message"\s*:\s*"([^"]+)"/.exec(String(e.message || e));
+      return "No se pudo vincular: " + (m ? m[1] : String(e.message || e)).slice(0, 200);
+    }
+  }
+  if (cmd === "/si" || cmd === "/sí") {
+    var p = cache.get(clave);
+    if (!p) return "No hay nada pendiente de confirmar.";
+    cache.remove(clave);
+    p = JSON.parse(p);
+    return ejecutarAccion_(de, p.accion, p.args);
+  }
+  if (cmd === "/no") { cache.remove(clave); return "Cancelado."; }
+
+  var accion, a, confirmar = null;
+  if (cmd === "/aprobar") {
+    if (!/^\d+$/.test(args[0] || "")) return "Uso: /aprobar 12 [nota para el docente]";
+    accion = "aprobar"; a = { id: Number(args[0]), nota: args.slice(1).join(" ") };
+  } else if (cmd === "/rechazar") {
+    if (!/^\d+$/.test(args[0] || "") || args.length < 2) return "Uso: /rechazar 12 motivo";
+    accion = "rechazar"; a = { id: Number(args[0]), motivo: args.slice(1).join(" ") };
+  } else if (cmd === "/liberar") {
+    if (!args[0]) return "Uso: /liberar 7 (o el código de la reserva)";
+    accion = "liberar"; a = { equipo: /^R/i.test(args[0]) ? args[0].toUpperCase() : codigoEquipo_(args[0]) };
+    confirmar = "Liberar la reserva en curso de " + a.equipo + ": la persona pierde el equipo.";
+  } else if (cmd === "/bloquear") {
+    var minB = minutosTexto_(args[1]);
+    if (!args[0] || !minB || args.length < 3) return "Uso: /bloquear 5 2h motivo";
+    accion = "bloquear"; a = { equipo: codigoEquipo_(args[0]), minutos: minB, motivo: args.slice(2).join(" ") };
+  } else if (cmd === "/desbloquear") {
+    if (!args[0]) return "Uso: /desbloquear 5 [1h] (0 para quitar el desbloqueo)";
+    accion = "desbloquear"; a = { equipo: codigoEquipo_(args[0]), minutos: args[1] === "0" ? 0 : (minutosTexto_(args[1]) || 120) };
+  } else if (cmd === "/anuncio") {
+    var minA = minutosTexto_(args[0]);
+    if (!minA || args.length < 2) return "Uso: /anuncio 3h texto del anuncio";
+    accion = "anuncio"; a = { minutos: minA, texto: args.slice(1).join(" ") };
+  } else if (["/encender", "/apagar", "/reiniciar", "/actualizar"].indexOf(cmd) >= 0) {
+    var eqs = equiposTexto_(args);
+    if (eqs === undefined) return "Uso: " + cmd + " 3 4  o  " + cmd + " sala";
+    accion = "orden"; a = { tipo: cmd.slice(1), equipos: eqs };
+    if (eqs === null || cmd === "/apagar") {
+      confirmar = (cmd === "/apagar" ? "Apagar " : cmd === "/encender" ? "Encender " : cmd === "/reiniciar" ? "Reiniciar Faro en " : "Actualizar Faro en ") +
+                  (eqs === null ? "toda la sala" : eqs.join(", ")) + (cmd === "/apagar" ? " (se omiten los que tengan reserva, clase o uso compartido)" : "") + ".";
+    }
+  } else {
+    return null; // no es una acción: lo atiende responderComando_
+  }
+  if (confirmar) {
+    cache.put(clave, JSON.stringify({ accion: accion, args: a }), 120);
+    return "⚠ " + confirmar + "\nResponda /si en los próximos 2 minutos para confirmar, o /no.";
+  }
+  return ejecutarAccion_(de, accion, a);
 }

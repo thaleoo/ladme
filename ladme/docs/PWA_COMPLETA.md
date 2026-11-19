@@ -276,6 +276,27 @@ El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
 3. En Apps Script, guarde la misma cadena en la propiedad `AVISOS_TOKEN`: el worker llamará a la
    función cada 5 minutos (no hace falta el cron de pg_net).
 
+## 17. Navegación de Administración, Mis reservas compactas y Telegram con acciones (migración 0012)
+
+- **Administración:** cinco grupos (Hoy, Reservas, Equipos, Historial, Herramientas) en un control
+  segmentado con indicador deslizante y contadores (solicitudes y clases pendientes, fallas
+  abiertas). Las subpestañas se despliegan debajo; la barra queda fija al hacer scroll y el
+  contenido entra con una transición según la dirección. Cada grupo recuerda su última subpestaña
+  durante la sesión. En el teléfono los grupos inactivos muestran solo el icono.
+- **Mis reservas:** tarjetas compactas (equipo, estado y cuánto falta en la cabecera; horario en una
+  línea; duración y datos en otra). Dos acciones a la vista y el resto en el menú «⋯».
+- **Dónde piden la sala los docentes:** «Sala para clases» en el menú (`/clases`), visible para
+  tipo Docente/Investigador y para el personal. Reservar también enlaza a esa página.
+- **Órdenes de Faro con motivo:** la sala completa dice cuántos equipos recibieron la orden y por
+  qué se omitieron los demás; un solo equipo explica su caso. «Terminar clase» pide confirmación
+  (en la consola, escribir «si»). Encender usa difusión por cada tarjeta de red (Faro 0.5.1); los
+  requisitos de Wake-on-LAN están en el README de Faro.
+- **Telegram con acciones:** Herramientas → Consola → Telegram → Vincular muestra un código; en el
+  grupo se escribe `/vincular 123456`. Luego: `/aprobar`, `/rechazar`, `/liberar`, `/bloquear`,
+  `/desbloquear`, `/anuncio`, `/encender`, `/apagar`, `/reiniciar`, `/actualizar`. Las órdenes de
+  sala y las que liberan o apagan piden `/si` (2 min). Cada acción usa los permisos de quien la
+  escribe y queda en el Registro.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

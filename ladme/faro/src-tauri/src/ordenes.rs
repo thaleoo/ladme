@@ -13,25 +13,57 @@ pub fn codigo_llegada(secreto: &str, equipo: &str, ventana: i64) -> String {
 }
 
 /// Wake-on-LAN: «paquete mágico» (6 × 0xFF y la MAC 16 veces) por difusión UDP.
+/// Se envía por cada tarjeta de red con IPv4 a su dirección de difusión (p. ej. 10.0.5.255) y
+/// también a 255.255.255.255, a los puertos 9 y 7, tres veces: en Windows la difusión general
+/// solo sale por la tarjeta principal, y algunos equipos ignoran el primer paquete.
 pub fn despertar(macs: &[String]) -> Result<usize, String> {
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
-    socket.set_broadcast(true).map_err(|e| e.to_string())?;
-    let mut enviados = 0;
-    for mac in macs {
-        let bytes: Vec<u8> = mac.split([':', '-']).filter_map(|p| u8::from_str_radix(p, 16).ok()).collect();
-        if bytes.len() != 6 {
-            continue;
-        }
-        let mut paquete = vec![0xFFu8; 6];
-        for _ in 0..16 {
-            paquete.extend_from_slice(&bytes);
-        }
-        for puerto in [9, 7] {
-            let _ = socket.send_to(&paquete, ("255.255.255.255", puerto));
-        }
-        enviados += 1;
+    let paquetes: Vec<Vec<u8>> = macs
+        .iter()
+        .filter_map(|mac| {
+            let bytes: Vec<u8> = mac.split([':', '-']).filter_map(|p| u8::from_str_radix(p, 16).ok()).collect();
+            (bytes.len() == 6).then(|| {
+                let mut p = vec![0xFFu8; 6];
+                for _ in 0..16 {
+                    p.extend_from_slice(&bytes);
+                }
+                p
+            })
+        })
+        .collect();
+    if paquetes.is_empty() {
+        return Ok(0);
     }
-    Ok(enviados)
+    // (dirección local, difusión) de cada tarjeta IPv4 que no sea la de bucle local.
+    let mut destinos: Vec<(std::net::Ipv4Addr, std::net::Ipv4Addr)> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !i.is_loopback())
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(v4) => Some((v4.ip, v4.broadcast.unwrap_or(std::net::Ipv4Addr::BROADCAST))),
+            _ => None,
+        })
+        .collect();
+    destinos.push((std::net::Ipv4Addr::UNSPECIFIED, std::net::Ipv4Addr::BROADCAST));
+    let mut alguno = false;
+    for _ in 0..3 {
+        for (local, difusion) in &destinos {
+            let Ok(socket) = std::net::UdpSocket::bind((*local, 0)) else { continue };
+            if socket.set_broadcast(true).is_err() {
+                continue;
+            }
+            for p in &paquetes {
+                for puerto in [9, 7] {
+                    alguno |= socket.send_to(p, (*difusion, puerto)).is_ok();
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if alguno {
+        Ok(paquetes.len())
+    } else {
+        Err("no se pudo enviar el paquete por ninguna tarjeta de red".into())
+    }
 }
 
 /// Apaga el PC en un minuto (Windows muestra su propio aviso).

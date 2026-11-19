@@ -19,7 +19,8 @@ import {
   fecha,
   hace,
   horasEntre,
-  rango
+  rango,
+  rangoCorto
 } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -208,6 +209,17 @@ export default function MisReservas() {
     }
   }
 
+  // El menú «Más» se cierra al tocar fuera de él.
+  useEffect(() => {
+    const cerrar = (e: MouseEvent) => {
+      document.querySelectorAll<HTMLDetailsElement>('details.menu-mas[open]').forEach((d) => {
+        if (!d.contains(e.target as Node)) d.open = false
+      })
+    }
+    document.addEventListener('click', cerrar)
+    return () => document.removeEventListener('click', cerrar)
+  }, [])
+
   function tarjeta(r: Reserva) {
     const estado = estadoReserva(r, lim.toleranciaMin)
     const vigente = r.estado === 'activa' && !esPasado(r.fin)
@@ -217,121 +229,117 @@ export default function MisReservas() {
       r.extensiones < lim.extensionesMax &&
       new Date(r.inicio).getTime() + topeHoras(r) * 3600000 > new Date(r.fin).getTime()
 
-    return (
-      <article key={r.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-        <div className="row between" style={{ alignItems: 'flex-start' }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="row tight">
-              <span style={{ fontWeight: 750, fontSize: 'var(--text-lg)', letterSpacing: '-0.01em' }}>
-                {r.equipos?.codigo ?? 'Equipo'}
-              </span>
-              <span className={`badge ${tonoEstado(estado)}`}>
-                {estado === 'En curso' && <span className="punto" />}
-                {estado}
-              </span>
-              {r.desatendido && <span className="badge gray">Desatendido</span>}
-              {r.excepcion && <span className="badge outline">Reserva larga</span>}
-            </div>
-            <p className="tiny muted" style={{ margin: '2px 0 0' }}>
-              {r.equipos?.nombre} · {r.codigo_legible}
-            </p>
-            <p className="small" style={{ margin: '2px 0 0' }}>
-              <Icon nombre="calendario" width={13} height={13} /> {rango(r.inicio, r.fin)}
-            </p>
-          </div>
-          <span className="badge outline num">{duracion(r.inicio, r.fin)}</span>
-        </div>
+    const empezo = !esFuturo(r.inicio)
+    const cuando =
+      estado === 'En curso' || estado === 'Sin registrar llegada' ? `Termina ${hace(r.fin)}`
+        : vigente ? `Empieza ${hace(r.inicio)}`
+          : r.estado === 'cancelada' ? 'Cancelada' : `Terminó ${hace(r.fin)}`
 
-        {r.actividad && <p className="small" style={{ margin: 0 }}>{r.actividad}</p>}
-        {r.desatendido && r.mensaje_llegada && (
-          <p className="tiny muted" style={{ margin: 0 }}>
-            Aviso en el equipo: {r.mensaje_llegada}
-          </p>
-        )}
-        {r.estado === 'cancelada' && r.motivo && (
-          <p className="tiny" style={{ margin: 0, color: 'var(--danger-fg)' }}>
-            Motivo de cancelación: {r.motivo}
-          </p>
-        )}
-        {estado === 'En curso' && (
-          <p className="tiny muted" style={{ margin: 0 }}>
-            <Icon nombre="reloj" width={13} height={13} /> Termina {hace(r.fin)}
+    // Acciones: dos a la vista (la más útil primero) y el resto en «Más».
+    type Accion = { id: string; nodo: JSX.Element }
+    const acciones: Accion[] = []
+    if (vigente && puedeLlegada && empezo)
+      acciones.push({ id: 'llegada', nodo: (
+        <button key="llegada" className="btn ok sm" disabled={procesando} onClick={() => llegada(r)} type="button">
+          <Icon nombre="check" /> Registrar llegada
+        </button>) })
+    acciones.push({ id: 'credencial', nodo: (
+      <Link key="credencial" className="btn ghost sm" to={`/credencial/${r.id}`}>
+        <Icon nombre="qr" /> Credencial
+      </Link>) })
+    if (vigente && empezo)
+      acciones.push({ id: 'liberar', nodo: (
+        <button key="liberar" className="btn ghost sm" disabled={procesando} type="button"
+                onClick={() => { setError(null); setDialogo({ tipo: 'liberar', reserva: r }) }}>
+          <Icon nombre="salir" /> Liberar
+        </button>) })
+    if (puedeExtender)
+      acciones.push({ id: 'extender', nodo: (
+        <button key="extender" className="btn ghost sm" disabled={procesando} onClick={() => abrirExtension(r)} type="button">
+          <Icon nombre="reloj" /> Extender
+        </button>) })
+    if (!vigente && r.equipos?.codigo)
+      acciones.push({ id: 'otra', nodo: (
+        <Link key="otra" className="btn ghost sm"
+              to={`/reservar?equipo=${r.equipos.codigo}&actividad=${encodeURIComponent(r.actividad ?? '')}&horas=${Math.min(horasEntre(r.inicio, r.fin), lim.maxHoras).toFixed(1)}`}>
+          <Icon nombre="actualizar" /> Reservar otra vez
+        </Link>) })
+    const visibles = acciones.slice(0, 2)
+    const resto = acciones.slice(2)
+    const cancelar = vigente
+
+    return (
+      <article key={r.id} className={`reserva-card ${vigente ? '' : 'pasada'}`}>
+        <header className="reserva-card__cab">
+          <div className="reserva-card__titulo">
+            <Link className="reserva-card__codigo" to={r.equipos?.codigo ? `/equipo/${r.equipos.codigo}` : '#'}>
+              {r.equipos?.codigo ?? 'Equipo'}
+            </Link>
+            <span className={`badge ${tonoEstado(estado)}`}>
+              {estado === 'En curso' && <span className="punto" />}
+              {estado}
+            </span>
+          </div>
+          <span className="reserva-card__cuando">{cuando}</span>
+        </header>
+
+        <p className="reserva-card__horario">
+          <Icon nombre="calendario" width={14} height={14} />
+          <span>{rangoCorto(r.inicio, r.fin)}</span>
+        </p>
+
+        <p className="reserva-card__meta">
+          <span className="reserva-card__dur num">{duracion(r.inicio, r.fin)}</span>
+          <span className="reserva-card__meta-t">{[r.actividad, r.codigo_legible, r.equipos?.nombre].filter(Boolean).join(' · ')}</span>
+          {r.desatendido && <span className="badge gray">Desatendido</span>}
+          {r.compartida && <span className="badge info">Compartida</span>}
+          {r.excepcion && <span className="badge outline">Larga</span>}
+          {r.extensiones > 0 && <span className="badge outline">Extendida</span>}
+        </p>
+
+        {estado === 'Sin registrar llegada' && (
+          <p className="reserva-card__nota aviso">
+            <Icon nombre="alerta" width={14} height={14} /> Registre su llegada: el laboratorio ya fue avisado.
           </p>
         )}
         {r.llegada_en && vigente && (
-          <p className="tiny muted" style={{ margin: 0 }}>
-            <Icon nombre="check" width={13} height={13} /> Llegada registrada {hace(r.llegada_en)}.
-          </p>
+          <p className="reserva-card__nota"><Icon nombre="check" width={14} height={14} /> Llegada registrada {hace(r.llegada_en)}.</p>
         )}
-        {estado === 'Sin registrar llegada' && (
-          <p className="tiny" style={{ margin: 0, color: 'var(--warning-fg)' }}>
-            <Icon nombre="alerta" width={13} height={13} /> Registre su llegada: el laboratorio ya fue avisado de que no ha llegado.
-          </p>
+        {r.desatendido && r.mensaje_llegada && vigente && (
+          <p className="reserva-card__nota">Aviso en el equipo: «{r.mensaje_llegada}»</p>
         )}
-        {r.extensiones > 0 && (
-          <p className="tiny muted" style={{ margin: 0 }}>
-            Extensión usada ({r.extensiones} de {lim.extensionesMax}).
-          </p>
+        {r.estado === 'cancelada' && r.motivo && (
+          <p className="reserva-card__nota peligro">Motivo: {r.motivo}</p>
         )}
 
         {estado === 'Finalizada' && r.funciono === null && Date.now() - new Date(r.fin).getTime() < 7 * 86400000 && (
           <div className="encuesta">
             <span>¿Todo funcionó bien con el equipo?</span>
             <span className="row tight">
-              <button className="btn ok sm" type="button" onClick={() => valorar(r, true)}>
-                Sí
-              </button>
-              <button className="btn gray sm" type="button" onClick={() => valorar(r, false)}>
-                No, hubo un problema
-              </button>
+              <button className="btn ok sm" type="button" onClick={() => valorar(r, true)}>Sí</button>
+              <button className="btn gray sm" type="button" onClick={() => valorar(r, false)}>No, hubo un problema</button>
             </span>
           </div>
         )}
 
-        <div className="row" style={{ gap: 'var(--s2)' }}>
-          <Link className="btn ghost sm" to={`/credencial/${r.id}`}>
-            <Icon nombre="qr" /> Credencial
-          </Link>
-          {!vigente && r.equipos?.codigo && (
-            <Link
-              className="btn ghost sm"
-              to={`/reservar?equipo=${r.equipos.codigo}&actividad=${encodeURIComponent(r.actividad ?? '')}&horas=${Math.min(horasEntre(r.inicio, r.fin), lim.maxHoras).toFixed(1)}`}
-            >
-              <Icon nombre="actualizar" /> Reservar otra vez
-            </Link>
+        <footer className="reserva-card__acciones">
+          {visibles.map((a) => a.nodo)}
+          {(resto.length > 0 || cancelar) && (
+            <details className="menu-mas">
+              <summary className="btn ghost sm" aria-label="Más acciones">
+                <Icon nombre="mas" /> <span className="solo-ancho">Más</span>
+              </summary>
+              <div className="menu-mas__lista" role="menu">
+                {resto.map((a) => a.nodo)}
+                {cancelar && (
+                  <button className="btn ghost sm peligro" disabled={procesando} onClick={() => abrirCancelar(r)} type="button" role="menuitem">
+                    <Icon nombre="x" /> Cancelar reserva
+                  </button>
+                )}
+              </div>
+            </details>
           )}
-
-          {vigente && (
-            <>
-              {puedeLlegada && !esFuturo(r.inicio) && (
-                <button className="btn ok sm" disabled={procesando} onClick={() => llegada(r)} type="button">
-                  <Icon nombre="check" /> Registrar llegada
-                </button>
-              )}
-              {puedeExtender && (
-                <button className="btn ghost sm" disabled={procesando} onClick={() => abrirExtension(r)} type="button">
-                  <Icon nombre="reloj" /> Extender
-                </button>
-              )}
-              {!esFuturo(r.inicio) && (
-                <button
-                  className="btn gray sm"
-                  disabled={procesando}
-                  onClick={() => {
-                    setError(null)
-                    setDialogo({ tipo: 'liberar', reserva: r })
-                  }}
-                  type="button"
-                >
-                  Liberar equipo
-                </button>
-              )}
-              <button className="btn danger sm" disabled={procesando} onClick={() => abrirCancelar(r)} type="button">
-                Cancelar
-              </button>
-            </>
-          )}
-        </div>
+        </footer>
       </article>
     )
   }

@@ -715,10 +715,87 @@ export async function registrarLlegadaPc(equipo: string, codigo: string): Promis
 
 export type OrdenFaro = 'reiniciar' | 'actualizar' | 'apagar' | 'encender' | 'desinstalar'
 
-export async function ordenFaro(equipos: string[] | null, orden: OrdenFaro): Promise<number> {
-  const { data, error } = await supabase.rpc('faro_comando', { p_equipos: equipos, p_tipo: orden })
+export type MotivoOmision = 'sin_faro' | 'ya_encendido' | 'sin_mac' | 'apagado' | 'compartido' | 'clase' | 'bloqueo' | 'reserva' | 'en_espera'
+export interface ResultadoOrden {
+  tipo: OrdenFaro
+  sala: boolean
+  enviados: string[]
+  omitidos: { codigo: string; motivo: MotivoOmision }[]
+  ayudante: string | null
+}
+
+/** Envía una orden y devuelve a quién llegó y por qué se omitió cada equipo. */
+export async function ordenFaro(equipos: string[] | null, orden: OrdenFaro): Promise<ResultadoOrden> {
+  const { data, error } = await supabase.rpc('faro_orden', { p_equipos: equipos, p_tipo: orden })
   if (error) fail('No se pudo enviar la orden', error)
-  return Number(data ?? 0)
+  return data as ResultadoOrden
+}
+
+const MOTIVOS: Record<MotivoOmision, [string, string]> = {
+  sin_faro: ['no tiene Faro vinculado', 'sin Faro'],
+  ya_encendido: ['ya está encendido', 'ya encendidos'],
+  sin_mac: ['Faro aún no envió su dirección de red (MAC); espere unos minutos con el equipo encendido', 'sin dirección de red registrada'],
+  apagado: ['ya está apagado o sin señal', 'ya apagados o sin señal'],
+  compartido: ['tiene un uso compartido en curso', 'con uso compartido'],
+  clase: ['tiene una clase en curso', 'con clase en curso'],
+  bloqueo: ['tiene un bloqueo en curso', 'con bloqueo en curso'],
+  reserva: ['tiene una reserva en curso', 'con reserva en curso'],
+  en_espera: ['está sin señal: la recibirá cuando vuelva a conectarse', 'sin señal (la recibirán al conectarse)']
+}
+const VERBO: Record<OrdenFaro, string> = {
+  encender: 'Señal de encendido enviada',
+  apagar: 'Apagado ordenado',
+  reiniciar: 'Reinicio de Faro ordenado',
+  actualizar: 'Actualización de Faro ordenada',
+  desinstalar: 'Desinstalación de Faro ordenada'
+}
+
+/**
+ * Mensaje según a quién iba la orden: para un equipo se explica su caso; para la sala, cuántos la
+ * recibieron y los motivos agrupados de los que no.
+ */
+export function textoOrden(r: ResultadoOrden): { texto: string; ok: boolean } {
+  const omitidos = r.omitidos.filter((o) => o.motivo !== 'en_espera')
+  const enEspera = r.omitidos.filter((o) => o.motivo === 'en_espera')
+  const desde = r.tipo === 'encender' && r.ayudante ? ` (desde ${r.ayudante})` : ''
+  if (!r.sala && r.enviados.length + omitidos.length === 1) {
+    const codigo = r.enviados[0] ?? omitidos[0].codigo
+    if (r.enviados.length === 1) {
+      const extra = r.tipo === 'encender' ? ' Si no enciende en 2 minutos, revise que el encendido por red esté activo en la BIOS.'
+        : enEspera.length ? ` ${codigo} ${MOTIVOS.en_espera[0]}.` : ''
+      return { texto: `${VERBO[r.tipo]} a ${codigo}${desde}.${extra}`, ok: true }
+    }
+    return { texto: `${codigo} ${MOTIVOS[omitidos[0].motivo][0]}: no se envió la orden.`, ok: false }
+  }
+  const partes: string[] = []
+  if (r.enviados.length) partes.push(`${VERBO[r.tipo]} a ${r.enviados.length} ${r.enviados.length === 1 ? 'equipo' : 'equipos'}${desde}.`)
+  else partes.push('Ningún equipo recibió la orden.')
+  const grupos = new Map<MotivoOmision, string[]>()
+  for (const o of omitidos) grupos.set(o.motivo, [...(grupos.get(o.motivo) ?? []), o.codigo])
+  if (grupos.size)
+    partes.push(
+      'Sin enviar: ' +
+        [...grupos.entries()].map(([m, l]) => `${l.length} ${MOTIVOS[m][1]}${l.length <= 3 ? ` (${l.join(', ')})` : ''}`).join(' · ') +
+        '.'
+    )
+  if (enEspera.length) partes.push(`${enEspera.length} ${MOTIVOS.en_espera[1]}.`)
+  return { texto: partes.join(' '), ok: r.enviados.length > 0 }
+}
+
+// ------------------------------------------------------------ Telegram
+export async function telegramCodigo(): Promise<string> {
+  const { data, error } = await supabase.rpc('telegram_codigo')
+  if (error) fail('No se pudo generar el código', error)
+  return data as string
+}
+export async function telegramMiVinculo(): Promise<{ nombre: string | null; creado_en: string } | null> {
+  const { data, error } = await supabase.rpc('telegram_mi_vinculo')
+  if (error) fail('No se pudo consultar Telegram', error)
+  return (data as { nombre: string | null; creado_en: string } | null) ?? null
+}
+export async function telegramDesvincular(): Promise<void> {
+  const { error } = await supabase.rpc('telegram_desvincular')
+  if (error) fail('No se pudo desvincular', error)
 }
 
 export async function anunciarFaro(texto: string, minutos: number, equipos: string[] | null = null): Promise<void> {

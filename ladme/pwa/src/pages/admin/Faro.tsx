@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  anunciarFaro, canalFaro, codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, ordenFaro,
+  anunciarFaro, canalFaro, codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, ordenFaro, textoOrden,
   panelFaro, quitarAnuncioFaro, terminarClaseFaro, type OrdenFaro,
   type EquipoFaro, type ModoFaro, type PanelFaro
 } from '../../lib/api'
@@ -54,7 +54,7 @@ export default function Faro() {
   const [filtro, setFiltro] = useState<Filtro>('todos')
   const [ocupado, setOcupado] = useState(false)
   const [codigo, setCodigo] = useState<{ codigo: string; vence: string; equipo: string } | null>(null)
-  const [confirmar, setConfirmar] = useState<{ titulo: string; texto: string; accion: () => Promise<void> } | null>(null)
+  const [confirmar, setConfirmar] = useState<{ titulo: string; texto: string; accion: () => Promise<void>; confirmar?: string; peligro?: boolean } | null>(null)
   const [clave, setClave] = useState<string | null>(null)
   const [, setTic] = useState(0)
   const [clase, setClase] = useState<{ motivo: string; minutos: number } | null>(null)
@@ -123,8 +123,8 @@ export default function Faro() {
       titulo: `${NOMBRE_ORDEN[o]} · ${donde}`,
       texto: AYUDA_ORDEN[o],
       accion: () => hacer(async () => {
-        const n = await ordenFaro(equipos, o)
-        toast.mostrar(n ? `Orden enviada a ${n} ${n === 1 ? 'equipo' : 'equipos'}. Se aplica en menos de un minuto.` : 'Ningún equipo cumplía las condiciones para esa orden.')
+        const { texto } = textoOrden(await ordenFaro(equipos, o))
+        toast.mostrar(texto)
       })
     })
   }
@@ -175,21 +175,45 @@ export default function Faro() {
             ))}
           </div>
         </div>
-        <div className="row tight faro-sala__acciones">
-          <button className="btn sm" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>Anuncio</button>
-          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>Empezar clase</button>
-          <button className="btn ghost sm" type="button" disabled={ocupado}
-                  onClick={() => void hacer(async () => {
-                    const n = await terminarClaseFaro(null)
-                    toast.mostrar(n ? `Clase terminada en ${n} ${n === 1 ? 'equipo' : 'equipos'}.` : 'No hay clases en curso.')
+        <div className="sala-grupos">
+          <div className="sala-grupo">
+            <span className="sala-grupo__t">Avisos</span>
+            <div className="sala-grupo__b">
+              <button className="btn sm" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>Anuncio</button>
+              <a className="btn ghost sm" href="/sala?kiosco=1" target="_blank" rel="noreferrer">Pantalla de la sala</a>
+            </div>
+          </div>
+          <div className="sala-grupo">
+            <span className="sala-grupo__t">Clase</span>
+            <div className="sala-grupo__b">
+              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>Empezar clase</button>
+              <button className="btn ghost sm" type="button" disabled={ocupado}
+                  onClick={() => setConfirmar({
+                    titulo: 'Terminar la clase en toda la sala',
+                    texto: 'Los equipos de la clase vuelven a necesitar reserva: quien esté trabajando sin reserva puede quedar bloqueado según el modo de Faro. Úselo solo cuando la clase haya terminado.',
+                    confirmar: 'Terminar clase',
+                    peligro: true,
+                    accion: () => hacer(async () => {
+                      const n = await terminarClaseFaro(null)
+                      toast.mostrar(n ? `Clase terminada en ${n} ${n === 1 ? 'equipo' : 'equipos'}.` : 'No hay clases en curso.')
+                    })
                   })}>
             Terminar clase
           </button>
-          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>Encender</button>
-          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>Apagar</button>
-          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>Actualizar Faro</button>
-          <a className="btn ghost sm" href="/sala?kiosco=1" target="_blank" rel="noreferrer">Pantalla de la sala</a>
-          {admin && (
+            </div>
+          </div>
+          <div className="sala-grupo">
+            <span className="sala-grupo__t">Energía</span>
+            <div className="sala-grupo__b">
+              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>Encender</button>
+              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>Apagar</button>
+            </div>
+          </div>
+          <div className="sala-grupo">
+            <span className="sala-grupo__t">Faro</span>
+            <div className="sala-grupo__b">
+              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>Actualizar Faro</button>
+              {admin && (
             <button className="btn ghost sm" type="button" disabled={ocupado}
                     title={panel.clave_creada_en ? `Clave creada ${hace(panel.clave_creada_en)}` : 'Aún no se ha creado'}
                     onClick={() => setConfirmar({
@@ -200,9 +224,11 @@ export default function Faro() {
                         ' Desbloquea cualquier equipo por 2 horas aunque no haya internet, y cada uso avisa al personal.',
                       accion: () => hacer(async () => setClave(await generarClaveFaro()))
                     })}>
-              <Icon nombre="clave" width={14} height={14} /> {panel.clave_creada_en ? 'Clave de emergencia' : 'Crear clave de emergencia'}
+              <Icon nombre="clave" width={14} height={14} /> {panel.clave_creada_en ? 'Clave' : 'Crear clave'}
             </button>
           )}
+            </div>
+          </div>
         </div>
         {panel.anuncios.length > 0 && (
           <ul className="small" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
@@ -465,9 +491,9 @@ export default function Faro() {
              pie={
                <>
                  <button className="btn gray" type="button" onClick={() => setConfirmar(null)}>Cancelar</button>
-                 <button className="btn" type="button" disabled={ocupado}
+                 <button className={`btn ${confirmar?.peligro ? 'danger' : ''}`} type="button" disabled={ocupado}
                          onClick={() => { const a = confirmar?.accion; setConfirmar(null); void a?.() }}>
-                   Confirmar
+                   {confirmar?.confirmar ?? 'Confirmar'}
                  </button>
                </>
              }>

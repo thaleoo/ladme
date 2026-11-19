@@ -20,6 +20,7 @@ import {
   modoFaro,
   ocupacionPublica,
   ordenFaro,
+  textoOrden,
   panelFaro,
   quitarAnuncioFaro,
   registro,
@@ -452,10 +453,10 @@ export const COMANDOS: Comando[] = [
     async correr(a, ctx) {
       if (a.pos[0]?.toLowerCase() === 'fin') {
         const eqs = a.pos.length > 1 ? resolverEquipos(a.pos.slice(1), ctx.equipos) : null
-        await terminarClaseFaro(eqs)
-        const txt = `Clase terminada en ${quien(eqs)}.`
-        ctx.imprimir(txt, 'ok')
-        return txt
+        return void ctx.confirmar(`Terminar la clase en ${quien(eqs)}: los equipos vuelven a necesitar reserva. Escriba «si».`, 'si', async () => {
+          const n = await terminarClaseFaro(eqs)
+          return n ? `Clase terminada en ${n} equipo(s).` : 'No había clases en curso.'
+        })
       }
       const iDur = a.pos.findIndex((p) => minutos(p) !== null && !/^\d+$/.test(p))
       if (iDur < 1) throw new Error('Uso: clase <equipos|sala> <duración> "motivo"')
@@ -510,10 +511,7 @@ export const COMANDOS: Comando[] = [
       if (tipo === 'desinstalar' && !ctx.admin) throw new Error('Solo un administrador puede desinstalar Faro.')
       const eqs = resolverEquipos(a.pos.slice(1), ctx.equipos)
       if (tipo === 'desinstalar' && !eqs) throw new Error('Desinstalar es por equipo, no para toda la sala.')
-      const hacer = async () => {
-        const n = await ordenFaro(eqs, tipo)
-        return `Orden «${tipo}» enviada a ${n} equipo(s).`
-      }
+      const hacer = async () => textoOrden(await ordenFaro(eqs, tipo)).texto
       if (tipo === 'desinstalar')
         return void ctx.confirmar(`Quitar Faro de ${quien(eqs)}. Escriba ${eqs![0]} para confirmar.`, eqs![0], hacer)
       if (tipo === 'apagar' || (!eqs && tipo !== 'actualizar'))

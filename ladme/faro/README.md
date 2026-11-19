@@ -92,7 +92,11 @@ Más detalles:
 - **Órdenes remotas** (Administración → Faro). Para toda la sala o un equipo:
   - **Anuncio**: un mensaje en la isla y en la pantalla de bloqueo hasta la hora que elija.
   - **Encender** (Wake-on-LAN): otro Faro encendido de la sala envía el «paquete mágico» a las MAC
-    conocidas. Requiere que el BIOS tenga Wake-on-LAN activo.
+    conocidas, por cada tarjeta de red y tres veces (desde 0.5.1). En cada PC hace falta: Wake-on-LAN
+    activo en el BIOS/UEFI; en Windows, «Inicio rápido» desactivado (Opciones de energía) y, en las
+    propiedades de la tarjeta de red → Administración de energía, «Permitir que este dispositivo
+    reactive el equipo» y «Solo permitir un paquete mágico». Funciona en la misma red local; si el
+    PC se desconectó de la corriente, el primer encendido debe ser manual.
   - **Apagar**: avisa y apaga en 1 minuto. Nunca apaga un equipo con una reserva en curso.
   - **Actualizar Faro** y **Reiniciar Faro**.
   - **Desinstalar** (solo administradores): Faro se quita solo y desvincula el equipo.

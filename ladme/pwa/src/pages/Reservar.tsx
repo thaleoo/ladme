@@ -234,6 +234,10 @@ export default function Reservar() {
       />
 
       <div className="dos-columnas">
+        <p className="small muted nota-clase">
+          <Icon nombre="calendario" width={14} height={14} /> ¿Es docente y necesita varios equipos para una clase?{' '}
+          <Link to="/clases">Solicite la sala para su clase</Link>.
+        </p>
         <form onSubmit={enviar} className="card stack" noValidate>
           {tope.alcanzado && (
             <div className="alert warn" role="status">

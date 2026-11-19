@@ -144,3 +144,21 @@ export function hace(iso: string): string {
 export function conPunto(texto: string): string {
   return texto.endsWith('.') ? texto : `${texto}.`
 }
+
+/**
+ * Rango corto y legible: «Hoy · 3:24 – 5:36 p. m.», «vie 20 nov · 9:00 a. m. – 1:00 p. m.» o, si cruza
+ * días, «vie 20 nov 11:36 a. m. → lun 23 nov 9:36 a. m.».
+ */
+export function rangoCorto(inicio: string, fin: string): string {
+  const a = new Date(inicio)
+  const b = new Date(fin)
+  const hoy = new Date()
+  const mismoDia = (x: Date, y: Date) => x.toDateString() === y.toDateString()
+  const manana = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1)
+  const dia = (d: Date) =>
+    mismoDia(d, hoy) ? 'Hoy' : mismoDia(d, manana) ? 'Mañana'
+      : new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: 'numeric', month: 'short' }).format(d).replace(/\./g, '')
+  const h = (d: Date) => new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' }).format(d)
+  if (mismoDia(a, b)) return `${dia(a)} · ${h(a)} – ${h(b)}`
+  return `${dia(a)} ${h(a)} → ${dia(b)} ${h(b)}`
+}

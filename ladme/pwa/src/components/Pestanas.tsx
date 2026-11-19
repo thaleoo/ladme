@@ -7,7 +7,7 @@ export default function Pestanas<T extends string>({
   alCambiar,
   etiqueta
 }: {
-  opciones: Array<{ id: T; texto: string }>
+  opciones: Array<{ id: T; texto: string; n?: number }>
   actual: T
   alCambiar: (id: T) => void
   etiqueta: string
@@ -23,8 +23,14 @@ export default function Pestanas<T extends string>({
       activo.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
     }
     medir()
+    // También al cambiar de tamaño la caja (p. ej. al aparecer con una animación), no solo la ventana.
+    const ro = new ResizeObserver(medir)
+    if (caja.current) ro.observe(caja.current)
     window.addEventListener('resize', medir)
-    return () => window.removeEventListener('resize', medir)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', medir)
+    }
   }, [actual, opciones.length])
 
   return (
@@ -39,6 +45,7 @@ export default function Pestanas<T extends string>({
           onClick={() => alCambiar(o.id)}
         >
           {o.texto}
+          {!!o.n && <span className="pestanas__n">{o.n}</span>}
         </button>
       ))}
       {indicador && (

@@ -576,6 +576,54 @@ begin
   perform pg_temp.ok(sala_tick() -> 'acciones' ? 'red_caida', 'si varios Faro dejan de responder a la vez, se avisa de posible caída de red');
 end $$;
 
+-- 0012: órdenes con motivo por equipo y acciones desde Telegram como la persona vinculada.
+do $$
+declare j jsonb; cod text; c clases; v_hoy date := (now() at time zone 'America/Bogota')::date; begin
+  perform pg_temp.como('lab@unal.edu.co');
+  update agentes set ultimo_latido = now() where token_hash is not null;
+  j := faro_orden(array['UNAL-06'], 'encender');
+  perform pg_temp.ok(jsonb_array_length(j -> 'enviados') = 0 and j -> 'omitidos' -> 0 ->> 'motivo' = 'ya_encendido',
+                     'encender un equipo ya encendido explica el motivo');
+  j := faro_orden(array['UNAL-01'], 'encender');
+  perform pg_temp.ok(j -> 'omitidos' -> 0 ->> 'motivo' = 'sin_faro', 'un equipo sin Faro lo dice');
+  update agentes set ultimo_latido = now() - interval '10 minutes', inventario = jsonb_build_object('mac', 'aa:bb:cc:dd:ee:04')
+   where equipo_id = (select id from equipos where codigo = 'UNAL-04');
+  j := faro_orden(null, 'encender');
+  perform pg_temp.ok(j -> 'enviados' ? 'UNAL-04' and j ->> 'ayudante' is not null and (j ->> 'sala')::boolean, 'encender la sala usa otro Faro como ayudante');
+  perform pg_temp.ok(not exists (select 1 from jsonb_array_elements(j -> 'omitidos') x where x ->> 'motivo' = 'sin_faro'),
+                     'en la sala no se listan los equipos sin Faro');
+  j := faro_orden(array['UNAL-06'], 'apagar');
+  perform pg_temp.ok(j -> 'omitidos' -> 0 ->> 'motivo' = 'compartido', 'no apaga un uso compartido y lo dice');
+  perform pg_temp.falla($q$select faro_orden(array['UNAL-99'], 'apagar')$q$, 'No existe');
+
+  -- Telegram: vincular con código y actuar como esa persona.
+  cod := telegram_codigo();
+  perform pg_temp.ok(cod ~ '^\d{6}$', 'el personal genera un código de 6 dígitos');
+  perform pg_temp.ok(telegram_vincular(555, '@lab', cod) is not null, 'el código vincula la cuenta de Telegram');
+  perform pg_temp.falla(format($q$select telegram_vincular(556, 'x', %L)$q$, cod), 'vencido');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla($q$select telegram_codigo()$q$, 'Solo el personal');
+  perform set_config('request.jwt.claim.sub', '', false);
+  j := telegram_accion(999, 'anuncio', '{"texto": "Hola", "minutos": 30}');
+  perform pg_temp.ok(not (j ->> 'ok')::boolean and j ->> 'error' ilike '%no está vinculada%', 'una cuenta sin vincular no puede actuar');
+  j := telegram_accion(555, 'anuncio', '{"texto": "Cerramos temprano", "minutos": 30}');
+  perform pg_temp.ok((j ->> 'ok')::boolean and exists (select 1 from faro_anuncios where texto = 'Cerramos temprano'
+                       and creado_por = (select id from perfiles where correo = 'lab@unal.edu.co')),
+                     'Telegram publica un anuncio a nombre de quien vinculó la cuenta');
+  j := telegram_accion(555, 'orden', '{"tipo": "apagar", "equipos": ["UNAL-06"]}');
+  perform pg_temp.ok((j ->> 'ok')::boolean and j -> 'datos' -> 'omitidos' -> 0 ->> 'motivo' = 'compartido', 'Telegram usa las mismas reglas de las órdenes');
+  j := telegram_accion(555, 'liberar', '{"equipo": "UNAL-19"}');
+  perform pg_temp.ok(not (j ->> 'ok')::boolean, 'un error se devuelve como texto, sin romper');
+  perform pg_temp.ok(exists (select 1 from consola_registro where comando like 'Telegram /anuncio%' and ok), 'las acciones de Telegram quedan en el Registro');
+  -- Aprobar una clase desde Telegram con la preselección de la app.
+  perform pg_temp.como('doc@unal.edu.co');
+  c := solicitar_clase('Muestreo', 'Prof. Uno', 3, array[3], '08:00', '10:00', v_hoy + 14, v_hoy + 28, 2);
+  perform set_config('request.jwt.claim.sub', '', false);
+  j := telegram_accion(555, 'aprobar', jsonb_build_object('id', c.id));
+  perform pg_temp.ok((j ->> 'ok')::boolean and jsonb_array_length(j -> 'datos' -> 'equipos') = 2
+                     and (select estado from clases where id = c.id) = 'aprobada', 'Telegram aprueba una clase con los equipos libres');
+end $$;
+
 -- Permisos reales del rol que usa la PWA.
 select pg_temp.como('ana@unal.edu.co') \gset sin_
 set role authenticated;
@@ -593,6 +641,8 @@ do $$ begin
   perform pg_temp.ok((select count(*) from clases) = 0, 'las solicitudes de clase ajenas no se ven');
   perform pg_temp.falla($q$select sala_tick()$q$, 'permission denied');
   perform pg_temp.falla($q$select * from faro_programas$q$, 'permission denied');
+  perform pg_temp.falla($q$select telegram_accion(1, 'anuncio')$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from telegram_vinculos$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from errores_app) = 0, 'el registro de errores solo lo ve el personal');
   perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id <> auth.uid()) = 0, 'cada quien ve solo sus avisos');

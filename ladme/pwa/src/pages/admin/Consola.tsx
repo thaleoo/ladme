@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { esAdmin, useAuth } from '../../context/AuthContext'
 import { anotarComando, listarEquipos, registro, type FiltrosRegistro } from '../../lib/api'
+import VinculoTelegram from '../../components/VinculoTelegram'
 import { analizar, completar, lineaRegistro, normalizar, type Contexto, type Linea, type TonoLinea } from '../../lib/consola'
 
 const CLAVE_HISTORIAL = 'ladme:consola:historial'
@@ -198,6 +199,7 @@ export default function Consola() {
 
   return (
     <div className="stack">
+      <VinculoTelegram />
       <p className="small muted" style={{ margin: 0 }}>
         Controle el laboratorio con comandos. Usa los mismos permisos que los botones de la app, las órdenes peligrosas piden
         confirmación y cada comando queda en el Registro.

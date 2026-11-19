@@ -167,3 +167,16 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
   (políticas `sala_*`) y aviso de posible caída de la red.
 - Las notificaciones al teléfono ya existían (`push_suscripciones`, `push-sw.js` y la función
   `enviar-avisos`); ver `docs/DESPLIEGUE.md` §4.
+
+## Migración 0012 — Órdenes con motivo y Telegram con acciones
+
+`migrations/0012_ordenes_telegram.sql`, después de 0011.
+
+- `faro_orden(equipos, tipo)` reemplaza a `faro_comando` en la PWA: devuelve qué equipos recibieron
+  la orden y, para cada uno de los demás, el motivo (`ya_encendido`, `sin_mac`, `apagado`,
+  `compartido`, `clase`, `bloqueo`, `reserva`, `en_espera`, `sin_faro`). Para encender busca un
+  equipo con Faro en línea que envíe la señal; si no hay ninguno lo dice.
+- **Telegram:** `telegram_vinculos` y `telegram_codigos`. Cada persona del personal vincula su cuenta
+  con un código de 6 dígitos (`telegram_codigo()`, vence en 10 min) que escribe en el grupo como
+  `/vincular 123456`. `telegram_accion()` (solo service_role, la llama el Apps Script) ejecuta la
+  acción en nombre de esa persona con sus mismos permisos y deja el registro en la consola.
