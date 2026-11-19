@@ -12,6 +12,8 @@ import Equipos from './admin/Equipos'
 import Estadisticas from './admin/Estadisticas'
 import Politicas from './admin/Politicas'
 import Faro from './admin/Faro'
+import Registro from './admin/Registro'
+import Consola from './admin/Consola'
 
 const PESTANAS = [
   { id: 'ronda', texto: 'Ronda' },
@@ -21,6 +23,8 @@ const PESTANAS = [
   { id: 'solicitudes', texto: 'Solicitudes' },
   { id: 'equipos', texto: 'Equipos' },
   { id: 'faro', texto: 'Faro' },
+  { id: 'registro', texto: 'Registro' },
+  { id: 'consola', texto: 'Consola' },
   { id: 'estadisticas', texto: 'Estadísticas' },
   { id: 'politicas', texto: 'Políticas', soloAdmin: true },
   { id: 'errores', texto: 'Errores de la app' }
@@ -57,6 +61,8 @@ export default function Admin() {
       {actual === 'solicitudes' && <Solicitudes />}
       {actual === 'equipos' && <Equipos />}
       {actual === 'faro' && <Faro />}
+      {actual === 'registro' && <Registro />}
+      {actual === 'consola' && <Consola />}
       {actual === 'estadisticas' && <Estadisticas />}
       {actual === 'politicas' && admin && <Politicas />}
       {actual === 'errores' && <Errores />}

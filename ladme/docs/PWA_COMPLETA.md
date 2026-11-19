@@ -227,6 +227,22 @@ Guía completa en `ladme/faro/README.md`. En resumen:
 - El formulario de reserva y la ficha del equipo avisan antes de llenar nada y muestran la reserva que ya
   tiene. Las reservas que ya existían se respetan.
 
+## 15. Agenda por equipo, Registro y Consola (migración 0010)
+
+1. SQL Editor → `ladme/db/migrations/0010_registro_consola.sql` (después de 0009).
+2. Publique la etiqueta `faro-v0.4.1` (la isla abierta ya no tiene sombra y no repite «Windows»).
+
+- **Agenda** en la ficha de cada equipo, por día o por semana: rangos libres y ocupados (sin nombres)
+  y «Reservar» en cada rango libre, con el equipo y las horas ya puestos. En Disponibilidad hay un
+  enlace «Ver la agenda del día y la semana».
+- **Registro** (Administración): todo el historial, de a 25 por página, con filtros por tipo, equipo,
+  periodo y búsqueda, y «Exportar CSV». La actividad de Faro muestra solo lo último con «Ver todo».
+- **Consola** (Administración): comandos como `estado`, `equipos`, `agenda 5`, `reservas`, `liberar 7`,
+  `bloquear 5 2h "motivo"`, `apagar sala`, `anuncio "texto" 3h`, `politica llegada_modo 2`,
+  `registro --equipo 5`, `seguir` y `exportar`. `ayuda` los explica. Usa los mismos permisos que los
+  botones, pide confirmación en lo peligroso y cada comando queda en el Registro.
+- Los mantenimientos nuevos avisan al chat del personal.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

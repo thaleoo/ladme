@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   anunciarFaro, canalFaro, codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, ordenFaro,
@@ -353,7 +354,7 @@ export default function Faro() {
           <p className="small muted" style={{ margin: '4px 0 0' }}>Aquí aparecerán los bloqueos, desbloqueos y el uso sin reserva.</p>
         ) : (
           <ul className="small" style={{ margin: '8px 0 0', paddingLeft: '1rem', display: 'grid', gap: 4 }}>
-            {panel.eventos.map((ev) => (
+            {panel.eventos.slice(0, 8).map((ev) => (
               <li key={ev.id}>
                 <strong>{ev.equipo}</strong> · {EVENTOS[ev.tipo] ?? ev.tipo}
                 {ev.tipo === 'modo' && typeof ev.detalle.modo === 'string' ? ` → ${ev.detalle.modo}` : ''}
@@ -363,6 +364,9 @@ export default function Faro() {
             ))}
           </ul>
         )}
+        <Link className="small" to="/admin?tab=registro&fuente=faro" style={{ display: 'inline-block', marginTop: 8 }}>
+          Ver todo en Registro
+        </Link>
       </section>
 
       <Modal abierto={!!codigo} titulo={`Vincular Faro en ${codigo?.equipo ?? ''}`} onCerrar={() => { setCodigo(null); void cargar() }}

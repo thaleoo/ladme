@@ -463,6 +463,9 @@ export default function Disponibilidad() {
                   ))}
                 </ul>
               )}
+              <Link className="small" to={`/equipo/${encodeURIComponent(sel.equipo.codigo)}#agenda`}>
+                Ver la agenda del día y la semana
+              </Link>
             </div>
           </div>
         )}

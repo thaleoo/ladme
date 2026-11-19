@@ -3633,3 +3633,86 @@ a.sala__equipo:hover { transform: translateY(-2px); box-shadow: inset 4px 0 0 va
 /* Aviso de «una reserva a la vez» en el formulario de reserva */
 .tope-lista { margin: var(--s2) 0; padding-left: 1.1em; }
 .tope-lista li { margin: 2px 0; }
+
+/* Agenda por equipo (día / semana) */
+.ag { display: grid; gap: var(--s3); }
+.ag-barra { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.ag-nav { display: flex; gap: 4px; }
+.ag-nav .btn { min-width: 36px; font-size: var(--text-base); }
+.ag-semana { display: grid; gap: 6px; }
+.ag-escala { display: flex; justify-content: space-between; padding-left: 96px; font-size: 10.5px; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.ag-dia .ag-escala { padding-left: 0; margin-top: 2px; }
+.ag-fila { display: flex; align-items: center; gap: var(--s3); width: 100%; padding: 10px 12px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--surface-2); text-align: left; cursor: pointer; color: inherit; font: inherit;
+  --btn-bg: var(--surface-2); box-shadow: none; min-height: 0; }
+.ag-fila:hover { border-color: var(--brand-300); background: var(--surface); }
+.ag-fecha { flex: none; width: 74px; font-size: var(--text-sm); font-weight: 650; line-height: 1.2; }
+.ag-cuerpo { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.ag-resumen { font-size: var(--text-xs); color: var(--ink-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-resumen.libre { color: var(--success-fg); font-weight: 600; }
+.ag-pista { position: relative; height: 12px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--ok) 22%, var(--surface)); }
+.ag-pasado { position: absolute; inset: 0 auto 0 0; background: var(--surface-3); }
+.ag-bloque { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.ag-bloque + .ag-bloque { box-shadow: -2px 0 0 var(--surface-2); }
+.ag-reserva.ag-bloque, .ag-leyenda i.ag-reserva { background: #f59e0b; }
+.ag-bloqueo.ag-bloque, .ag-leyenda i.ag-bloqueo { background: repeating-linear-gradient(135deg, var(--ink-400, #9ca3af) 0 3px, var(--ink-300, #cbd5e1) 3px 6px); }
+.ag-leyenda i.ag-libre { background: color-mix(in srgb, var(--ok) 22%, var(--surface)); border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); }
+.ag-ahora { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--brand-600); border-radius: 2px; }
+.ag-marca { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--ink-900) 12%, transparent); }
+.ag-leyenda { display: flex; gap: var(--s4); flex-wrap: wrap; margin-top: 4px; font-size: var(--text-xs); color: var(--ink-500); }
+.ag-leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+.ag-leyenda i { width: 14px; height: 10px; border-radius: 3px; display: inline-block; }
+.ag-dia { display: grid; gap: 6px; }
+.ag-titulo { margin: 0 0 4px; font-size: var(--text-base); }
+.ag-dia .ag-pista { height: 16px; }
+.ag-lista { list-style: none; margin: var(--s2) 0 0; padding: 0; display: grid; gap: 6px; }
+.ag-tramo { display: flex; align-items: center; gap: var(--s3); padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--line);
+  border-left-width: 4px; background: var(--surface-2); font-size: var(--text-sm); }
+.ag-tramo.ag-libre { border-left-color: var(--ok); }
+.ag-tramo.ag-reserva { border-left-color: #f59e0b; }
+.ag-tramo.ag-bloqueo { border-left-color: var(--ink-400, #9ca3af); }
+.ag-info { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; column-gap: var(--s3); row-gap: 2px; align-items: baseline; }
+.ag-horas { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ag-que { color: var(--ink-600); }
+.ag-tramo .btn { flex: none; }
+.ag-tramo.ag-libre .ag-que strong { color: var(--success-fg); }
+@media (max-width: 420px) {
+  .ag-fecha { width: 62px; }
+  .ag-escala { padding-left: 86px; }
+}
+
+/* Registro */
+.registro-filtros { display: grid; gap: var(--s3); }
+.registro-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s2); }
+.registro-campos .field { margin: 0; }
+.registro-barra { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); }
+.registro-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; transition: opacity 0.15s; }
+.registro-lista.cargando { opacity: 0.55; }
+.registro-fila { display: flex; gap: var(--s3); padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); }
+.registro-cuando { flex: none; width: 112px; font-size: var(--text-xs); color: var(--ink-500); padding-top: 2px; }
+.registro-que { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.registro-texto { font-size: var(--text-sm); word-break: break-word; }
+.paginador { display: flex; justify-content: center; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .registro-fila { flex-direction: column; gap: 4px; }
+  .registro-cuando { width: auto; }
+}
+
+/* Consola del personal: siempre oscura, como una terminal */
+.consola { display: flex; flex-direction: column; height: min(68vh, 640px); min-height: 360px; border-radius: var(--r-lg);
+  background: #0b0a10; border: 1px solid #26222f; color: #e7e5ee; overflow: hidden; cursor: text;
+  font-family: var(--mono, ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace); font-size: 12.5px; line-height: 1.5; }
+.consola__pantalla { flex: 1; overflow: auto; padding: 12px 14px; overscroll-behavior: contain; }
+.consola__linea { margin: 0 0 2px; white-space: pre-wrap; word-break: break-word; font: inherit; color: #d6d3e0; }
+.consola__linea.cmd { color: #c4b5fd; margin-top: 8px; }
+.consola__linea.ok { color: #6ee7b7; }
+.consola__linea.error { color: #fca5a5; }
+.consola__linea.aviso { color: #fcd34d; }
+.consola__linea.tenue { color: #8b8798; }
+.consola__entrada { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid #26222f; background: #100e17; }
+.consola__prompt { color: #a78bfa; font-weight: 700; flex: none; }
+.consola__entrada input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; box-shadow: none; padding: 0; min-height: 24px;
+  color: #f5f3ff; font: inherit; font-size: 16px; }
+@media (min-width: 640px) { .consola__entrada input { font-size: inherit; } }
+.consola__entrada input::placeholder { color: #6b6779; }

@@ -783,3 +783,45 @@ export async function salaPublica(): Promise<EquipoSala[]> {
   if (error) fail('No se pudo cargar la sala', error)
   return (data ?? []) as EquipoSala[]
 }
+
+// ------------------------------------------------------------ Registro y consola
+export type FuenteRegistro = 'reservas' | 'faro' | 'fallas' | 'mantenimiento' | 'solicitudes' | 'errores' | 'consola'
+
+export interface FilaRegistro {
+  en: string
+  fuente: FuenteRegistro
+  tipo: string
+  equipo: string | null
+  texto: string
+  persona: string | null
+  actor: string | null
+}
+
+export interface FiltrosRegistro {
+  fuentes?: FuenteRegistro[] | null
+  equipo?: string | null
+  desde?: string | null
+  hasta?: string | null
+  buscar?: string | null
+}
+
+/** Historial unificado del laboratorio (solo personal), de a páginas. */
+export async function registro(f: FiltrosRegistro, limite = 25, offset = 0): Promise<{ total: number; filas: FilaRegistro[] }> {
+  const { data, error } = await supabase.rpc('registro', {
+    p_fuentes: f.fuentes?.length ? f.fuentes : null,
+    p_equipo: f.equipo || null,
+    p_desde: f.desde || null,
+    p_hasta: f.hasta || null,
+    p_buscar: f.buscar || null,
+    p_limite: limite,
+    p_offset: offset
+  })
+  if (error) fail('No se pudo cargar el registro', error)
+  return data as { total: number; filas: FilaRegistro[] }
+}
+
+/** Deja constancia de un comando de la consola (quién, qué y cómo terminó). */
+export async function anotarComando(comando: string, ok: boolean, resultado: string | null): Promise<void> {
+  const { error } = await supabase.rpc('consola_anotar', { p_comando: comando, p_ok: ok, p_resultado: resultado })
+  if (error) console.warn('No se pudo anotar el comando', error.message)
+}

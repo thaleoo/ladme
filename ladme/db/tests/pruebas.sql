@@ -439,6 +439,36 @@ begin
   update politicas set valor = '1' where clave = 'reservas_activas_max';
 end $$;
 
+-- 0010: registro unificado, consola auditada, mantenimientos al chat, sistema operativo sin repetir.
+do $$
+declare j jsonb; k jsonb; t0 timestamptz := date_trunc('hour', now()) + interval '200 hours'; begin
+  perform pg_temp.como('lab@unal.edu.co');
+  perform consola_anotar('estado', true, '12 equipos');
+  j := registro(null, null, null, null, null, 25, 0);
+  perform pg_temp.ok((j ->> 'total')::int > 25 and jsonb_array_length(j -> 'filas') = 25, 'el registro trae páginas de 25 y el total');
+  k := registro(null, null, null, null, null, 25, 25);
+  perform pg_temp.ok((k -> 'filas' -> 0 ->> 'en')::timestamptz <= (j -> 'filas' -> 24 ->> 'en')::timestamptz, 'la página 2 sigue a la 1 (más reciente primero)');
+  j := registro(array['consola'], null, null, null, 'estado', 25, 0);
+  perform pg_temp.ok((j ->> 'total')::int = 1 and j -> 'filas' -> 0 ->> 'actor' = (select nombre from perfiles where correo = 'lab@unal.edu.co'), 'los comandos de la consola quedan con quién los ejecutó');
+  j := registro(array['faro'], 'unal-16', null, null, null, 100, 0);
+  perform pg_temp.ok((j ->> 'total')::int > 0 and not exists (select 1 from jsonb_array_elements(j -> 'filas') x where x ->> 'equipo' <> 'UNAL-16'),
+                     'filtro por fuente y equipo');
+  j := registro(array['reservas'], null, now() - interval '1 hour', null, null, 5000, 0);
+  perform pg_temp.ok((j ->> 'total')::int > 0 and jsonb_array_length(j -> 'filas') = least((j ->> 'total')::int, 5000), 'exportar por tandas de hasta 5000');
+  perform pg_temp.ok(not exists (select 1 from jsonb_array_elements(registro(array['fallas'], null, null, null, null, 500, 0) -> 'filas') x
+                                  where x ->> 'texto' ilike '%no da%video%'), 'el registro no expone la descripción de las fallas');
+  -- Mantenimiento → chat.
+  perform crear_mantenimiento('UNAL-09', 'correctivo', 'Cambio de fuente', t0 + interval '300 hours', t0 + interval '303 hours', 'lab@unal.edu.co', 0, true);
+  perform pg_temp.ok(exists (select 1 from cola_chat where tipo = 'mantenimiento' and texto like 'UNAL-09 entra en mantenimiento correctivo%'),
+                     'un mantenimiento nuevo avisa al chat');
+  -- Sistema operativo sin repetir.
+  update equipos set sistema_operativo = 'Windows', so_version = 'Windows 11 Pro' where codigo = 'UNAL-09';
+  perform pg_temp.ok((select so_version from equipos where codigo = 'UNAL-09') = '11 Pro', 'la versión se guarda sin repetir el sistema');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla($q$select registro()$q$, 'Solo el personal');
+  perform pg_temp.falla($q$select consola_anotar('x', true)$q$, 'Solo el personal');
+end $$;
+
 -- Permisos reales del rol que usa la PWA.
 select pg_temp.como('ana@unal.edu.co') \gset sin_
 set role authenticated;
@@ -461,6 +491,8 @@ do $$ begin
   perform pg_temp.falla($q$select * from faro_clave$q$, 'permission denied');
   perform pg_temp.falla($q$select * from chat_pendientes(5)$q$, 'permission denied');
   perform pg_temp.falla($q$select * from faro_uso$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from registro_v$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from consola_registro$q$, 'permission denied');
 end $$;
 reset role;
 

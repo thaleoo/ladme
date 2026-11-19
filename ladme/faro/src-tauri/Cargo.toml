@@ -1,6 +1,6 @@
 [package]
 name = "ladme-faro"
-version = "0.4.0"
+version = "0.4.1"
 description = "Faro: agente de los computadores de la sala LADME"
 authors = ["Laboratorio de Datos y Modelamiento Estadístico, UNAL Sede La Paz"]
 edition = "2021"

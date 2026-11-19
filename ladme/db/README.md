@@ -133,3 +133,16 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
   personal no pasan por este límite.
 - `crear_reserva` toma un candado por persona (`pg_advisory_xact_lock`), así que dos reservas enviadas al
   mismo tiempo no pueden pasar las dos.
+
+## Migración 0010 — Registro, consola y mantenimientos al chat
+
+`migrations/0010_registro_consola.sql`, después de 0009.
+
+- `registro(fuentes, equipo, desde, hasta, buscar, limite, offset)`: el historial completo (reservas,
+  Faro, fallas, mantenimientos, solicitudes, errores de la app y comandos de la consola) en un solo
+  lugar, de a páginas y con filtros. Solo personal. Nada se borra; la PWA exporta lo filtrado a CSV.
+  La descripción de las fallas no aparece (puede traer datos personales).
+- `consola_registro` y `consola_anotar()`: cada comando de la consola queda con quién lo ejecutó.
+- Un mantenimiento nuevo avisa al chat del personal.
+- Trigger en `equipos`: la versión del sistema se guarda sin repetir el tipo («Windows 11 Pro» →
+  sistema `Windows`, versión `11 Pro`).

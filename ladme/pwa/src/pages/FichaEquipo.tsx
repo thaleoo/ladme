@@ -8,8 +8,9 @@ import { esStaff, useAuth } from '../context/AuthContext'
 import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
 import MiReserva from '../components/MiReserva'
+import AgendaEquipo from '../components/AgendaEquipo'
 import { useTopeReservas } from '../lib/reservaVigente'
-import { conPunto, dia, diaCorto, fecha, finDia, hora, inicioDia, nuevoIdSolicitud, sumarDias } from '../lib/format'
+import { conPunto, dia, fecha, hora, nuevoIdSolicitud } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
@@ -53,6 +54,12 @@ export default function FichaEquipo() {
   const [recarga, setRecarga] = useState(0)
   const [mia, setMia] = useState<{ inicio: string; fin: string } | null>(null)
   const tope = useTopeReservas()
+  // «…/equipo/UNAL-05#agenda» lleva directo a la agenda cuando la ficha termina de cargar.
+  useEffect(() => {
+    if (equipo && window.location.hash === '#agenda') {
+      requestAnimationFrame(() => document.getElementById('agenda')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    }
+  }, [equipo])
   useEffect(() => {
     if (params.get('reportar') === '1' || params.get('accion') === 'reportar') setDialogo('falla')
     if (params.has('reportar') || params.has('accion') || params.has('llegada')) {
@@ -168,7 +175,6 @@ export default function FichaEquipo() {
   const esMia = !!mia && !!enCurso && new Date(mia.inicio).getTime() === new Date(enCurso.inicio).getTime()
   const libre = !enCurso && equipo?.estado === 'activo'
   const proximoLibre = useMemo(() => (enCurso ? proximaLibertad(ocupacion) : new Date()), [ocupacion, enCurso])
-  const dias = useMemo(() => Array.from({ length: 7 }, (_, i) => sumarDias(inicioDia(ahora), i)), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (cargando) return <Cargando texto="Cargando ficha del equipo…" />
 
@@ -373,40 +379,12 @@ export default function FichaEquipo() {
         </section>
       )}
 
-      <section className="card">
+      <section className="card" id="agenda">
         <div className="section-title" style={{ marginTop: 0 }}>
-          <h2>Agenda de los próximos 7 días</h2>
-          <span className="section-title__count">
-            {ocupacion.filter((o) => new Date(o.fin) > ahora).length} ocupaciones
-          </span>
+          <h2>Agenda</h2>
+          <span className="section-title__count">¿Cuándo puedo usarlo?</span>
         </div>
-
-        <div className="agenda">
-          {dias.map((d) => {
-            const tramos = ocupacion
-              .filter((o) => new Date(o.fin) > inicioDia(d) && new Date(o.inicio) < finDia(d))
-              .sort((a, b) => a.inicio.localeCompare(b.inicio))
-            return (
-              <div key={d.toISOString()} className="agenda__dia">
-                <div className="agenda__fecha">{diaCorto(d)}</div>
-                <div className="agenda__tramos">
-                  {tramos.length === 0 ? (
-                    <span className="agenda__libre">
-                      <Icon nombre="check" width={13} height={13} /> Día libre
-                    </span>
-                  ) : (
-                    tramos.map((o, i) => (
-                      <span key={`${o.inicio}-${i}`} className={`badge ${o.tipo === 'bloqueo' ? 'gray' : 'warn'}`}>
-                        {hora(o.inicio)}–{hora(o.fin)}
-                        {o.tipo === 'bloqueo' ? ' · bloqueo' : ''}
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <AgendaEquipo codigo={equipo.codigo} ocupacion={ocupacion} fueraDeServicio={equipo.estado !== 'activo'} />
       </section>
 
       <section className="card">

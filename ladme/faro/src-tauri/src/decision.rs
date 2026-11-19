@@ -179,6 +179,15 @@ pub struct Vista {
     pub limpieza_desde: Option<DateTime<Utc>>,
 }
 
+/// «Windows Windows 11 Pro» → «Windows 11 Pro»: el tipo de sistema y la versión a veces traen la misma palabra.
+fn sin_repetir(s: &str) -> String {
+    let palabras: Vec<&str> = s.split_whitespace().collect();
+    match palabras.as_slice() {
+        [a, b, ..] if a.eq_ignore_ascii_case(b) => palabras[1..].join(" "),
+        _ => palabras.join(" "),
+    }
+}
+
 const USO_RECIENTE_SEG: u64 = 120;
 
 fn es_reserva(o: &Ocupacion) -> bool {
@@ -222,7 +231,7 @@ pub fn decidir(e: &Entrada) -> Vista {
         pantalla: Pantalla::Ninguna,
         modo: Some(r.modo),
         equipo: Some(codigo.clone()),
-        sistema: Some(r.equipo.sistema.clone()).filter(|s| !s.is_empty()),
+        sistema: Some(sin_repetir(&r.equipo.sistema)).filter(|s| !s.is_empty()),
         titulo: String::new(),
         detalle: String::new(),
         cuenta_hasta: None,
@@ -528,6 +537,13 @@ mod pruebas {
         recordar(&mut m, Some(&antes), Some(&despues), t(0));
         assert_eq!(ver(&despues, 5, None, &m).limpieza_desde, Some(t(-60)));
         assert_eq!(ver(&despues, 20, None, &m).limpieza_desde, None);
+    }
+
+    #[test]
+    fn sistema_sin_palabra_repetida() {
+        assert_eq!(super::sin_repetir("Windows Windows 11 Pro"), "Windows 11 Pro");
+        assert_eq!(super::sin_repetir("Linux Fedora 43"), "Linux Fedora 43");
+        assert_eq!(super::sin_repetir(""), "");
     }
 
     #[test]
