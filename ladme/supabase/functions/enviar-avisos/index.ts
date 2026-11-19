@@ -108,9 +108,14 @@ function json(cuerpo: unknown, estado = 200): Response {
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405)
 
+  // Se acepta la clave de servicio (cron de pg_net) o un token propio (worker de Apps Script,
+  // que usa la clave secreta nueva y no la service_role). El token va en el secreto AVISOS_TOKEN.
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  const token = Deno.env.get('AVISOS_TOKEN') ?? ''
   const autorizacion = req.headers.get('Authorization') ?? ''
-  if (!serviceKey || autorizacion !== `Bearer ${serviceKey}`) {
+  const conClave = !!serviceKey && autorizacion === `Bearer ${serviceKey}`
+  const conToken = token.length >= 24 && req.headers.get('x-ladme-token') === token
+  if (!conClave && !conToken) {
     return json({ error: 'No autorizado.' }, 401)
   }
 

@@ -26,6 +26,23 @@ pub struct Remoto {
     pub comandos: Vec<Comando>,
     #[serde(default)]
     pub anuncio: Option<Anuncio>,
+    /// Desde la 0011: uso compartido en curso y personas esperando un equipo.
+    #[serde(default)]
+    pub compartido: Option<Compartido>,
+    #[serde(default)]
+    pub espera: i64,
+}
+
+/// Otra persona dejó un proceso corriendo y permite usar el equipo sin cerrar estos programas.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Compartido {
+    pub hasta: DateTime<Utc>,
+    #[serde(default)]
+    pub protegidos: Vec<String>,
+    #[serde(default)]
+    pub nota: Option<String>,
+    #[serde(default)]
+    pub titular: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -139,6 +156,8 @@ pub enum Estado {
     LibreEnUso,
     Bloqueado,
     Desbloqueado,
+    /// Uso compartido: se puede usar el equipo sin cerrar los programas protegidos.
+    Compartido,
     Mantenimiento,
     Ocupado,
 }
@@ -177,6 +196,10 @@ pub struct Vista {
     pub anuncio: Option<String>,
     /// Ofrecer borrar los archivos creados desde este momento (la sesión que terminó).
     pub limpieza_desde: Option<DateTime<Utc>>,
+    /// Uso compartido en curso (con o sin invitado): qué no se debe cerrar.
+    pub compartido: Option<Compartido>,
+    /// Personas esperando un equipo libre.
+    pub espera: i64,
 }
 
 /// «Windows Windows 11 Pro» → «Windows 11 Pro»: el tipo de sistema y la versión a veces traen la misma palabra.
@@ -215,6 +238,8 @@ pub fn decidir(e: &Entrada) -> Vista {
             llegada_pendiente: false,
             anuncio: None,
             limpieza_desde: None,
+            compartido: None,
+            espera: 0,
         };
     };
 
@@ -245,6 +270,8 @@ pub fn decidir(e: &Entrada) -> Vista {
         llegada_pendiente: false,
         anuncio: r.anuncio.as_ref().filter(|a| a.hasta > ahora).map(|a| a.texto.clone()),
         limpieza_desde: None,
+        compartido: r.compartido.clone().filter(|c| c.hasta > ahora),
+        espera: r.espera.max(0),
     };
 
     // La ocupación vigente según la copia (sin conexión, una reserva vale hasta su fin).
@@ -271,6 +298,24 @@ pub fn decidir(e: &Entrada) -> Vista {
                 }
             }
             v.cuenta_hasta = Some(hasta);
+            return v;
+        }
+    }
+
+    // 1b) Uso compartido sin nadie más: el equipo se puede usar sin cerrar los programas protegidos.
+    if actual.is_none() {
+        if let Some(c) = v.compartido.clone() {
+            v.estado = Estado::Compartido;
+            v.titulo = "Uso compartido".into();
+            // Lo que no se debe cerrar va en el aviso «protegido» de la isla; aquí solo la idea.
+            v.detalle = if c.protegidos.is_empty() {
+                "Puedes usar este equipo sin cerrar los programas abiertos.".into()
+            } else {
+                format!("Puedes usar este equipo sin cerrar {}.", c.protegidos.join(", "))
+            };
+            v.titular = c.titular.clone();
+            v.mensaje = c.nota.clone();
+            v.cuenta_hasta = Some(c.hasta);
             return v;
         }
     }
@@ -337,7 +382,7 @@ pub fn decidir(e: &Entrada) -> Vista {
         // 5) Sin ocupación vigente.
         None => {
             // Recién terminó una reserva: ofrecer borrar los archivos de esa sesión (15 min).
-            if r.politicas.sesion_limpia == 1 {
+            if r.politicas.sesion_limpia == 1 && v.compartido.is_none() {
                 if let (Some(fin), Some(ini)) = (e.memoria.fin_reciente, e.memoria.inicio_reciente) {
                     if fin <= ahora && ahora < fin + Duration::minutes(15) {
                         v.limpieza_desde = Some(ini);
@@ -421,6 +466,8 @@ mod pruebas {
             canal: None,
             comandos: vec![],
             anuncio: None,
+            compartido: None,
+            espera: 0,
         }
     }
 
@@ -537,6 +584,22 @@ mod pruebas {
         recordar(&mut m, Some(&antes), Some(&despues), t(0));
         assert_eq!(ver(&despues, 5, None, &m).limpieza_desde, Some(t(-60)));
         assert_eq!(ver(&despues, 20, None, &m).limpieza_desde, None);
+    }
+
+    #[test]
+    fn uso_compartido_no_bloquea() {
+        let mut r = remoto(Modo::Bloquear, None);
+        r.compartido = Some(Compartido { hasta: t(120), protegidos: vec!["RStudio".into()], nota: None, titular: Some("Ana".into()) });
+        let v = ver(&r, 0, Some(5), &Memoria::default());
+        assert_eq!(v.estado, Estado::Compartido);
+        assert_eq!(v.pantalla, Pantalla::Ninguna);
+        assert!(v.detalle.contains("RStudio"));
+        // Con un invitado, la vista es la de su reserva y conserva el aviso de lo protegido.
+        let mut g = remoto(Modo::Bloquear, Some(reserva(-5, 60)));
+        g.compartido = r.compartido.clone();
+        let v = ver(&g, 0, Some(5), &Memoria::default());
+        assert_eq!(v.estado, Estado::Reservado);
+        assert!(v.compartido.is_some());
     }
 
     #[test]

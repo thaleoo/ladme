@@ -24,7 +24,13 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
   faro_llegada_automatica: { titulo: 'Faro: registrar la llegada al detectar uso (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
   llegada_modo: { titulo: 'Quién registra la llegada (0 = la persona desde la app · 1 = solo el personal · 2 = con el QR de la isla de Faro)', unidad: '', min: 0, max: 2 },
   liberar_no_show_min: { titulo: 'Liberar sola una reserva sin llegada ni uso del PC (0 = nunca)', unidad: 'minutos', min: 0, max: 120 },
-  faro_sesion_limpia: { titulo: 'Faro ofrece borrar los archivos de la persona al terminar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 }
+  faro_sesion_limpia: { titulo: 'Faro ofrece borrar los archivos de la persona al terminar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
+  uso_compartido: { titulo: 'Permitir uso compartido de reservas (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
+  clase_semanas_max: { titulo: 'Semanas máximas de una solicitud de sala para clase', unidad: 'semanas', min: 1, max: 30 },
+  sala_encender_hhmm: { titulo: 'Encender la sala a las (HHMM, p. ej. 700; 0 = no)', unidad: '', min: 0, max: 2359 },
+  sala_apagar_hhmm: { titulo: 'Apagar la sala a las (HHMM, p. ej. 1900; 0 = no). Se omiten equipos con reserva o clase', unidad: '', min: 0, max: 2359 },
+  sala_aviso_cierre_min: { titulo: 'Anuncio de cierre antes de apagar', unidad: 'min', min: 0, max: 120 },
+  sala_sabado: { titulo: 'El horario automático aplica los sábados (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 }
 }
 
 /** Solo administradores. Los cambios aplican de inmediato a las reservas nuevas. */

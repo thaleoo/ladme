@@ -1,0 +1,396 @@
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { esStaff, useAuth } from '../context/AuthContext'
+import { cancelarClase, listarClases, obtenerClase, salaPublica, solicitarClase, type EquipoSala } from '../lib/api'
+import type { Clase, EstadoClase } from '../lib/types'
+import PageHeader, { Cargando, Empty } from '../components/PageHeader'
+import Icon from '../components/Icon'
+import Modal from '../components/Modal'
+
+/**
+ * Sala para clases: el docente pide la sala para su clase semanal, el personal la aprueba con los
+ * equipos libres y el docente imprime la lista de equipos habilitados para sus estudiantes.
+ */
+
+export const DIAS = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+const CORTOS = ['', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+
+export const TEXTO_ESTADO: Record<EstadoClase, { texto: string; tono: string }> = {
+  pendiente: { texto: 'Pendiente', tono: 'warn' },
+  aprobada: { texto: 'Aprobada', tono: 'ok' },
+  rechazada: { texto: 'No aprobada', tono: 'danger' },
+  cancelada: { texto: 'Cancelada', tono: 'gray' }
+}
+
+const hhmm = (t: string) => t.slice(0, 5)
+const fechaCorta = (d: string) =>
+  new Date(`${d}T12:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+
+export function textoHorario(c: Pick<Clase, 'dias' | 'hora_inicio' | 'hora_fin' | 'desde' | 'hasta'>): string {
+  return `${c.dias.map((d) => CORTOS[d]).join(', ')} · ${hhmm(c.hora_inicio)}–${hhmm(c.hora_fin)} · ${fechaCorta(c.desde)} al ${fechaCorta(c.hasta)}`
+}
+
+/** Fechas de cada sesión (para la hoja impresa y el conteo del formulario). */
+export function sesiones(c: Pick<Clase, 'dias' | 'desde' | 'hasta'>): Date[] {
+  const salida: Date[] = []
+  const d = new Date(`${c.desde}T12:00`)
+  const fin = new Date(`${c.hasta}T12:00`)
+  while (d <= fin && salida.length < 200) {
+    const iso = d.getDay() === 0 ? 7 : d.getDay()
+    if (c.dias.includes(iso)) salida.push(new Date(d))
+    d.setDate(d.getDate() + 1)
+  }
+  return salida
+}
+
+const hoyIso = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function Formulario({ alEnviar }: { alEnviar: () => void }) {
+  const { perfil } = useAuth()
+  const [nombre, setNombre] = useState('')
+  const [docente, setDocente] = useState(perfil?.nombre ?? '')
+  const [grupo, setGrupo] = useState('1')
+  const [dias, setDias] = useState<number[]>([])
+  const [inicio, setInicio] = useState('14:00')
+  const [fin, setFin] = useState('16:00')
+  const [desde, setDesde] = useState(hoyIso())
+  const [hasta, setHasta] = useState('')
+  const [equipos, setEquipos] = useState('')
+  const [notas, setNotas] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const n = useMemo(() => (dias.length && desde && hasta ? sesiones({ dias, desde, hasta }).length : 0), [dias, desde, hasta])
+
+  async function enviar(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (!dias.length) return setError('Elija al menos un día de la semana.')
+    if (!hasta) return setError('Indique hasta qué fecha se repite la clase.')
+    setEnviando(true)
+    try {
+      await solicitarClase({
+        nombre: nombre.trim(),
+        docente: docente.trim(),
+        grupo: Number(grupo),
+        dias,
+        horaInicio: inicio,
+        horaFin: fin,
+        desde,
+        hasta,
+        equipos: equipos ? Number(equipos) : null,
+        notas: notas.trim() || null
+      })
+      alEnviar()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo enviar la solicitud.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <form className="stack" onSubmit={enviar}>
+      <div className="grid-2">
+        <div className="field">
+          <label className="field__label" htmlFor="cl-nombre">Nombre de la clase</label>
+          <input id="cl-nombre" required minLength={3} maxLength={120} value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Estadística I" />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="cl-grupo">Grupo</label>
+          <input id="cl-grupo" required type="number" min={1} max={999} inputMode="numeric" value={grupo} onChange={(e) => setGrupo(e.target.value)} />
+        </div>
+      </div>
+      <div className="field">
+        <label className="field__label" htmlFor="cl-docente">Docente responsable</label>
+        <input id="cl-docente" required minLength={3} maxLength={120} value={docente} onChange={(e) => setDocente(e.target.value)} />
+      </div>
+      <div className="field">
+        <span className="field__label">Días de clase</span>
+        <div className="chips" role="group" aria-label="Días de clase">
+          {[1, 2, 3, 4, 5, 6].map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={`chip ${dias.includes(d) ? 'activo' : ''}`}
+              aria-pressed={dias.includes(d)}
+              onClick={() => setDias((x) => (x.includes(d) ? x.filter((y) => y !== d) : [...x, d].sort()))}
+            >
+              {DIAS[d]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid-2">
+        <div className="field">
+          <label className="field__label" htmlFor="cl-inicio">Desde las</label>
+          <input id="cl-inicio" type="time" required value={inicio} onChange={(e) => setInicio(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="cl-fin">Hasta las</label>
+          <input id="cl-fin" type="time" required value={fin} onChange={(e) => setFin(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="cl-desde">Primera semana</label>
+          <input id="cl-desde" type="date" required min={hoyIso()} value={desde} onChange={(e) => setDesde(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="cl-hasta">Se repite hasta</label>
+          <input id="cl-hasta" type="date" required min={desde} value={hasta} onChange={(e) => setHasta(e.target.value)} />
+          <span className="field__hint">Para una sola sesión, ponga la misma fecha.</span>
+        </div>
+      </div>
+      <div className="field">
+        <label className="field__label" htmlFor="cl-equipos">Computadores que necesita (opcional)</label>
+        <input id="cl-equipos" type="number" min={1} max={200} inputMode="numeric" value={equipos} onChange={(e) => setEquipos(e.target.value)} placeholder="Número de estudiantes" />
+      </div>
+      <div className="field">
+        <label className="field__label" htmlFor="cl-notas">Notas para el laboratorio (opcional)</label>
+        <textarea id="cl-notas" maxLength={500} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Programas que usarán, si es un parcial…" />
+      </div>
+      {n > 0 && (
+        <p className="small muted" style={{ margin: 0 }}>
+          {n === 1 ? '1 sesión' : `${n} sesiones`} en total. El laboratorio asigna los computadores libres en todas ellas.
+        </p>
+      )}
+      {error && (
+        <div className="alert danger">
+          <Icon nombre="alerta" />
+          <div className="alert__body">{error}</div>
+        </div>
+      )}
+      <button type="submit" disabled={enviando}>
+        {enviando ? 'Enviando…' : 'Enviar solicitud'}
+      </button>
+    </form>
+  )
+}
+
+export default function Clases() {
+  const { perfil } = useAuth()
+  const staff = esStaff(perfil)
+  const docente = perfil?.tipo_usuario === 'Docente/Investigador' || staff
+  const [lista, setLista] = useState<Clase[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [nueva, setNueva] = useState(false)
+  const [enviada, setEnviada] = useState(false)
+
+  const cargar = () =>
+    listarClases()
+      .then((l) => setLista(staff ? l.filter((c) => c.solicitante === perfil?.id) : l))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'No se pudieron cargar las clases.'))
+
+  useEffect(() => {
+    void cargar()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="stack">
+      <PageHeader
+        eyebrow="Docentes"
+        titulo="Sala para clases"
+        sub="Pida los computadores del LADME para su clase. El laboratorio asigna los equipos libres y usted imprime la lista para sus estudiantes."
+        acciones={
+          docente && (
+            <button type="button" onClick={() => setNueva(true)}>
+              <Icon nombre="calendario" width={16} height={16} /> Solicitar sala
+            </button>
+          )
+        }
+      />
+
+      {!docente && (
+        <div className="alert info">
+          <Icon nombre="info" />
+          <div className="alert__body">
+            Solo los docentes pueden solicitar la sala para una clase. Si es docente, cambie su tipo de usuario en{' '}
+            <Link to="/cuenta#perfil">Cuenta</Link>.
+          </div>
+        </div>
+      )}
+      {enviada && (
+        <div className="alert ok" role="status">
+          <Icon nombre="check" />
+          <div className="alert__body">Solicitud enviada. El personal del laboratorio la revisa y le avisará por correo y en la app.</div>
+        </div>
+      )}
+      {error && <div className="alert danger"><Icon nombre="alerta" /><div className="alert__body">{error}</div></div>}
+
+      {!lista && !error ? (
+        <Cargando texto="Cargando clases…" />
+      ) : lista && lista.length === 0 ? (
+        <div className="card">
+          <Empty icono="calendario" titulo="Aún no ha pedido la sala">
+            {docente ? 'Toque «Solicitar sala» para pedirla para una clase.' : 'Aquí aparecerán sus solicitudes.'}
+          </Empty>
+        </div>
+      ) : (
+        <ul className="lista-clases">
+          {lista?.map((c) => (
+            <li key={c.id}>
+              <Link className="card clase-item" to={`/clases/${c.id}`}>
+                <span className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                  <strong>{c.nombre} · grupo {c.grupo}</strong>
+                  <span className={`badge ${TEXTO_ESTADO[c.estado].tono}`}>{TEXTO_ESTADO[c.estado].texto}</span>
+                </span>
+                <span className="small muted">{textoHorario(c)}</span>
+                {c.estado === 'aprobada' && c.equipos && <span className="small">{c.equipos.length} equipos habilitados</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Modal abierto={nueva} titulo="Solicitar la sala para una clase" onCerrar={() => setNueva(false)}>
+        <Formulario
+          alEnviar={() => {
+            setNueva(false)
+            setEnviada(true)
+            void cargar()
+          }}
+        />
+      </Modal>
+    </div>
+  )
+}
+
+/** Detalle de una clase con la hoja imprimible de equipos habilitados. */
+export function ClaseDetalle() {
+  const { id } = useParams()
+  const { perfil } = useAuth()
+  const [c, setC] = useState<Clase | null | undefined>(undefined)
+  const [sala, setSala] = useState<EquipoSala[]>([])
+  const [cancelar, setCancelar] = useState(false)
+  const [motivo, setMotivo] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    obtenerClase(Number(id))
+      .then(setC)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'No se pudo cargar.'))
+    salaPublica().then(setSala).catch(() => setSala([]))
+  }, [id])
+
+  if (c === undefined && !error) return <Cargando texto="Cargando clase…" />
+  if (!c) return <div className="card"><Empty icono="buscar" titulo="Clase no encontrada">{error ?? 'Puede que no tenga acceso a esta solicitud.'}</Empty></div>
+
+  const habilitados = new Set(c.equipos ?? [])
+  const xs = sala.map((e) => e.x ?? 0)
+  const ys = sala.map((e) => e.y ?? 0)
+  const conPlano = sala.length > 0 && sala.every((e) => e.x && e.y)
+  const fechas = sesiones(c)
+  const puedeCancelar = (c.estado === 'pendiente' || c.estado === 'aprobada') && (c.solicitante === perfil?.id || esStaff(perfil))
+
+  return (
+    <div className="stack clase-detalle">
+      <PageHeader
+        volver={{ a: '/clases', texto: 'Clases' }}
+        titulo={`${c.nombre} · grupo ${c.grupo}`}
+        sub={textoHorario(c)}
+        acciones={
+          <span className="row tight no-imprimir">
+            {c.estado === 'aprobada' && (
+              <button type="button" onClick={() => window.print()}>
+                <Icon nombre="imprimir" width={16} height={16} /> Imprimir lista
+              </button>
+            )}
+            {puedeCancelar && (
+              <button type="button" className="btn ghost" onClick={() => setCancelar(true)}>
+                Cancelar clase
+              </button>
+            )}
+          </span>
+        }
+      />
+      <span className={`badge ${TEXTO_ESTADO[c.estado].tono} no-imprimir`} style={{ alignSelf: 'flex-start' }}>
+        {TEXTO_ESTADO[c.estado].texto}
+      </span>
+      {c.respuesta && (
+        <div className="alert info">
+          <Icon nombre="info" />
+          <div className="alert__body"><strong>Nota del laboratorio:</strong> {c.respuesta}</div>
+        </div>
+      )}
+      {c.estado === 'pendiente' && (
+        <p className="small muted">El personal del laboratorio está revisando la solicitud. Recibirá un aviso cuando la apruebe.</p>
+      )}
+
+      {c.estado === 'aprobada' && c.equipos && (
+        <section className="card hoja-clase">
+          <div className="hoja-clase__cabecera">
+            <div>
+              <div className="eyebrow">LADME · Laboratorio de Datos y Modelamiento Estadístico</div>
+              <h2>{c.nombre} · grupo {c.grupo}</h2>
+              <p className="small" style={{ margin: 0 }}>
+                Docente: <strong>{c.docente}</strong>
+              </p>
+              <p className="small" style={{ margin: 0 }}>
+                {c.dias.map((d) => DIAS[d]).join(', ')} de {hhmm(c.hora_inicio)} a {hhmm(c.hora_fin)} · del {fechaCorta(c.desde)} al{' '}
+                {fechaCorta(c.hasta)}
+              </p>
+            </div>
+            <div className="hoja-clase__total">
+              <strong>{c.equipos.length}</strong>
+              <span>equipos</span>
+            </div>
+          </div>
+          <h3>Equipos habilitados para la clase</h3>
+          <ul className="hoja-clase__codigos">
+            {c.equipos.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+          {conPlano && (
+            <>
+              <h3>Ubicación en la sala</h3>
+              <div
+                className="hoja-clase__plano"
+                style={{ gridTemplateColumns: `repeat(${Math.max(...xs)}, 1fr)`, gridTemplateRows: `repeat(${Math.max(...ys)}, auto)` }}
+              >
+                {sala.map((e) => (
+                  <span key={e.codigo} className={habilitados.has(e.codigo) ? 'si' : ''} style={{ gridColumn: e.x ?? 1, gridRow: e.y ?? 1 }}>
+                    {e.codigo.replace(/^[A-Z]+-/, '')}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+          <p className="small hoja-clase__nota">
+            Use solo los equipos de esta lista durante la clase. Los demás pueden estar reservados por otras personas. Si un equipo
+            habilitado falla, avise al personal del laboratorio.
+          </p>
+          <details className="no-imprimir">
+            <summary className="small">Ver las {fechas.length} sesiones</summary>
+            <p className="small muted">{fechas.map((f) => f.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })).join(' · ')}</p>
+          </details>
+        </section>
+      )}
+
+      <Modal abierto={cancelar} titulo="Cancelar la clase" onCerrar={() => setCancelar(false)}>
+        <div className="stack">
+          <p className="small" style={{ margin: 0 }}>Se liberan todas las sesiones que aún no han ocurrido.</p>
+          <div className="field">
+            <label className="field__label" htmlFor="cl-motivo">Motivo (opcional)</label>
+            <input id="cl-motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={200} />
+          </div>
+          {error && <div className="alert danger"><Icon nombre="alerta" /><div className="alert__body">{error}</div></div>}
+          <button
+            type="button"
+            className="btn danger"
+            onClick={() =>
+              void cancelarClase(c.id, motivo)
+                .then(() => obtenerClase(c.id).then(setC))
+                .then(() => setCancelar(false))
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : 'No se pudo cancelar.'))
+            }
+          >
+            Cancelar la clase
+          </button>
+        </div>
+      </Modal>
+    </div>
+  )
+}

@@ -256,6 +256,11 @@ supabase functions deploy enviar-avisos --no-verify-jwt
 
 La función está en `ladme/supabase/functions/enviar-avisos/index.ts`. Lee la cola `cola_notificaciones`, envía a las suscripciones del usuario y elimina las suscripciones vencidas (404/410).
 
+> **Alternativa sin pg_net (recomendada si usa la clave secreta nueva `sb_secret_…`):** agregue el
+> secreto `AVISOS_TOKEN` (cadena aleatoria de 32+ caracteres) a la función y la misma cadena en la
+> propiedad `AVISOS_TOKEN` de Apps Script. El worker de correo llama a la función cada 5 minutos y no
+> hace falta el cron `ladme-push` de abajo.
+
 ### 4.3 Programar el cron
 
 En **Database → Extensions**, habilite `pg_cron` y `pg_net`. Luego ejecute en SQL Editor:

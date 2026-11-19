@@ -170,8 +170,10 @@ export default function Disponibilidad() {
     const ahora = Date.now()
     return equipos.map((equipo) => {
       const lista = porEquipo.get(equipo.codigo) ?? []
-      const actual = lista.find((o) => new Date(o.inicio).getTime() <= ahora && new Date(o.fin).getTime() > ahora)
-      const proxima = lista.find((o) => new Date(o.inicio).getTime() > ahora)
+      // Un uso compartido no ocupa el equipo: se puede usar sin cerrar los programas protegidos.
+      const actual = lista.find((o) => !o.compartida && new Date(o.inicio).getTime() <= ahora && new Date(o.fin).getTime() > ahora)
+      const compartido = lista.find((o) => o.compartida && new Date(o.inicio).getTime() <= ahora && new Date(o.fin).getTime() > ahora)
+      const proxima = lista.find((o) => !o.compartida && new Date(o.inicio).getTime() > ahora)
       if (equipo.estado !== 'activo') {
         return { equipo, situacion: 'inactivo', detalle: equipo.estado === 'mantenimiento' ? 'Mantenimiento' : 'Fuera de servicio' }
       }
@@ -182,6 +184,7 @@ export default function Disponibilidad() {
           detalle: `hasta ${cuando(actual.fin)}`
         }
       }
+      if (compartido) return { equipo, proxima, situacion: 'libre', detalle: `Uso compartido hasta ${cuando(compartido.fin)}` }
       return { equipo, proxima, situacion: 'libre', detalle: proxima ? `hasta ${cuando(proxima.inicio)}` : 'Libre' }
     })
   }, [equipos, porEquipo])

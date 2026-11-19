@@ -146,3 +146,24 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
 - Un mantenimiento nuevo avisa al chat del personal.
 - Trigger en `equipos`: la versión del sistema se guarda sin repetir el tipo («Windows 11 Pro» →
   sistema `Windows`, versión `11 Pro`).
+
+## Migración 0011 — Clases, uso compartido y mejoras de Faro
+
+`migrations/0011_clases_compartido.sql`, después de 0010.
+
+- **Uso compartido:** `reservas.compartida` y `protegidos`. Las reservas compartidas no chocan con
+  sus invitados pero sí entre ellas (dos restricciones de exclusión); un trigger impide compartir
+  encima de otras reservas y poner un bloqueo sobre un proceso compartido. `marcar_compartida()`;
+  `ocupacion_publica` y `equipos_disponibles` lo tienen en cuenta. La titular recibe aviso cuando
+  alguien reserva dentro de su horario.
+- **Clases:** tabla `clases` y `reservas.clase_id`. `solicitar_clase()` (solo
+  Docente/Investigador o personal), `clase_previa()`, `aprobar_clase()` (un bloqueo por equipo y
+  sesión), `rechazar_clase()` y `cancelar_clase()`. Avisos al chat del personal y al docente.
+- **Faro:** `faro_estado` queda envuelto (`_faro_estado_base` + lo nuevo): clases aprobadas en curso
+  desbloquean el equipo, datos de uso compartido y lista de espera, minutos por programa
+  (`faro_programas`) y aviso de salud del disco.
+- `reportes.diagnostico`: lo último que Faro sabía del equipo al reportar la falla.
+- `sala_tick()` (lo llama el worker cada 5 min): horario automático de encendido y apagado
+  (políticas `sala_*`) y aviso de posible caída de la red.
+- Las notificaciones al teléfono ya existían (`push_suscripciones`, `push-sw.js` y la función
+  `enviar-avisos`); ver `docs/DESPLIEGUE.md` §4.

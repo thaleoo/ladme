@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { crearReserva, equiposDisponibles, listarEquipos, solicitarExcepcion } from '../lib/api'
-import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo } from '../lib/types'
+import { crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
+import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { useTopeReservas } from '../lib/reservaVigente'
@@ -39,6 +39,10 @@ export default function Reservar() {
   const [detalle, setDetalle] = useState('')
   const [desatendido, setDesatendido] = useState(false)
   const [mensaje, setMensaje] = useState('')
+  const [compartida, setCompartida] = useState(false)
+  const [protegidos, setProtegidos] = useState<string[]>([])
+  const [otrosProtegidos, setOtrosProtegidos] = useState('')
+  const [ocupEquipo, setOcupEquipo] = useState<Ocupacion[]>([])
   const [justificacion, setJustificacion] = useState('')
   const [idSolicitud, setIdSolicitud] = useState(() => nuevoIdSolicitud())
   const [cargando, setCargando] = useState(true)
@@ -46,6 +50,18 @@ export default function Reservar() {
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [disponibles, setDisponibles] = useState<string[] | null>(null)
+
+  // Ocupación del equipo elegido: para avisar si el horario cae en un uso compartido.
+  useEffect(() => {
+    if (!equipo) return setOcupEquipo([])
+    let vivo = true
+    ocupacionPublica(equipo)
+      .then((l) => vivo && setOcupEquipo(l))
+      .catch(() => vivo && setOcupEquipo([]))
+    return () => {
+      vivo = false
+    }
+  }, [equipo])
 
   useEffect(() => {
     let vivo = true
@@ -156,6 +172,14 @@ export default function Reservar() {
         mensaje: mensaje.trim() || undefined,
         idSolicitud
       })
+      if (compartida && desatendido) {
+        const todos = [...protegidos, ...otrosProtegidos.split(',').map((x) => x.trim()).filter(Boolean)]
+        try {
+          await marcarCompartida(reserva.id, true, todos, mensaje.trim() || undefined)
+        } catch (e) {
+          toast.mostrar(`La reserva quedó creada, pero no se pudo compartir: ${e instanceof Error ? e.message : ''}`)
+        }
+      }
       setIdSolicitud(nuevoIdSolicitud())
       navigate(`/credencial/${reserva.id}`, { replace: true, state: { recienCreada: true } })
     } catch (e) {
@@ -182,6 +206,16 @@ export default function Reservar() {
   }
 
   const equipoActual = equipos.find((e) => e.codigo === equipo)
+  // ¿El horario elegido cae dentro del uso compartido de otra persona?
+  const anfitrion = (() => {
+    try {
+      const a = new Date(aIso(inicio)).getTime()
+      const b = new Date(aIso(fin)).getTime()
+      return ocupEquipo.find((o) => o.compartida && new Date(o.inicio).getTime() < b && new Date(o.fin).getTime() > a) ?? null
+    } catch {
+      return null
+    }
+  })()
   const categorias = [...new Set(equipos.map((e) => e.categoria))].sort()
   const porcentaje = Number.isFinite(duracion) && duracion > 0 ? Math.min(100, (duracion / lim.maxTotal) * 100) : 0
 
@@ -413,6 +447,49 @@ export default function Reservar() {
             </div>
           )}
 
+          {desatendido && !esLarga && lim.usoCompartido && (
+            <div className="compartir-caja">
+              <label className="check-row" style={{ margin: 0 }}>
+                <input type="checkbox" checked={compartida} onChange={(e) => setCompartida(e.target.checked)} />
+                <span>
+                  <strong>Uso compartido</strong>
+                  Mientras su proceso corre, otras personas pueden usar este equipo y reservarlo en su horario, sin cerrar los
+                  programas que usted proteja. Faro les muestra el aviso y no deja apagar ni reiniciar el equipo de forma remota.
+                </span>
+              </label>
+              {compartida && (
+                <>
+                  <span className="field__label">Programas que nadie debe cerrar</span>
+                  {(equipoActual?.software ?? []).length > 0 && (
+                    <div className="chips" role="group" aria-label="Programas protegidos">
+                      {(equipoActual?.software ?? []).map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          className={`chip ${protegidos.includes(p) ? 'activo' : ''}`}
+                          aria-pressed={protegidos.includes(p)}
+                          onClick={() => setProtegidos((x) => (x.includes(p) ? x.filter((y) => y !== p) : [...x, p]))}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    aria-label="Otros programas protegidos"
+                    value={otrosProtegidos}
+                    onChange={(e) => setOtrosProtegidos(e.target.value)}
+                    maxLength={200}
+                    placeholder="Otros, separados por coma (p. ej. script de Python en la terminal)"
+                  />
+                  <p className="tiny muted" style={{ margin: 0 }}>
+                    Guarde sus resultados en su carpeta o en la nube: quien use el equipo trabaja en la misma sesión del computador.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="row" style={{ gap: 'var(--s2)' }}>
             <button type="submit" disabled={enviando || cargando || tope.alcanzado || !!problema || (adminExcede && !confirmaExceso)}>
               {enviando ? (
@@ -452,6 +529,18 @@ export default function Reservar() {
               <div className="alert__body">{aviso}</div>
             </div>
           )}
+          {anfitrion && (
+            <div className="alert warn" role="status">
+              <Icon nombre="compartir" />
+              <div className="alert__body">
+                <strong>Este horario es de uso compartido.</strong> Otra persona dejó un proceso corriendo en {equipo}. Puede usar el
+                equipo, pero <strong>no cierre</strong> {anfitrion.protegidos?.length ? anfitrion.protegidos.join(', ') : 'los programas abiertos'}, ni
+                cierre la sesión, reinicie o apague el computador.
+                {anfitrion.mensaje_llegada && <> Nota: «{anfitrion.mensaje_llegada}».</>}
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="alert danger">
               <Icon nombre="alerta" />

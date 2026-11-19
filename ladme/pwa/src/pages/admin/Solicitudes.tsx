@@ -7,6 +7,7 @@ import { Cargando, Empty } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
 import Modal from '../../components/Modal'
 import { useToast } from '../../components/Toast'
+import SolicitudesClase from './SolicitudesClase'
 
 const TONO: Record<Solicitud['estado'], string> = { pendiente: 'warn', aprobada: 'ok', rechazada: 'danger', retirada: 'gray' }
 
@@ -59,6 +60,10 @@ export default function Solicitudes() {
 
   return (
     <>
+      <SolicitudesClase />
+      <div className="section-title">
+        <h2>Reservas largas</h2>
+      </div>
       {!admin && (
         <div className="alert info">
           <Icon nombre="info" />

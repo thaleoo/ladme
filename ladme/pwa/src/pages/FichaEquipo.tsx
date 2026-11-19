@@ -170,7 +170,8 @@ export default function FichaEquipo() {
   }, [codigo, perfil, recarga])
 
   const ahora = new Date()
-  const enCurso = ocupacion.find((o) => new Date(o.inicio) <= ahora && new Date(o.fin) > ahora)
+  const enCurso = ocupacion.find((o) => !o.compartida && new Date(o.inicio) <= ahora && new Date(o.fin) > ahora)
+  const compartidoAhora = ocupacion.find((o) => o.compartida && new Date(o.inicio) <= ahora && new Date(o.fin) > ahora)
   // La reserva en curso es la de quien mira: ya tiene «Tu reserva», no tiene sentido preguntarse a sí mismo.
   const esMia = !!mia && !!enCurso && new Date(mia.inicio).getTime() === new Date(enCurso.inicio).getTime()
   const libre = !enCurso && equipo?.estado === 'activo'
@@ -229,7 +230,7 @@ export default function FichaEquipo() {
         }
       />
 
-      <div className="stats">
+      <div className="stats stats--2">
         <div className={`stat ${libre ? 'ok' : 'warn'}`}>
           <div className="stat__label">
             <Icon nombre="monitor" width={14} height={14} /> Estado actual
@@ -259,21 +260,25 @@ export default function FichaEquipo() {
             )}
           </div>
         </div>
-        <div className="stat">
-          <div className="stat__label">
-            <Icon nombre="ticket" width={14} height={14} /> Reservas
-          </div>
-          <div className="stat__value">{ocupacion.filter((o) => o.tipo === 'reserva').length}</div>
-        </div>
-        <div className="stat">
-          <div className="stat__label">
-            <Icon nombre="llave" width={14} height={14} /> Bloqueos
-          </div>
-          <div className="stat__value">{ocupacion.filter((o) => o.tipo === 'bloqueo').length}</div>
-        </div>
       </div>
 
+      {compartidoAhora && !enCurso && !(mia && new Date(mia.inicio).getTime() === new Date(compartidoAhora.inicio).getTime()) && (
+        <section className="card compartido-card">
+          <div className="row tight">
+            <Icon nombre="compartir" />
+            <strong>En uso compartido hasta {hora(compartidoAhora.fin)}</strong>
+          </div>
+          <p className="small" style={{ margin: 0 }}>
+            Otra persona dejó un proceso corriendo y permite usar este equipo. Puede trabajar aquí, pero <strong>no cierre</strong>{' '}
+            {compartidoAhora.protegidos?.length ? compartidoAhora.protegidos.join(', ') : 'los programas abiertos'}, ni cierre la
+            sesión, reinicie o apague el computador.
+          </p>
+          {compartidoAhora.mensaje_llegada && <p className="small muted" style={{ margin: 0 }}>«{compartidoAhora.mensaje_llegada}»</p>}
+        </section>
+      )}
+
       <MiReserva
+        software={equipo.software ?? []}
         equipo={equipo.codigo}
         accion={accion}
         codigoLlegada={codigoLlegada}

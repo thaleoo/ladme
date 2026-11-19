@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { extenderReserva, liberarReserva, misReservas, registrarLlegada, registrarLlegadaPc, valorarReserva } from '../lib/api'
+import { extenderReserva, liberarReserva, marcarCompartida, misReservas, registrarLlegada, registrarLlegadaPc, valorarReserva } from '../lib/api'
 import type { Reserva } from '../lib/types'
 import { conPunto, hora, horasEntre } from '../lib/format'
 import { useLimites } from '../lib/politicas'
@@ -10,6 +10,8 @@ import { useToast } from './Toast'
 
 interface Props {
   equipo: string
+  /** Programas detectados en el equipo, para elegir cuáles proteger al compartir. */
+  software?: string[]
   /** «extender» o «liberar» cuando la ficha se abre desde la isla de Faro. */
   accion: string | null
   /** Código del QR de llegada de la isla (?llegada=…). */
@@ -24,10 +26,13 @@ interface Props {
  * «Tu reserva» en la ficha del equipo: aparece solo si quien mira tiene la reserva vigente
  * (o por empezar) de ESTE equipo. Desde aquí registra la llegada, extiende o libera.
  */
-export default function MiReserva({ equipo, accion, codigoLlegada, alCambiar, alVer }: Props) {
+export default function MiReserva({ equipo, software = [], accion, codigoLlegada, alCambiar, alVer }: Props) {
   const lim = useLimites()
   const toast = useToast()
   const [reserva, setReserva] = useState<Reserva | null | undefined>(undefined)
+  const [compartiendo, setCompartiendo] = useState(false)
+  const [protegidos, setProtegidos] = useState<string[]>([])
+  const [notaCompartir, setNotaCompartir] = useState('')
   const [ocupado, setOcupado] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [extendiendo, setExtendiendo] = useState(accion === 'extender')
@@ -176,7 +181,58 @@ export default function MiReserva({ equipo, accion, codigoLlegada, alCambiar, al
         <Link className="btn ghost" to={`/credencial/${reserva.id}`}>
           <Icon nombre="qr" /> Mi pase
         </Link>
+        {lim.usoCompartido &&
+          (reserva.compartida ? (
+            <button className="btn ghost" type="button" disabled={ocupado}
+                    onClick={() => void hacer(async () => { await marcarCompartida(reserva.id, false); toast.mostrar('Ya no está compartida.') })}>
+              <Icon nombre="compartir" /> Dejar de compartir
+            </button>
+          ) : (
+            <button className="btn ghost" type="button" disabled={ocupado} onClick={() => setCompartiendo(true)}>
+              <Icon nombre="compartir" /> Compartir mientras no estoy
+            </button>
+          ))}
       </div>
+      {reserva.compartida && (
+        <p className="small mt" style={{ margin: 0 }}>
+          <span className="badge info">Uso compartido</span> Otras personas pueden usar el equipo sin cerrar{' '}
+          {reserva.protegidos?.length ? reserva.protegidos.join(', ') : 'sus programas'}.
+        </p>
+      )}
+
+      <Modal abierto={compartiendo} titulo={`Compartir ${equipo} mientras no está`} onCerrar={() => setCompartiendo(false)}>
+        <div className="stack">
+          <p className="small" style={{ margin: 0 }}>
+            Mientras su proceso corre, otras personas pueden usar este equipo y reservarlo en su horario. Verán qué programas no deben
+            cerrar, y Faro no deja apagar ni reiniciar el equipo de forma remota. Ellas trabajan en la misma sesión del computador:
+            guarde sus resultados en su carpeta o en la nube.
+          </p>
+          <span className="field__label">Programas que nadie debe cerrar</span>
+          {software.length > 0 && (
+            <div className="chips" role="group" aria-label="Programas protegidos">
+              {software.map((p) => (
+                <button key={p} type="button" className={`chip ${protegidos.includes(p) ? 'activo' : ''}`} aria-pressed={protegidos.includes(p)}
+                        onClick={() => setProtegidos((x) => (x.includes(p) ? x.filter((y) => y !== p) : [...x, p]))}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="field">
+            <label className="field__label" htmlFor="mr-nota">Nota para quien use el equipo</label>
+            <input id="mr-nota" maxLength={140} value={notaCompartir} onChange={(e) => setNotaCompartir(e.target.value)}
+                   placeholder="Ej. No cerrar la terminal: entrenamiento hasta las 6 p. m." />
+          </div>
+          <button type="button" disabled={ocupado}
+                  onClick={() => void hacer(async () => {
+                    await marcarCompartida(reserva.id, true, protegidos, notaCompartir.trim() || undefined)
+                    setCompartiendo(false)
+                    toast.mostrar('Listo: su reserva es de uso compartido.')
+                  })}>
+            <Icon nombre="compartir" /> Compartir
+          </button>
+        </div>
+      </Modal>
 
       {extendiendo && empezo && (
         <div className="mt">

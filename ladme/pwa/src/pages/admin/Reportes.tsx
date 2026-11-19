@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { atenderReporte, listarReportes } from '../../lib/api'
-import type { Reporte } from '../../lib/types'
+import type { DiagnosticoFaro, Reporte } from '../../lib/types'
 import { hace } from '../../lib/format'
 import { descargarCSV } from '../../lib/csv'
 import { Cargando, Empty } from '../../components/PageHeader'
@@ -136,6 +136,7 @@ export default function Reportes() {
               <p className="tiny muted" style={{ margin: '4px 0 0', wordBreak: 'break-all' }}>
                 {r.autor?.nombre} · {r.autor?.correo} · {hace(r.creado_en)}
               </p>
+              {r.diagnostico && <Diagnostico d={r.diagnostico} />}
               {r.respuesta && (
                 <p className="small" style={{ margin: '4px 0 0' }}>
                   <span className="muted">Respuesta:</span> {r.respuesta}
@@ -233,5 +234,24 @@ export default function Reportes() {
         </div>
       </Modal>
     </>
+  )
+}
+
+/** Lo que Faro sabía del equipo cuando se reportó la falla. */
+function Diagnostico({ d }: { d: DiagnosticoFaro }) {
+  const datos = [
+    d.en_linea ? 'Faro en línea' : `Faro sin señal${d.ultimo_latido ? ` desde ${hace(d.ultimo_latido)}` : ''}`,
+    d.cpu_pct != null && d.en_linea ? `CPU ${d.cpu_pct} %` : null,
+    d.ram_gb ? `RAM ${d.ram_gb} GB` : null,
+    d.disco_libre_gb != null && d.disco_gb ? `disco ${d.disco_libre_gb} de ${d.disco_gb} GB libres` : null,
+    d.disco_salud && d.disco_salud !== 'ok' ? `salud del disco: ${d.disco_salud}` : null,
+    d.arranque_h != null ? `encendido hace ${d.arranque_h} h` : null,
+    d.bloqueado ? 'pantalla bloqueada' : null,
+    d.version ? `Faro ${d.version}` : null
+  ].filter(Boolean)
+  return (
+    <p className="tiny diagnostico" style={{ margin: '6px 0 0' }}>
+      <strong>Diagnóstico automático:</strong> {datos.join(' · ')}
+    </p>
   )
 }

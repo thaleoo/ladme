@@ -11,7 +11,7 @@ import Icon from './Icon'
  * con el equipo y las horas ya puestos.
  */
 
-type Tramo = { tipo: 'libre' | 'reserva' | 'bloqueo'; inicio: Date; fin: Date; motivo?: string | null }
+type Tramo = { tipo: 'libre' | 'compartido' | 'reserva' | 'bloqueo'; inicio: Date; fin: Date; motivo?: string | null; protegidos?: string[] | null }
 
 const MIN_LIBRE_MS = 15 * 60_000
 
@@ -21,34 +21,41 @@ function siguienteCuarto(d: Date): Date {
   return new Date(Math.ceil(d.getTime() / ms) * ms)
 }
 
-/** Tramos de un día [d0, d0+1d): ocupaciones recortadas y unidas, y los huecos libres entre ellas. */
+/**
+ * Tramos de un día [d0, d0+1d): se corta el día en cada inicio y fin, y cada pedazo toma el estado
+ * más fuerte que lo cubre (reserva o bloqueo > uso compartido > libre). Así, una reserva dentro de un
+ * uso compartido se ve como ocupada y el resto del horario compartido sigue reservable.
+ */
 function tramosDelDia(ocupacion: Ocupacion[], d0: Date, ahora: Date): Tramo[] {
   const d1 = sumarDias(d0, 1)
   const desde = new Date(Math.max(d0.getTime(), siguienteCuarto(ahora).getTime()))
-  const ocupados: Tramo[] = ocupacion
-    .map((o) => ({ tipo: o.tipo, inicio: new Date(o.inicio), fin: new Date(o.fin), motivo: o.motivo }))
-    .filter((o) => o.fin > d0 && o.inicio < d1)
-    .map((o) => ({ ...o, inicio: o.inicio < d0 ? d0 : o.inicio, fin: o.fin > d1 ? d1 : o.fin }))
-    .sort((a, b) => a.inicio.getTime() - b.inicio.getTime())
-
-  // Une ocupaciones que se tocan o se solapan (del mismo tipo).
-  const unidos: Tramo[] = []
-  for (const o of ocupados) {
-    const u = unidos[unidos.length - 1]
-    if (u && u.tipo === o.tipo && o.inicio <= u.fin) u.fin = o.fin > u.fin ? o.fin : u.fin
-    else unidos.push({ ...o })
-  }
-
+  if (desde >= d1) return []
+  const ocs = ocupacion
+    .map((o) => ({
+      tipo: (o.compartida ? 'compartido' : o.tipo) as Tramo['tipo'],
+      inicio: new Date(Math.max(new Date(o.inicio).getTime(), desde.getTime())),
+      fin: new Date(Math.min(new Date(o.fin).getTime(), d1.getTime())),
+      motivo: o.tipo === 'bloqueo' ? o.motivo : o.compartida ? o.mensaje_llegada : null,
+      protegidos: o.protegidos ?? null
+    }))
+    .filter((o) => o.fin > o.inicio)
+  const cortes = [...new Set([desde.getTime(), d1.getTime(), ...ocs.flatMap((o) => [o.inicio.getTime(), o.fin.getTime()])])].sort((a, b) => a - b)
+  const prioridad = { libre: 0, compartido: 1, reserva: 2, bloqueo: 3 } as const
   const salida: Tramo[] = []
-  let cursor = desde
-  for (const o of unidos) {
-    if (o.fin <= desde) continue
-    if (o.inicio.getTime() - cursor.getTime() >= MIN_LIBRE_MS) salida.push({ tipo: 'libre', inicio: cursor, fin: o.inicio })
-    salida.push({ ...o, inicio: o.inicio < desde ? desde : o.inicio })
-    if (o.fin > cursor) cursor = o.fin
+  for (let i = 0; i < cortes.length - 1; i++) {
+    const a = cortes[i]
+    const b = cortes[i + 1]
+    const cubren = ocs.filter((o) => o.inicio.getTime() <= a && o.fin.getTime() >= b)
+    const fuerte = cubren.sort((x, y) => prioridad[y.tipo] - prioridad[x.tipo])[0]
+    const t: Tramo = fuerte
+      ? { tipo: fuerte.tipo, inicio: new Date(a), fin: new Date(b), motivo: fuerte.motivo, protegidos: fuerte.protegidos }
+      : { tipo: 'libre', inicio: new Date(a), fin: new Date(b) }
+    const u = salida[salida.length - 1]
+    if (u && u.tipo === t.tipo && (u.motivo ?? '') === (t.motivo ?? '')) u.fin = t.fin
+    else salida.push(t)
   }
-  if (d1.getTime() - cursor.getTime() >= MIN_LIBRE_MS) salida.push({ tipo: 'libre', inicio: cursor, fin: d1 })
-  return salida
+  // Huecos libres muy cortos no sirven para reservar.
+  return salida.filter((t) => t.tipo !== 'libre' || t.fin.getTime() - t.inicio.getTime() >= MIN_LIBRE_MS)
 }
 
 function textoHora(d: Date, d0: Date): string {
@@ -172,7 +179,7 @@ export default function AgendaEquipo({
           </div>
           {dias.map((d) => {
             const tramos = tramosDelDia(ocupacion, d, ahora)
-            const libres = tramos.filter((t) => t.tipo === 'libre')
+            const libres = tramos.filter((t) => t.tipo === 'libre' || t.tipo === 'compartido')
             const resumen =
               libres.length === 0
                 ? 'Sin horas libres'
@@ -206,6 +213,7 @@ export default function AgendaEquipo({
           })}
           <div className="ag-leyenda" aria-hidden="true">
             <span><i className="ag-libre" /> Libre</span>
+            <span><i className="ag-compartido" /> Compartido</span>
             <span><i className="ag-reserva" /> Reservado</span>
             <span><i className="ag-bloqueo" /> Bloqueado</span>
           </div>
@@ -239,6 +247,11 @@ export default function AgendaEquipo({
                           <>
                             <strong>Libre</strong> · {duracion(t.inicio.toISOString(), t.fin.toISOString())}
                           </>
+                        ) : t.tipo === 'compartido' ? (
+                          <>
+                            <strong>Uso compartido</strong> · se puede usar sin cerrar{' '}
+                            {t.protegidos?.length ? t.protegidos.join(', ') : 'los programas abiertos'}
+                          </>
                         ) : t.tipo === 'reserva' ? (
                           <strong>Reservado</strong>
                         ) : (
@@ -249,7 +262,7 @@ export default function AgendaEquipo({
                         )}
                       </span>
                       </span>
-                      {t.tipo === 'libre' && t.inicio < limiteReserva && (
+                      {(t.tipo === 'libre' || t.tipo === 'compartido') && t.inicio < limiteReserva && (
                         <Link className="btn sm" to={enlace(t)}>
                           <Icon nombre="reservar" width={14} height={14} /> Reservar
                         </Link>

@@ -157,10 +157,10 @@ export default function Faro() {
         avisa o bloquea el equipo cuando no hay reserva. Se recomienda empezar en «Observar» y subir de fase con los datos.
       </p>
 
-      <section className="card tight">
-        <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s3)' }}>
-          <div>
-            <strong>Modo de toda la sala</strong>
+      <section className="card tight faro-sala">
+        <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s2)' }}>
+          <div style={{ minWidth: 0 }}>
+            <strong>Toda la sala</strong>
             <p className="tiny muted" style={{ margin: '2px 0 0' }}>
               {vinculados.length === 0 ? 'Aún no hay equipos vinculados.'
                 : modoComun ? `Todos en «${MODOS.find((m) => m.id === modoComun)?.texto}».` : 'Hay equipos en modos distintos.'}
@@ -168,31 +168,44 @@ export default function Faro() {
           </div>
           <div className="chips" role="group" aria-label="Modo de toda la sala">
             {MODOS.map((m) => (
-              <button key={m.id} type="button" className="chip" aria-pressed={modoComun === m.id}
+              <button key={m.id} type="button" className="chip" aria-pressed={modoComun === m.id} title={m.ayuda}
                       disabled={ocupado || vinculados.length === 0} onClick={() => modoComun !== m.id && cambiarTodos(m.id)}>
                 {m.texto}
               </button>
             ))}
           </div>
         </div>
-      </section>
-
-      <section className="card tight">
-        <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s3)' }}>
-          <div style={{ minWidth: 0 }}>
-            <strong>Toda la sala</strong>
-            <p className="tiny muted" style={{ margin: '2px 0 0' }}>Anuncios en las islas y órdenes para todos los equipos con Faro.</p>
-          </div>
-          <div className="row tight" style={{ flexWrap: 'wrap' }}>
-            <button className="btn sm" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>Anuncio</button>
-            <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>Encender</button>
-            <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>Apagar</button>
-            <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>Actualizar Faro</button>
-            <a className="btn ghost sm" href="/sala?kiosco=1" target="_blank" rel="noreferrer">Pantalla de la sala</a>
-          </div>
+        <div className="row tight faro-sala__acciones">
+          <button className="btn sm" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>Anuncio</button>
+          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>Empezar clase</button>
+          <button className="btn ghost sm" type="button" disabled={ocupado}
+                  onClick={() => void hacer(async () => {
+                    const n = await terminarClaseFaro(null)
+                    toast.mostrar(n ? `Clase terminada en ${n} ${n === 1 ? 'equipo' : 'equipos'}.` : 'No hay clases en curso.')
+                  })}>
+            Terminar clase
+          </button>
+          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>Encender</button>
+          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>Apagar</button>
+          <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>Actualizar Faro</button>
+          <a className="btn ghost sm" href="/sala?kiosco=1" target="_blank" rel="noreferrer">Pantalla de la sala</a>
+          {admin && (
+            <button className="btn ghost sm" type="button" disabled={ocupado}
+                    title={panel.clave_creada_en ? `Clave creada ${hace(panel.clave_creada_en)}` : 'Aún no se ha creado'}
+                    onClick={() => setConfirmar({
+                      titulo: panel.clave_creada_en ? 'Cambiar la clave de emergencia' : 'Crear la clave de emergencia',
+                      texto: (panel.clave_creada_en
+                        ? 'La clave anterior deja de servir en cuanto cada equipo se conecte. La nueva se muestra una sola vez.'
+                        : 'La clave se muestra una sola vez: guárdela en un lugar seguro del laboratorio.') +
+                        ' Desbloquea cualquier equipo por 2 horas aunque no haya internet, y cada uso avisa al personal.',
+                      accion: () => hacer(async () => setClave(await generarClaveFaro()))
+                    })}>
+              <Icon nombre="clave" width={14} height={14} /> {panel.clave_creada_en ? 'Clave de emergencia' : 'Crear clave de emergencia'}
+            </button>
+          )}
         </div>
         {panel.anuncios.length > 0 && (
-          <ul className="small" style={{ margin: 'var(--s2) 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
+          <ul className="small" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
             {panel.anuncios.map((a) => (
               <li key={a.id} className="row between" style={{ gap: 'var(--s2)' }}>
                 <span>«{a.texto}» <span className="muted">· {a.equipos ? a.equipos.join(', ') : 'toda la sala'} · hasta {hora(a.hasta)}</span></span>
@@ -202,56 +215,6 @@ export default function Faro() {
           </ul>
         )}
       </section>
-
-      <section className="card tight">
-        <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s3)' }}>
-          <div style={{ minWidth: 0 }}>
-            <strong className="row tight"><Icon nombre="usuarios" /> Modo clase</strong>
-            <p className="tiny muted" style={{ margin: '2px 0 0' }}>
-              Bloquea los equipos para reservas durante la clase y los deja libres para usar sin reserva. Los equipos que ya
-              tienen una reserva en ese horario se respetan.
-            </p>
-          </div>
-          <div className="row tight">
-            <button className="btn ghost sm" type="button" disabled={ocupado}
-                    onClick={() => void hacer(async () => {
-                      const n = await terminarClaseFaro(null)
-                      toast.mostrar(n ? `Clase terminada en ${n} ${n === 1 ? 'equipo' : 'equipos'}.` : 'No hay clases en curso.')
-                    })}>
-              Terminar clase
-            </button>
-            <button className="btn sm" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>
-              Empezar clase
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <FaroUso />
-
-      {admin && (
-        <section className="card tight">
-          <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s3)' }}>
-            <div style={{ minWidth: 0 }}>
-              <strong className="row tight"><Icon nombre="clave" /> Clave de emergencia</strong>
-              <p className="tiny muted" style={{ margin: '2px 0 0' }}>
-                Desbloquea cualquier equipo por 2 horas aunque no haya internet. Cada uso avisa al personal.{' '}
-                {panel.clave_creada_en ? `Creada ${hace(panel.clave_creada_en)}.` : 'Aún no se ha creado.'}
-              </p>
-            </div>
-            <button className="btn ghost sm" type="button" disabled={ocupado}
-                    onClick={() => setConfirmar({
-                      titulo: panel.clave_creada_en ? 'Cambiar la clave de emergencia' : 'Crear la clave de emergencia',
-                      texto: panel.clave_creada_en
-                        ? 'La clave anterior deja de servir en cuanto cada equipo se conecte. La nueva se muestra una sola vez.'
-                        : 'La clave se muestra una sola vez: guárdela en un lugar seguro del laboratorio.',
-                      accion: () => hacer(async () => setClave(await generarClaveFaro()))
-                    })}>
-              {panel.clave_creada_en ? 'Cambiar clave' : 'Crear clave'}
-            </button>
-          </div>
-        </section>
-      )}
 
       <div className="chips" role="group" aria-label="Filtrar equipos">
         {([
@@ -270,40 +233,59 @@ export default function Faro() {
         </div>
       )}
 
-      <div className="grid cols-2">
+      <div className="faro-tiles">
         {visibles.map((e) => {
           const c = conexion(e)
           return (
-            <article key={e.codigo} className="card tight">
-              <div className="row between" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row tight" style={{ flexWrap: 'wrap' }}>
-                    <strong style={{ fontSize: 'var(--text-lg)' }}>{e.codigo}</strong>
-                    <span className={`badge ${c.tono}`}>{c.texto}</span>
-                    {e.vinculado && enLinea(e) && e.bloqueado && <span className="badge danger">Bloqueado ahora</span>}
-                    {e.desbloqueo_hasta && <span className="badge info">Libre hasta {hora(e.desbloqueo_hasta)}</span>}
-                  </div>
-                  <p className="small muted" style={{ margin: '2px 0 0' }}>
-                    {e.vinculado
-                      ? [e.host, e.so, e.version && `Faro ${e.version}`].filter(Boolean).join(' · ') || 'Sin datos del equipo todavía'
-                      : [e.categoria, e.nombre].filter(Boolean).join(' · ')}
-                  </p>
-                  {e.usos_sin_reserva_7d > 0 && (
-                    <p className="tiny" style={{ margin: '4px 0 0', color: 'var(--warn-700, #b45309)' }}>
-                      Usado sin reserva {e.usos_sin_reserva_7d} {e.usos_sin_reserva_7d === 1 ? 'vez' : 'veces'} en 7 días
-                    </p>
-                  )}
-                </div>
-                {!e.vinculado && (
-                  <button className="btn sm" type="button" disabled={ocupado}
-                          onClick={() => void hacer(async () => setCodigo(await codigoVinculoFaro(e.codigo)))}>
-                    Vincular
-                  </button>
-                )}
-              </div>
+            <button key={e.codigo} type="button" className={`faro-tile ${c.tono}`} onClick={() => setAbiertoEquipo(e.codigo)}
+                    aria-label={`${e.codigo}: ${c.texto}`}>
+              <span className="faro-tile__fila">
+                <strong>{e.codigo}</strong>
+                <span className={`punto ${c.tono}`} aria-hidden="true" />
+              </span>
+              <span className="tiny muted">{c.texto}</span>
+              <span className="faro-tile__extra tiny">
+                {!e.vinculado ? 'Toca para vincular'
+                  : [MODOS.find((m) => m.id === e.modo)?.texto, enLinea(e) && e.cpu_pct != null ? `CPU ${e.cpu_pct}%` : null,
+                     e.bloqueado && enLinea(e) ? 'bloqueado' : null, e.desbloqueo_hasta ? `libre ${hora(e.desbloqueo_hasta)}` : null]
+                     .filter(Boolean).join(' · ')}
+              </span>
+              {e.usos_sin_reserva_7d > 0 && <span className="faro-tile__alerta" title="Usos sin reserva en 7 días">{e.usos_sin_reserva_7d}</span>}
+            </button>
+          )
+        })}
+      </div>
 
-              {e.vinculado && (
-                <div className="stack mt" style={{ gap: 'var(--s2)' }}>
+      {(() => {
+        const e = panel.equipos.find((x) => x.codigo === abiertoEquipo)
+        if (!e) return null
+        const c = conexion(e)
+        return (
+          <Modal abierto titulo={e.codigo} onCerrar={() => setAbiertoEquipo(null)}>
+            <div className="stack">
+              <div className="row tight" style={{ flexWrap: 'wrap' }}>
+                <span className={`badge ${c.tono}`}>{c.texto}</span>
+                {e.vinculado && enLinea(e) && e.bloqueado && <span className="badge danger">Bloqueado ahora</span>}
+                {e.desbloqueo_hasta && <span className="badge info">Libre hasta {hora(e.desbloqueo_hasta)}</span>}
+              </div>
+              <p className="small muted" style={{ margin: 0 }}>
+                {e.vinculado
+                  ? [e.host, e.so, e.version && `Faro ${e.version}`].filter(Boolean).join(' · ') || 'Sin datos del equipo todavía'
+                  : [e.categoria, e.nombre].filter(Boolean).join(' · ')}
+              </p>
+              {e.usos_sin_reserva_7d > 0 && (
+                <p className="tiny" style={{ margin: 0, color: 'var(--warn-700, #b45309)' }}>
+                  Usado sin reserva {e.usos_sin_reserva_7d} {e.usos_sin_reserva_7d === 1 ? 'vez' : 'veces'} en 7 días
+                </p>
+              )}
+              {!e.vinculado ? (
+                <button className="btn" type="button" disabled={ocupado}
+                        onClick={() => void hacer(async () => { setAbiertoEquipo(null); setCodigo(await codigoVinculoFaro(e.codigo)) })}>
+                  Vincular Faro en este equipo
+                </button>
+              ) : (
+                <>
+                  <span className="field__label">Modo</span>
                   <div className="chips" role="group" aria-label={`Modo de ${e.codigo}`}>
                     {MODOS.map((m) => (
                       <button key={m.id} type="button" className="chip" aria-pressed={e.modo === m.id} disabled={ocupado} title={m.ayuda}
@@ -312,6 +294,7 @@ export default function Faro() {
                       </button>
                     ))}
                   </div>
+                  <span className="field__label">Dejar libre sin reserva</span>
                   <div className="row tight" style={{ flexWrap: 'wrap' }}>
                     {e.desbloqueo_hasta ? (
                       <button className="btn ghost sm" type="button" disabled={ocupado}
@@ -322,31 +305,32 @@ export default function Faro() {
                       [30, 60, 240].map((min) => (
                         <button key={min} className="btn ghost sm" type="button" disabled={ocupado}
                                 onClick={() => void hacer(() => desbloquearFaro(e.codigo, min), `${e.codigo} libre por ${min < 60 ? `${min} min` : `${min / 60} h`}.`)}>
-                          Libre {min < 60 ? `${min} min` : `${min / 60} h`}
+                          {min < 60 ? `${min} min` : `${min / 60} h`}
                         </button>
                       ))
                     )}
-                    <button className="btn ghost sm" type="button" disabled={ocupado} style={{ marginLeft: 'auto' }}
-                            onClick={() => setConfirmar({
-                              titulo: `Desvincular ${e.codigo}`,
-                              texto: 'Faro dejará de funcionar en ese PC hasta que lo vincule de nuevo con otro código.',
-                              accion: () => hacer(() => desvincularFaro(e.codigo), `${e.codigo} desvinculado.`)
-                            })}>
-                      Desvincular
-                    </button>
                   </div>
-                  <button type="button" className="btn ghost sm" style={{ justifySelf: 'start' }}
-                          onClick={() => setAbiertoEquipo(abiertoEquipo === e.codigo ? null : e.codigo)} aria-expanded={abiertoEquipo === e.codigo}>
-                    {abiertoEquipo === e.codigo ? 'Ocultar detalles' : 'Equipo y órdenes remotas'}
+                  <DetalleEquipo e={e} admin={admin} ocupado={ocupado} orden={orden}
+                    canal={(cn) => void hacer(() => canalFaro([e.codigo], cn), `${e.codigo} en el canal ${cn}.`)} />
+                  <button className="btn ghost sm" type="button" disabled={ocupado} style={{ justifySelf: 'start' }}
+                          onClick={() => setConfirmar({
+                            titulo: `Desvincular ${e.codigo}`,
+                            texto: 'Faro dejará de funcionar en ese PC hasta que lo vincule de nuevo con otro código.',
+                            accion: () => hacer(() => desvincularFaro(e.codigo), `${e.codigo} desvinculado.`)
+                          })}>
+                    Desvincular
                   </button>
-                  {abiertoEquipo === e.codigo && <DetalleEquipo e={e} admin={admin} ocupado={ocupado} orden={orden}
-                    canal={(c) => void hacer(() => canalFaro([e.codigo], c), `${e.codigo} en el canal ${c}.`)} />}
-                </div>
+                </>
               )}
-            </article>
-          )
-        })}
-      </div>
+            </div>
+          </Modal>
+        )
+      })()}
+
+      <details className="card tight plegable">
+        <summary><strong>Uso de la sala</strong> <span className="tiny muted">horas de uso real por día y hora</span></summary>
+        <FaroUso />
+      </details>
 
       <section className="card tight">
         <strong>Actividad reciente</strong>

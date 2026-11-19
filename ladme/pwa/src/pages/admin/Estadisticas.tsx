@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { estadisticas, estadisticasSoporte } from '../../lib/api'
+import { estadisticas, estadisticasSoporte, programasUsados } from '../../lib/api'
 import type { Conteo, Estadisticas as Datos, EstadisticasSoporte } from '../../lib/types'
 import { descargarCSV } from '../../lib/csv'
 import { Cargando } from '../../components/PageHeader'
@@ -68,6 +68,7 @@ export default function Estadisticas() {
   const [dias, setDias] = useState(120)
   const [datos, setDatos] = useState<Datos | null>(null)
   const [soporte, setSoporte] = useState<EstadisticasSoporte | null>(null)
+  const [programas, setProgramas] = useState<Conteo[]>([])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -76,6 +77,9 @@ export default function Estadisticas() {
     const hasta = new Date()
     const desde = new Date(hasta.getTime() - dias * 86400000).toISOString()
     estadisticasSoporte(desde, hasta.toISOString()).then((d) => vivo && setSoporte(d)).catch(() => undefined)
+    programasUsados(desde.slice(0, 10), hasta.toISOString().slice(0, 10))
+      .then((l) => vivo && setProgramas(l.map((p) => ({ clave: p.programa, n: p.equipos, horas: p.horas }))))
+      .catch(() => vivo && setProgramas([]))
     estadisticas(desde, hasta.toISOString())
       .then((d) => vivo && setDatos(d))
       .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudieron calcular las estadísticas.'))
@@ -154,6 +158,7 @@ export default function Estadisticas() {
             <Barras titulo="Reservas por matrícula" datos={datos.por_matricula} />
             <Columnas titulo="Reservas por día de la semana (inicio)" datos={porDia} etiqueta={(c) => c} />
             {soporte && <Barras titulo="Reportes de fallas por equipo" datos={soporte.reportes_por_equipo} />}
+            {programas.length > 0 && <Barras titulo="Horas de uso por programa (medido por Faro)" datos={programas} valor="horas" unidad=" h" />}
             {soporte && (
               <section className="card">
                 <h3 style={{ fontSize: 'var(--text-base)' }}>Soporte</h3>

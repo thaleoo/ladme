@@ -132,3 +132,10 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
 .link-pie { background: none; border: 0; padding: 0; color: var(--texto-3); font: inherit; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
 .link-pie:hover { color: var(--texto-2); }
 .link-pie svg { width: 12px; height: 12px; }
+
+.protegido, .espera { display: flex; gap: 9px; align-items: flex-start; margin-top: 10px; padding: 9px 12px; border-radius: 14px; font-size: 12.5px; line-height: 1.45; }
+.protegido { background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.35); color: var(--texto); }
+.espera { background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.32); color: var(--texto-2); }
+.protegido svg, .espera svg { flex: none; width: 15px; height: 15px; margin-top: 1px; }
+.protegido svg { color: #6ee7b7; }
+.espera svg { color: #fcd34d; }

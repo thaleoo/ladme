@@ -52,6 +52,8 @@ export interface Reserva {
   detalle: string | null
   desatendido: boolean
   mensaje_llegada: string | null
+  compartida?: boolean
+  protegidos?: string[] | null
   token_credencial: string
   extensiones: number
   liberada_en: string | null
@@ -76,6 +78,9 @@ export interface Ocupacion {
   desatendido: boolean
   mensaje_llegada: string | null
   motivo: string | null
+  /** Uso compartido: otras personas pueden usar el equipo sin cerrar los programas protegidos. */
+  compartida?: boolean
+  protegidos?: string[] | null
 }
 
 export type EstadoMantenimiento = 'programado' | 'en_curso' | 'completado' | 'validado' | 'cancelado'
@@ -199,6 +204,23 @@ export interface Reporte {
   creado_en: string
   equipos?: { codigo: string; nombre: string; estado: string } | null
   autor?: { nombre: string; correo: string } | null
+  /** Lo último que Faro sabía del equipo al reportar la falla. */
+  diagnostico?: DiagnosticoFaro | null
+}
+
+export interface DiagnosticoFaro {
+  en_linea: boolean
+  ultimo_latido: string | null
+  version: string | null
+  cpu_pct: number | null
+  inactivo_seg: number | null
+  bloqueado: boolean | null
+  so: string | null
+  ram_gb: number | null
+  disco_gb: number | null
+  disco_libre_gb: number | null
+  disco_salud: string | null
+  arranque_h: number | null
 }
 
 export interface EstadisticasSoporte {
@@ -229,4 +251,25 @@ export function etiquetaSO(e: Pick<Equipo, 'sistema_operativo' | 'so_version'>):
   }
   if (e.sistema_operativo === 'Linux') return v ? v.split(/\s+/).slice(0, 2).join(' ').replace(/LTS$/i, '').trim() : 'Linux'
   return e.sistema_operativo ?? null
+}
+
+export type EstadoClase = 'pendiente' | 'aprobada' | 'rechazada' | 'cancelada'
+export interface Clase {
+  id: number
+  solicitante: string
+  nombre: string
+  docente: string
+  grupo: number
+  dias: number[]
+  hora_inicio: string
+  hora_fin: string
+  desde: string
+  hasta: string
+  equipos_pedidos: number | null
+  notas: string | null
+  estado: EstadoClase
+  equipos: string[] | null
+  respuesta: string | null
+  resuelto_en: string | null
+  creado_en: string
 }

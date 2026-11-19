@@ -586,7 +586,15 @@ function obtenerEventosUsuarioAnonimo(equipoFiltro) {
       backgroundColor: colorAsignado,
       borderColor: colorAsignado,
       textColor: "#FFFFFF",
-      extendedProps: { equipos: equiposRowStr, actividad: tipoActividad }
+      // Vista pública: solo lo que ayuda a entender la reserva, nunca quién es la persona
+      // (sin nombre, correo, cédula, programa ni matrícula).
+      extendedProps: {
+        equipos: equiposRowStr,
+        actividad: tipoActividad,
+        detalle: r[6] ? r[6].toString().slice(0, 300) : "",
+        desatendido: r[COL_DESATENDIDO - 8] ? "Sí" : "No",
+        mensaje: r[COL_MENSAJE - 8] ? r[COL_MENSAJE - 8].toString().slice(0, LARGO_MAX_MENSAJE) : ""
+      }
     });
   });
   return eventos;
@@ -2182,7 +2190,7 @@ function enviarRecordatorioFin_(r) {
  * Es idempotente: borra los disparadores previos de estas mismas funciones.
  */
 function instalarDisparadores() {
-  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_", "respaldarSupabase_", "reporteMensual_"];
+  var handlers = ["revisarMantenimientos_", "recordarFinReservas_", "enviarCorreosSupabase_", "respaldarSupabase_", "reporteMensual_", "telegramComandos_"];
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (handlers.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
@@ -2193,6 +2201,10 @@ function instalarDisparadores() {
   ScriptApp.newTrigger("respaldarSupabase_").timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
   // Resumen del mes anterior para el personal: el día 1 a las 8 a. m.
   ScriptApp.newTrigger("reporteMensual_").timeBased().onMonthDay(1).atHour(8).create();
+  // Comandos de consulta desde el grupo de Telegram (/estado, /agenda 5…), cada minuto.
+  if (prop_("TELEGRAM_BOT_TOKEN") && prop_("TELEGRAM_CHAT_ID")) {
+    ScriptApp.newTrigger("telegramComandos_").timeBased().everyMinutes(1).create();
+  }
   return { ok: true, mensaje: "Disparadores instalados: mantenimientos (07:00), recordatorios (30 min), correo de la PWA (5 min), copia de seguridad (domingos 03:00) y reporte mensual (día 1, 08:00)." };
 }
 
@@ -2970,6 +2982,7 @@ function enviarCorreosSupabase_() {
       supabaseRpc_("encolar_alertas_liberacion", {});
       supabaseRpc_("liberar_no_show", {});         // solo actúa si la política liberar_no_show_min > 0
       supabaseRpc_("encolar_avisos_espera", {});   // avisa a la lista de espera cuando se libera un equipo
+      try { supabaseRpc_("sala_tick", {}); } catch (e) { Logger.log("sala_tick: " + e); } // horario de la sala y red caída
       if (new Date().getHours() >= 7) supabaseRpc_("encolar_recordatorios_mantenimiento", {});   // una vez al día por persona (lo garantiza la base)
     } catch (err) { Logger.log(err); }
 
@@ -2991,6 +3004,7 @@ function enviarCorreosSupabase_() {
     Logger.log("enviarCorreosSupabase_: " + err);
   } finally {
     try { enviarChatPersonal_(); } catch (err) { Logger.log("enviarChatPersonal_: " + err); }
+    try { enviarPush_(); } catch (err) { Logger.log("enviarPush_: " + err); }
     lock.releaseLock();
   }
 }
@@ -3296,4 +3310,127 @@ function reporteMensual_(soloA) {
 /** Ejecutar desde el editor: envía el reporte del mes anterior solo a su cuenta. */
 function probarReporteMensual() {
   return reporteMensual_(Session.getActiveUser().getEmail());
+}
+
+/* =========================================================================
+ * NOTIFICACIONES AL TELÉFONO
+ * Cada 5 minutos, junto con los correos, se llama a la función enviar-avisos de Supabase.
+ * Requiere la propiedad AVISOS_TOKEN (la misma cadena que el secreto AVISOS_TOKEN de la
+ * función). Sin esa propiedad no se intenta nada.
+ * ========================================================================= */
+function enviarPush_() {
+  var token = prop_("AVISOS_TOKEN"), base = prop_("SUPABASE_URL").replace(/\/+$/, "");
+  if (!token || !base) return;
+  var r = UrlFetchApp.fetch(base + "/functions/v1/enviar-avisos", {
+    method: "post", contentType: "application/json", payload: "{}", muteHttpExceptions: true,
+    headers: { "x-ladme-token": token }
+  });
+  if (r.getResponseCode() >= 300) Logger.log("enviar-avisos respondió " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
+}
+
+/* =========================================================================
+ * COMANDOS DE TELEGRAM (solo consulta)
+ * El bot responde en el grupo del personal a: /estado, /equipos, /agenda 5 [mañana],
+ * /reservas [5], /clases y /ayuda. Sin nombres ni correos: el chat no lleva datos personales.
+ * Lee los mensajes nuevos cada minuto (sin webhook: no hace falta publicar nada).
+ * ========================================================================= */
+function telegramComandos_() {
+  var token = prop_("TELEGRAM_BOT_TOKEN"), chat = String(prop_("TELEGRAM_CHAT_ID"));
+  if (!token || !chat) return;
+  var props = PropertiesService.getScriptProperties();
+  var offset = Number(props.getProperty("TELEGRAM_OFFSET") || 0);
+  var r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D" +
+                            (offset ? "&offset=" + offset : ""), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) return;
+  var datos = JSON.parse(r.getContentText());
+  (datos.result || []).forEach(function (u) {
+    offset = Math.max(offset, u.update_id + 1);
+    var m = u.message;
+    if (!m || !m.text || String(m.chat.id) !== chat || m.text.charAt(0) !== "/") return;
+    var partes = m.text.trim().split(/\s+/);
+    var cmd = partes[0].toLowerCase().replace(/@.*$/, "");
+    var resp;
+    try {
+      resp = responderComando_(cmd, partes.slice(1));
+    } catch (e) {
+      resp = "No pude responder: " + String(e.message || e).slice(0, 200);
+    }
+    if (resp) enviarMensajeChat_(resp);
+  });
+  props.setProperty("TELEGRAM_OFFSET", String(offset));
+}
+
+function supabaseGet_(ruta) {
+  var base = prop_("SUPABASE_URL").replace(/\/+$/, ""), clave = prop_("SUPABASE_SECRET_KEY");
+  var r = UrlFetchApp.fetch(base + "/rest/v1/" + ruta, { headers: { apikey: clave, Authorization: "Bearer " + clave }, muteHttpExceptions: true });
+  if (r.getResponseCode() >= 300) throw new Error("Supabase respondió " + r.getResponseCode());
+  return JSON.parse(r.getContentText());
+}
+
+function horaCorta_(iso) {
+  return Utilities.formatDate(new Date(iso), "America/Bogota", "dd/MM HH:mm");
+}
+
+/** «5», «unal-5» o «UNAL-05» → «UNAL-05». */
+function codigoEquipo_(txt) {
+  var t = String(txt || "").toUpperCase().trim();
+  var m = /^(?:([A-Z]+)-?)?(\d+)$/.exec(t);
+  if (!m) return t;
+  var n = ("0" + m[2]).slice(-2);
+  return (m[1] || "UNAL") + "-" + n;
+}
+
+function responderComando_(cmd, args) {
+  if (cmd === "/ayuda" || cmd === "/start" || cmd === "/help") {
+    return "Comandos de LADME:\n/estado: resumen de la sala\n/equipos: estado de cada equipo\n/agenda 5 [mañana]: horarios de un equipo\n" +
+           "/reservas [5]: reservas de hoy\n/clases: solicitudes de sala pendientes";
+  }
+  if (cmd === "/estado" || cmd === "/equipos") {
+    var sala = supabaseRpc_("sala_publica", {}) || [];
+    var cuenta = function (e) { return sala.filter(function (x) { return x.estado === e; }).length; };
+    var agentes = supabaseGet_("agentes?select=ultimo_latido&token_hash=not.is.null");
+    var vivos = agentes.filter(function (a) { return a.ultimo_latido && Date.now() - new Date(a.ultimo_latido).getTime() < 120000; }).length;
+    if (cmd === "/estado") {
+      var fallas = supabaseGet_("reportes?select=id&estado=in.(abierto,en_revision)").length;
+      return "LADME ahora\nLibres: " + cuenta("libre") + " · Ocupados: " + cuenta("ocupado") + " · Bloqueados: " + cuenta("bloqueado") +
+             " · Mantenimiento: " + cuenta("mantenimiento") + "\nFaro en línea: " + vivos + " de " + agentes.length + "\nFallas abiertas: " + fallas;
+    }
+    return sala.map(function (x) {
+      return x.codigo + "  " + x.estado + (x.hasta ? " hasta " + horaCorta_(x.hasta) : "");
+    }).join("\n") || "Sin equipos.";
+  }
+  if (cmd === "/agenda") {
+    if (!args[0]) return "Uso: /agenda 5 [mañana]";
+    var codigo = codigoEquipo_(args[0]);
+    var dia = new Date(Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd") + "T00:00:00-05:00");
+    if ((args[1] || "").toLowerCase().indexOf("ma") === 0) dia = new Date(dia.getTime() + 86400000);
+    var fin = new Date(dia.getTime() + 86400000);
+    var ocs = supabaseGet_("ocupacion_publica?select=tipo,inicio,fin,motivo,compartida&codigo=eq." + encodeURIComponent(codigo) +
+                           "&inicio=lt." + fin.toISOString() + "&fin=gt." + dia.toISOString() + "&order=inicio");
+    if (!ocs.length) return codigo + ": libre todo el día.";
+    return codigo + " · " + Utilities.formatDate(dia, "America/Bogota", "dd/MM") + "\n" + ocs.map(function (o) {
+      var tipo = o.compartida ? "compartido" : o.tipo === "bloqueo" ? "bloqueado" : "reservado";
+      return horaCorta_(o.inicio).slice(6) + "–" + horaCorta_(o.fin).slice(6) + "  " + tipo + (o.tipo === "bloqueo" && o.motivo ? " · " + o.motivo : "");
+    }).join("\n");
+  }
+  if (cmd === "/reservas") {
+    var ahora = new Date(), manana = new Date(ahora.getTime() + 86400000);
+    var filtro = args[0] ? "&equipos.codigo=eq." + encodeURIComponent(codigoEquipo_(args[0])) : "";
+    var lista = supabaseGet_("reservas?select=codigo_legible,tipo,inicio,fin,llegada_en,equipos!inner(codigo)&estado=eq.activa&liberada_en=is.null" +
+                             "&fin=gt." + ahora.toISOString() + "&inicio=lt." + manana.toISOString() + filtro + "&order=inicio&limit=40");
+    if (!lista.length) return "No hay reservas en las próximas 24 horas.";
+    return lista.map(function (x) {
+      return x.equipos.codigo + "  " + horaCorta_(x.inicio) + "–" + horaCorta_(x.fin).slice(6) + "  " + x.codigo_legible +
+             (x.tipo === "bloqueo" ? " (bloqueo)" : new Date(x.inicio) < ahora && !x.llegada_en ? " · sin llegada" : "");
+    }).join("\n");
+  }
+  if (cmd === "/clases") {
+    var cl = supabaseGet_("clases?select=id,nombre,grupo,hora_inicio,hora_fin,desde,hasta&estado=eq.pendiente&order=creado_en");
+    if (!cl.length) return "No hay solicitudes de sala pendientes.";
+    return "Solicitudes de sala pendientes:\n" + cl.map(function (c) {
+      return "#" + c.id + " " + c.nombre + " (grupo " + c.grupo + ") " + c.hora_inicio.slice(0, 5) + "–" + c.hora_fin.slice(0, 5) +
+             ", " + c.desde + " a " + c.hasta;
+    }).join("\n") + "\nSe aprueban en Administración → Reservas → Solicitudes y clases.";
+  }
+  return null; // otros comandos: silencio
 }

@@ -243,6 +243,39 @@ Guía completa en `ladme/faro/README.md`. En resumen:
   botones, pide confirmación en lo peligroso y cada comando queda en el Registro.
 - Los mantenimientos nuevos avisan al chat del personal.
 
+## 16. Clases, uso compartido, notificaciones al teléfono y Faro 0.5 (migración 0011)
+
+1. SQL Editor → `ladme/db/migrations/0011_clases_compartido.sql` (después de 0010).
+2. Vuelva a pegar `ladme/appsscript/Código.gs` e `Index.html` y ejecute `instalarDisparadores`
+   (agrega los comandos de Telegram).
+3. Publique la etiqueta `faro-v0.5.0`.
+
+- **Sala para clases:** los docentes (tipo Docente/Investigador) piden la sala en «Sala para clases»:
+  nombre de la clase, docente, grupo, días, horario y semanas. El personal recibe aviso en Telegram y
+  la aprueba en Administración → Reservas → Solicitudes y clases: la app marca los equipos libres en
+  todas las sesiones y con un clic crea los bloqueos. El docente imprime la hoja con los equipos
+  habilitados. Durante la clase, Faro deja usar esos equipos.
+- **Uso compartido:** al reservar con «Proceso desatendido», se puede marcar «Uso compartido» y
+  elegir los programas que nadie debe cerrar. Otras personas pueden usar y reservar el equipo en ese
+  horario; la app, la agenda y Faro les muestran qué no cerrar. Faro no apaga el equipo ni ofrece
+  borrar archivos mientras dure.
+- **Vistas más compactas:** Administración en cinco grupos; Faro como cuadrícula de equipos con las
+  acciones en una ventana; la ficha del equipo sin contadores repetidos.
+- **Fallas con diagnóstico**, **uso por programa** en Estadísticas, **horario automático** de la
+  sala (políticas `sala_*`), aviso de **red caída** y de **salud del disco**.
+- **Telegram:** en el grupo del personal, `/estado`, `/equipos`, `/agenda 5`, `/reservas`, `/clases`.
+
+### Activar las notificaciones al teléfono
+
+El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
+
+1. `npx web-push generate-vapid-keys`. La pública va a `VITE_VAPID_PUBLIC_KEY` en el hosting de la PWA.
+2. En Supabase → Edge Functions, despliegue `enviar-avisos` (sin verificación JWT) con los secretos
+   `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` y `AVISOS_TOKEN` (una cadena aleatoria
+   de 32 caracteres o más).
+3. En Apps Script, guarde la misma cadena en la propiedad `AVISOS_TOKEN`: el worker llamará a la
+   función cada 5 minutos (no hace falta el cron de pg_net).
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

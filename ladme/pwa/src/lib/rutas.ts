@@ -36,6 +36,7 @@ const cargadores = {
   '/avisos': () => import('../pages/Avisos'),
   '/cuenta': () => import('../pages/Cuenta'),
   '/mi-uso': () => import('../pages/MiUso'),
+  '/clases': () => import('../pages/Clases'),
   '/admin': () => import('../pages/Admin'),
   '/mantenimiento': () => import('../pages/Mantenimiento'),
   '/usuarios': () => import('../pages/Usuarios')
@@ -52,6 +53,8 @@ export const Paginas = {
   Avisos: perezosa(cargadores['/avisos']),
   Cuenta: perezosa(cargadores['/cuenta']),
   MiUso: perezosa(cargadores['/mi-uso']),
+  Clases: perezosa(cargadores['/clases']),
+  ClaseDetalle: perezosa(() => cargadores['/clases']().then((m) => ({ default: m.ClaseDetalle }))),
   Admin: perezosa(cargadores['/admin']),
   Mantenimiento: perezosa(cargadores['/mantenimiento']),
   Usuarios: perezosa(cargadores['/usuarios'])

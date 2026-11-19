@@ -118,6 +118,13 @@ Más detalles:
 - **Reporte mensual.** El día 1, Apps Script envía al personal un resumen del mes anterior.
 - **Canal de pruebas.** En el detalle de un equipo puede marcarse «pruebas»: recibe las versiones
   publicadas con etiquetas `faro-pruebas-vX.Y.Z` antes que el resto de la sala.
+- **Uso compartido (0.5).** Si la reserva en curso es compartida, la isla muestra «Uso compartido»
+  con los programas que no se deben cerrar, deja usar el equipo y no se apaga ni ofrece borrar
+  archivos mientras dure.
+- **Programas usados (0.5).** En cada latido, Faro informa qué programas de la lista conocida están
+  abiertos (solo el nombre del programa). El laboratorio ve horas por programa en Estadísticas.
+- **Salud del disco (0.5, Windows).** El estado que da el sistema (`Get-PhysicalDisk`); si hay
+  advertencias, avisa al chat del personal.
 - **Actualizaciones automáticas.** Cada 6 horas, Faro revisa si hay una versión nueva firmada en los
   Releases de GitHub. Si la hay, la instala cuando no hay una reserva en curso y se reinicia solo. Funciona
   en Windows y con el AppImage de Linux; los `.deb` y `.rpm` pedirían contraseña de administrador, así que

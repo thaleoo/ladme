@@ -65,6 +65,7 @@ button { font: inherit; color: inherit; }
 [data-estado='libre'] { --c: var(--azul); }
 [data-estado='bloqueado'] { --c: var(--rojo); }
 [data-estado='desbloqueado'] { --c: var(--violeta-claro); }
+[data-estado='compartido'] { --c: #34d399; }
 [data-estado='mantenimiento'], [data-estado='ocupado'] { --c: var(--naranja); }
 [data-estado='conectando'] { --c: var(--gris); }
 

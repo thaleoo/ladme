@@ -17,6 +17,8 @@ export interface Limites {
   llegadaModo: number
   /** Reservas vigentes o futuras que puede tener cada usuario a la vez (el personal está exento); 0 = sin límite. */
   reservasALaVez: number
+  /** Permite marcar reservas como uso compartido. */
+  usoCompartido: boolean
   recargar: () => Promise<void>
 }
 
@@ -31,6 +33,7 @@ const POR_DEFECTO: Limites = {
   maxAbsolutoHoras: 720,
   llegadaModo: 0,
   reservasALaVez: 1,
+  usoCompartido: true,
   recargar: async () => {}
 }
 
@@ -57,6 +60,7 @@ export function PoliticasProvider({ children }: { children: ReactNode }) {
       maxHoras: valores.duracion_max_horas ?? POR_DEFECTO.maxHoras,
       llegadaModo: valores.llegada_modo ?? POR_DEFECTO.llegadaModo,
       reservasALaVez: valores.reservas_activas_max ?? POR_DEFECTO.reservasALaVez,
+      usoCompartido: (valores.uso_compartido ?? 1) === 1,
       maxExtension: valores.extension_max_horas ?? POR_DEFECTO.maxExtension,
       maxTotal: valores.duracion_max_total_horas ?? POR_DEFECTO.maxTotal,
       extensionesMax: valores.extensiones_max ?? POR_DEFECTO.extensionesMax,

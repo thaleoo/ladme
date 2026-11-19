@@ -15,27 +15,60 @@ import Faro from './admin/Faro'
 import Registro from './admin/Registro'
 import Consola from './admin/Consola'
 
-const PESTANAS = [
-  { id: 'ronda', texto: 'Ronda' },
-  { id: 'reservas', texto: 'Reservas' },
-  { id: 'bloqueos', texto: 'Bloqueos' },
-  { id: 'reportes', texto: 'Reportes' },
-  { id: 'solicitudes', texto: 'Solicitudes' },
-  { id: 'equipos', texto: 'Equipos' },
-  { id: 'faro', texto: 'Faro' },
-  { id: 'registro', texto: 'Registro' },
-  { id: 'consola', texto: 'Consola' },
-  { id: 'estadisticas', texto: 'Estadísticas' },
-  { id: 'politicas', texto: 'Políticas', soloAdmin: true },
-  { id: 'errores', texto: 'Errores de la app' }
+/**
+ * Las secciones se agrupan en cinco grupos para no tener una fila de doce pestañas. Cada sección
+ * sigue teniendo su dirección (?tab=faro), así que los enlaces de avisos y del chat no cambian.
+ */
+const GRUPOS = [
+  { id: 'hoy', texto: 'Hoy', secciones: [{ id: 'ronda', texto: 'Ronda' }] },
+  {
+    id: 'reservas',
+    texto: 'Reservas',
+    secciones: [
+      { id: 'reservas', texto: 'Reservas' },
+      { id: 'solicitudes', texto: 'Solicitudes y clases' },
+      { id: 'bloqueos', texto: 'Bloqueos' }
+    ]
+  },
+  {
+    id: 'equipos',
+    texto: 'Equipos',
+    secciones: [
+      { id: 'faro', texto: 'Faro' },
+      { id: 'equipos', texto: 'Inventario' },
+      { id: 'reportes', texto: 'Fallas' }
+    ]
+  },
+  {
+    id: 'historial',
+    texto: 'Historial',
+    secciones: [
+      { id: 'registro', texto: 'Registro' },
+      { id: 'estadisticas', texto: 'Estadísticas' },
+      { id: 'errores', texto: 'Errores de la app' }
+    ]
+  },
+  {
+    id: 'herramientas',
+    texto: 'Herramientas',
+    secciones: [
+      { id: 'consola', texto: 'Consola' },
+      { id: 'politicas', texto: 'Políticas', soloAdmin: true }
+    ]
+  }
 ] as const
+
+type Seccion = { id: string; texto: string; soloAdmin?: boolean }
 
 export default function Admin() {
   const { perfil } = useAuth()
   const admin = esAdmin(perfil)
   const [params, setParams] = useSearchParams()
-  const visibles = PESTANAS.filter((p) => !('soloAdmin' in p) || admin)
-  const actual = visibles.find((p) => p.id === params.get('tab'))?.id ?? 'ronda'
+  const grupos = GRUPOS.map((g) => ({ ...g, secciones: (g.secciones as readonly Seccion[]).filter((x) => !x.soloAdmin || admin) }))
+  const todas = grupos.flatMap((g) => g.secciones)
+  const actual = todas.find((x) => x.id === params.get('tab'))?.id ?? 'ronda'
+  const grupo = grupos.find((g) => g.secciones.some((x) => x.id === actual)) ?? grupos[0]
+  const ir = (id: string) => setParams({ tab: id }, { replace: true })
 
   return (
     <>
@@ -46,11 +79,21 @@ export default function Admin() {
       />
 
       <Pestanas
-        etiqueta="Secciones de administración"
-        opciones={visibles.map((p) => ({ id: p.id, texto: p.texto }))}
-        actual={actual}
-        alCambiar={(id) => setParams({ tab: id }, { replace: true })}
+        etiqueta="Grupos de administración"
+        opciones={grupos.map((g) => ({ id: g.id, texto: g.texto }))}
+        actual={grupo.id}
+        alCambiar={(id) => ir(grupos.find((g) => g.id === id)?.secciones[0]?.id ?? 'ronda')}
       />
+      {grupo.secciones.length > 1 && (
+        <div className="chips subsecciones" role="tablist" aria-label={`Secciones de ${grupo.texto}`}>
+          {grupo.secciones.map((x) => (
+            <button key={x.id} type="button" role="tab" className="chip" aria-selected={actual === x.id} aria-pressed={actual === x.id}
+                    onClick={() => ir(x.id)}>
+              {x.texto}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="panel-pestana" key={actual}>
 

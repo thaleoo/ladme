@@ -3,7 +3,7 @@
 //! Faro lo envía unas veces al día; el software se copia a la PWA para filtrar al reservar.
 
 use serde_json::{json, Value};
-use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
+use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
 /// Medidor del uso del procesador (necesita dos lecturas separadas en el tiempo).
 pub struct Medidor {
@@ -68,7 +68,90 @@ pub fn recolectar() -> Value {
         "so_version": System::long_os_version(),
         "arranque_h": System::uptime() / 3600,
         "software": software(),
+        "disco_salud": salud_disco(),
     })
+}
+
+/// Procesos que delatan cada programa (nombre del ejecutable, sin «.exe», en minúsculas).
+const PROCESOS: &[(&str, &[&str])] = &[
+    ("R", &["r", "rgui", "rterm", "rsession", "rscript"]),
+    ("RStudio", &["rstudio"]),
+    ("Python", &["python", "python3", "pythonw", "ipython"]),
+    ("Jupyter", &["jupyter-lab", "jupyter-notebook", "jupyter"]),
+    ("Visual Studio Code", &["code", "codium"]),
+    ("PyCharm", &["pycharm64", "pycharm"]),
+    ("MATLAB", &["matlab"]),
+    ("GNU Octave", &["octave", "octave-gui"]),
+    ("Julia", &["julia"]),
+    ("SPSS", &["stats", "spss"]),
+    ("Stata", &["stata", "statamp-64", "statase-64", "statabe-64", "xstata"]),
+    ("SAS", &["sas"]),
+    ("Minitab", &["mtb", "minitab"]),
+    ("Orange", &["orange-canvas"]),
+    ("QGIS", &["qgis", "qgis-bin", "qgis-ltr-bin"]),
+    ("ArcGIS", &["arcgispro"]),
+    ("Power BI", &["pbidesktop"]),
+    ("Tableau", &["tableau"]),
+    ("Microsoft Office", &["excel", "winword", "powerpnt"]),
+    ("LibreOffice", &["soffice.bin", "soffice"]),
+    ("LaTeX", &["texstudio", "texmaker", "pdflatex", "xelatex"]),
+    ("GeoGebra", &["geogebra"]),
+];
+
+/// Lee qué programas de la lista están abiertos ahora. Solo nombres de programas: nunca archivos,
+/// ventanas ni lo que la persona hace en ellos.
+pub struct Programas {
+    sys: System,
+}
+
+impl Programas {
+    pub fn new() -> Self {
+        Programas { sys: System::new() }
+    }
+
+    pub fn activos(&mut self) -> Vec<String> {
+        self.sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::Never));
+        let mut nombres: Vec<String> = self
+            .sys
+            .processes()
+            .values()
+            .map(|p| p.name().to_string_lossy().to_lowercase().trim_end_matches(".exe").to_string())
+            .collect();
+        nombres.sort();
+        nombres.dedup();
+        PROCESOS
+            .iter()
+            .filter(|(_, exes)| exes.iter().any(|e| nombres.binary_search(&e.to_string()).is_ok()))
+            .map(|(n, _)| n.to_string())
+            .collect()
+    }
+}
+
+/// Salud del disco según el sistema: «ok», «advertencia», «falla» o nada si no se puede saber.
+#[cfg(windows)]
+fn salud_disco() -> Option<&'static str> {
+    use std::os::windows::process::CommandExt;
+    let salida = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", "(Get-PhysicalDisk | Select-Object -ExpandProperty HealthStatus) -join ','"])
+        .creation_flags(0x0800_0000)
+        .output()
+        .ok()?;
+    let texto = String::from_utf8_lossy(&salida.stdout).to_lowercase();
+    if texto.contains("unhealthy") {
+        Some("falla")
+    } else if texto.contains("warning") {
+        Some("advertencia")
+    } else if texto.contains("healthy") {
+        Some("ok")
+    } else {
+        None
+    }
+}
+
+/// En Linux leer SMART necesita permisos de administrador; solo se usa si el sistema lo expone.
+#[cfg(not(windows))]
+fn salud_disco() -> Option<&'static str> {
+    None
 }
 
 /// Programas que interesan al laboratorio: (nombre visible, coincidencias en Windows, ejecutables en Linux).
@@ -157,6 +240,13 @@ fn software() -> Vec<String> {
 
 #[cfg(test)]
 mod pruebas {
+    #[test]
+    fn programas_activos_no_falla() {
+        let mut p = super::Programas::new();
+        let v = p.activos();
+        assert!(v.iter().all(|n| super::PROCESOS.iter().any(|(x, _)| x == n)));
+    }
+
     #[test]
     fn recolecta_algo_razonable() {
         let v = super::recolectar();

@@ -879,6 +879,13 @@
       }).registrarReserva(datos);
     }
 
+    // «2 h 30 min» a partir de milisegundos.
+    function duracionTexto(ms) {
+      const min = Math.round(ms / 60000);
+      const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+      return [d ? d + ' d' : '', h ? h + ' h' : '', m ? m + ' min' : ''].filter(Boolean).join(' ') || '0 min';
+    }
+
     function mostrarDetalles(eventInfo, esAdministrador) {
       const event = eventInfo.event;
       const props = event.extendedProps;
@@ -912,8 +919,12 @@
         html += `
           <li class="list-group-item"><strong>Equipo Asignado:</strong> ${esc(props.equipos)}</li>
           <li class="list-group-item"><strong>Tipo de Actividad:</strong> ${esc(props.actividad)}</li>
+          ${props.detalle ? `<li class="list-group-item"><strong>Descripción:</strong> ${esc(props.detalle)}</li>` : ''}
           <li class="list-group-item"><strong>Horario de Inicio:</strong> ${esc(event.start ? event.start.toLocaleString() : 'N/A')}</li>
           <li class="list-group-item"><strong>Horario de Fin:</strong> ${esc(event.end ? event.end.toLocaleString() : 'N/A')}</li>
+          ${(event.start && event.end) ? `<li class="list-group-item"><strong>Duración:</strong> ${esc(duracionTexto(event.end - event.start))}</li>` : ''}
+          ${props.desatendido === 'Sí' ? `<li class="list-group-item"><strong>Proceso desatendido:</strong> Sí, hay un proceso corriendo; no apague ni reinicie el equipo.</li>` : ''}
+          ${props.mensaje ? `<li class="list-group-item"><strong>Mensaje para quien llegue:</strong> ${esc(props.mensaje)}</li>` : ''}
         `;
         footer.innerHTML = `<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>`;
       }

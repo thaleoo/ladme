@@ -51,7 +51,7 @@ const urgente = (v = vista()) => !!v.insistir || ['por_terminar', 'gracia', 'lib
 
 function accionesDe(estado, v = vista()) {
   if (estado === 'reservado' || estado === 'por_terminar') return [...(v.llegada_pendiente ? ['llegada'] : []), 'extender', 'liberar', 'reportar'];
-  if (estado === 'libre' || estado === 'libre_en_uso' || estado === 'gracia') return ['reservar', 'reportar'];
+  if (estado === 'libre' || estado === 'libre_en_uso' || estado === 'gracia' || estado === 'compartido') return ['reservar', 'reportar'];
   return ['reportar'];
 }
 
@@ -63,6 +63,7 @@ function etiqueta(v) {
     case 'libre': return v.siguiente ? `Libre hasta ${textoHora(v.siguiente)}` : 'Disponible';
     case 'libre_en_uso': return 'Sin reserva';
     case 'desbloqueado': return v.titulo === 'Clase en curso' ? 'Clase en curso' : 'Uso libre';
+    case 'compartido': return 'Uso compartido';
     case 'mantenimiento': return esc(v.titulo);
     case 'ocupado': return 'Bloqueado';
     default: return 'Conectando…';
@@ -74,6 +75,7 @@ function queCuenta(v) {
     case 'reservado': case 'por_terminar': return 'restantes';
     case 'gracia': return v.modo === 'bloquear' ? 'para el bloqueo' : 'de gracia';
     case 'desbloqueado': return 'de uso libre';
+    case 'compartido': return 'de uso compartido';
     case 'ocupado': return 'hasta que termine';
     case 'libre': case 'libre_en_uso': return 'para la próxima reserva';
     default: return '';
@@ -160,6 +162,10 @@ function htmlAbierta(v) {
         <button class="cerrar" data-cerrar title="Cerrar">${ICONOS.cerrar}</button>
       </div>
       ${v.anuncio ? `<div class="anuncio">${ICONOS.megafono}<span>${esc(v.anuncio)}</span></div>` : ''}
+      ${v.compartido ? `<div class="protegido">${ICONOS.candado}<span><strong>Uso compartido${v.compartido.titular ? ` de ${esc(v.compartido.titular)}` : ''}.</strong>
+        ${v.compartido.protegidos?.length ? `No cierres ${esc(v.compartido.protegidos.join(', '))}.` : 'No cierres los programas abiertos.'}
+        No reinicies, apagues ni cierres la sesión.${v.compartido.nota ? ` «${esc(v.compartido.nota)}»` : ''}</span></div>` : ''}
+      ${v.espera > 0 && (v.estado === 'por_terminar' || v.estado === 'reservado') ? `<div class="espera">${ICONOS.reloj}<span>${v.espera === 1 ? 'Hay 1 persona esperando' : `Hay ${v.espera} personas esperando`} un equipo. Si ya terminaste, libéralo desde el QR.</span></div>` : ''}
       ${cuerpo}
       <div class="pie"><span>Faro · LADME ${esc(paquete?.version ?? '')}${paquete?.clave_disponible && accion !== 'personal'
         ? ` · <button class="link-pie" data-personal title="Personal del laboratorio">${ICONOS.llave} Personal</button>` : ''}</span><span class="num" data-vivo="hora">--</span></div>

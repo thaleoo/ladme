@@ -225,14 +225,14 @@ fn aplicar(app: &AppHandle, n: &mut Nucleo, mut nueva: Vista) {
 
 // ------------------------------------------------------------------ ciclo
 
-async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Option<u64>, cpu: u32) {
+async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Option<u64>, cpu: u32, programas: Vec<String>) {
     let (cfg, token, bloqueado, inventario) = {
         let n = compartido.lock().unwrap();
         (n.config.clone(), n.config.token.clone(), n.copia.bloqueado, n.inventario_pendiente.clone())
     };
     let Some(token) = token else { return };
     let mut info = json!({ "inactivo_seg": inactivo, "bloqueado": bloqueado, "host": host(), "so": sistema(),
-                           "version": env!("CARGO_PKG_VERSION"), "cpu": cpu });
+                           "version": env!("CARGO_PKG_VERSION"), "cpu": cpu, "programas": programas });
     if let Some(inv) = inventario {
         info["inventario"] = inv;
     }
@@ -293,6 +293,10 @@ async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg
             }
             Ok("buscando actualización".into())
         }
+        // Nunca se apaga un equipo con un proceso compartido en curso (el servidor también lo evita).
+        "apagar" if compartido.lock().unwrap().copia.remoto.as_ref().and_then(|r| r.compartido.as_ref()).is_some_and(|c| c.hasta > Utc::now()) => {
+            Err("hay un uso compartido en curso: no se apaga".into())
+        }
         "apagar" => ordenes::apagar().map(|_| {
             compartido.lock().unwrap().aviso_local = Some((
                 "El laboratorio apagará este equipo en 1 minuto. Guarda tu trabajo.".into(),
@@ -330,6 +334,7 @@ async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg
 async fn ciclo(app: AppHandle, compartido: Compartido) {
     let api = Api::new();
     let mut medidor = inventario::Medidor::new();
+    let mut lector = inventario::Programas::new();
     // El inventario se recolecta al minuto de arrancar y luego cada 6 horas.
     let mut proximo_inventario = Instant::now() + Duration::from_secs(60);
     let mut ultimo_latido: Option<Instant> = None;
@@ -368,7 +373,8 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
         if vinculado && toca {
             ultimo_latido = Some(Instant::now());
             let cpu = medidor.cpu_pct();
-            latir(&app, &api, &compartido, inactivo, cpu).await;
+            let programas = lector.activos();
+            latir(&app, &api, &compartido, inactivo, cpu, programas).await;
         }
         {
             let mut n = compartido.lock().unwrap();

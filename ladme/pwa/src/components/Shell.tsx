@@ -67,9 +67,10 @@ export default function Shell() {
       { a: '/mis-reservas', texto: 'Mis reservas', icono: 'ticket' },
       { a: '/mi-uso', texto: 'Mi uso', icono: 'grafica' }
     ]
+    if (staff || perfil?.tipo_usuario === 'Docente/Investigador') base.push({ a: '/clases', texto: 'Sala para clases', icono: 'calendario' })
     if (staff) base.push({ a: '/validar', texto: 'Validar credencial', icono: 'qr' })
     return base
-  }, [staff])
+  }, [staff, perfil?.tipo_usuario])
 
   const gestion = useMemo<Enlace[]>(() => {
     const lista: Enlace[] = []

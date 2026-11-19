@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type {
-  Aviso, Equipo, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+  Aviso, Clase, Equipo, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
 } from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
@@ -824,4 +824,98 @@ export async function registro(f: FiltrosRegistro, limite = 25, offset = 0): Pro
 export async function anotarComando(comando: string, ok: boolean, resultado: string | null): Promise<void> {
   const { error } = await supabase.rpc('consola_anotar', { p_comando: comando, p_ok: ok, p_resultado: resultado })
   if (error) console.warn('No se pudo anotar el comando', error.message)
+}
+
+// ------------------------------------------------------------ Uso compartido
+/** El titular comparte (o deja de compartir) su reserva mientras no está. */
+export async function marcarCompartida(reserva: string, compartida: boolean, protegidos: string[] = [], nota?: string): Promise<void> {
+  const { error } = await supabase.rpc('marcar_compartida', {
+    p_reserva: reserva,
+    p_compartida: compartida,
+    p_protegidos: protegidos,
+    p_nota: nota ?? null
+  })
+  if (error) fail('No se pudo cambiar el uso compartido', error)
+}
+
+// ------------------------------------------------------------ Clases
+export interface DatosClase {
+  nombre: string
+  docente: string
+  grupo: number
+  dias: number[]
+  horaInicio: string
+  horaFin: string
+  desde: string
+  hasta: string
+  equipos?: number | null
+  notas?: string | null
+}
+
+export async function solicitarClase(d: DatosClase): Promise<Clase> {
+  const { data, error } = await supabase.rpc('solicitar_clase', {
+    p_nombre: d.nombre,
+    p_docente: d.docente,
+    p_grupo: d.grupo,
+    p_dias: d.dias,
+    p_hora_inicio: d.horaInicio,
+    p_hora_fin: d.horaFin,
+    p_desde: d.desde,
+    p_hasta: d.hasta,
+    p_equipos: d.equipos ?? null,
+    p_notas: d.notas ?? null
+  })
+  if (error) fail('No se pudo enviar la solicitud', error)
+  return data as Clase
+}
+
+/** Las propias (docente) o todas (personal), las más recientes primero. */
+export async function listarClases(soloPendientes = false): Promise<Clase[]> {
+  let q = supabase.from('clases').select('*').order('creado_en', { ascending: false }).limit(200)
+  if (soloPendientes) q = q.eq('estado', 'pendiente')
+  const { data, error } = await q
+  if (error) fail('No se pudieron cargar las clases', error)
+  return (data ?? []) as Clase[]
+}
+
+export async function obtenerClase(id: number): Promise<Clase | null> {
+  const { data, error } = await supabase.from('clases').select('*').eq('id', id).maybeSingle()
+  if (error) fail('No se pudo cargar la clase', error)
+  return (data as Clase) ?? null
+}
+
+export interface PreviaClase {
+  total_sesiones: number
+  sesiones: { inicio: string; fin: string; libres: number }[]
+  equipos: { codigo: string; libres: number }[]
+}
+
+export async function clasePrevia(id: number): Promise<PreviaClase> {
+  const { data, error } = await supabase.rpc('clase_previa', { p_id: id })
+  if (error) fail('No se pudo calcular la disponibilidad', error)
+  return data as PreviaClase
+}
+
+export async function aprobarClase(id: number, equipos: string[], respuesta?: string): Promise<{ creadas: number; omitidas: { codigo: string; inicio: string }[] }> {
+  const { data, error } = await supabase.rpc('aprobar_clase', { p_id: id, p_equipos: equipos, p_respuesta: respuesta ?? null })
+  if (error) fail('No se pudo aprobar', error)
+  return data as { creadas: number; omitidas: { codigo: string; inicio: string }[] }
+}
+
+export async function rechazarClase(id: number, respuesta: string): Promise<void> {
+  const { error } = await supabase.rpc('rechazar_clase', { p_id: id, p_respuesta: respuesta })
+  if (error) fail('No se pudo rechazar', error)
+}
+
+export async function cancelarClase(id: number, motivo?: string): Promise<number> {
+  const { data, error } = await supabase.rpc('cancelar_clase', { p_id: id, p_motivo: motivo ?? null })
+  if (error) fail('No se pudo cancelar la clase', error)
+  return data as number
+}
+
+// ------------------------------------------------------------ Programas usados (Faro)
+export async function programasUsados(desde: string, hasta: string): Promise<{ programa: string; horas: number; equipos: number }[]> {
+  const { data, error } = await supabase.rpc('faro_programas_resumen', { p_desde: desde, p_hasta: hasta })
+  if (error) fail('No se pudo cargar el uso por programa', error)
+  return (data ?? []) as { programa: string; horas: number; equipos: number }[]
 }

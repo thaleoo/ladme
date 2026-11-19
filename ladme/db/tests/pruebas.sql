@@ -469,6 +469,113 @@ declare j jsonb; k jsonb; t0 timestamptz := date_trunc('hour', now()) + interval
   perform pg_temp.falla($q$select consola_anotar('x', true)$q$, 'Solo el personal');
 end $$;
 
+-- 0011: uso compartido, clases, diagnóstico en fallas, Faro (compartido, clases, programas, disco) y horario de la sala.
+do $$
+declare h reservas; g reservas; j jsonb; t6 text; t4 text; c clases; n int; v_hhmm int; v_hoy date := (now() at time zone 'America/Bogota')::date;
+begin
+  insert into auth.users (email, raw_user_meta_data) values ('dora@unal.edu.co', '{"name": "Dora"}'), ('doc@unal.edu.co', '{"name": "Docente Uno"}');
+  update perfiles set tipo_usuario = 'Docente/Investigador', programa = 'Estadística', reglamento_aceptado_en = now() where correo = 'doc@unal.edu.co';
+
+  -- Uso compartido: Ana deja un proceso y comparte su reserva.
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  select e.id, p.id, now() - interval '5 minutes', now() + interval '3 hours', 'Investigación'
+    from equipos e, perfiles p where e.codigo = 'UNAL-06' and p.correo = 'ana@unal.edu.co' returning * into h;
+  perform pg_temp.como('ana@unal.edu.co');
+  h := marcar_compartida(h.id, true, array['RStudio', ' RStudio ', 'Python'], 'No cerrar RStudio: modelo corriendo');
+  perform pg_temp.ok(h.compartida and h.desatendido and cardinality(h.protegidos) = 2, 'una reserva se marca como uso compartido con programas protegidos');
+  perform pg_temp.ok((select compartida and 'RStudio' = any (protegidos) from ocupacion_publica where codigo = 'UNAL-06' and inicio = h.inicio),
+                     'la agenda pública muestra el tramo compartido');
+  -- Otra persona puede reservar dentro del horario compartido; dos invitados a la vez no.
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  select e.id, p.id, now() - interval '1 minute', now() + interval '1 hour', 'PAE'
+    from equipos e, perfiles p where e.codigo = 'UNAL-06' and p.correo = 'dora@unal.edu.co' returning * into g;
+  perform pg_temp.ok(g.id is not null, 'se puede reservar un equipo en uso compartido');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where dedupe_key = 'compartida:' || g.id and usuario_id = h.usuario_id),
+                     'la titular recibe aviso cuando alguien usa su equipo compartido');
+  perform pg_temp.falla(format($q$insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+    select e.id, p.id, now() + interval '30 minutes', now() + interval '90 minutes', 'PAE' from equipos e, perfiles p
+     where e.codigo = 'UNAL-06' and p.correo = 'caro@unal.edu.co'$q$), 'sin_solapamiento');
+  perform pg_temp.falla($q$insert into reservas (tipo, equipo_id, usuario_id, inicio, fin, motivo)
+    select 'bloqueo', e.id, p.id, now() + interval '2 hours', now() + interval '4 hours', 'Mantenimiento' from equipos e, perfiles p
+     where e.codigo = 'UNAL-06' and p.correo = 'lab@unal.edu.co'$q$, 'uso compartido');
+  perform pg_temp.falla(format($q$select marcar_compartida(%L, false)$q$, h.id), 'no puedes dejar de compartir');
+  perform pg_temp.como('dora@unal.edu.co');
+  perform pg_temp.falla(format($q$select marcar_compartida(%L, false)$q$, h.id), 'no encontrada');
+
+  -- Faro en el equipo compartido.
+  perform pg_temp.como('lab@unal.edu.co');
+  t6 := faro_vincular(faro_codigo_vinculo('UNAL-06') ->> 'codigo', 'PC-06', 'Windows 11', '0.5.0') ->> 'token';
+  update agentes set ultimo_latido = now() - interval '60 seconds' where equipo_id = (select id from equipos where codigo = 'UNAL-06');
+  j := faro_estado(t6, '{"inactivo_seg": 5, "cpu": 40, "programas": ["RStudio", "Python"], "inventario": {"disco_salud": "advertencia", "disco_gb": 500, "disco_libre_gb": 200}}');
+  perform pg_temp.ok(j -> 'compartido' -> 'protegidos' ? 'RStudio' and j -> 'compartido' ->> 'titular' is not null, 'Faro recibe los programas protegidos');
+  perform pg_temp.ok(j -> 'actual' ->> 'tipo' = 'reserva' and (j -> 'actual' ->> 'inicio')::timestamptz = g.inicio, 'con invitado, Faro ve la reserva del invitado');
+  perform pg_temp.ok(j ? 'espera', 'Faro recibe cuántas personas esperan equipo');
+  perform pg_temp.ok((select sum(minutos) from faro_programas where programa = 'RStudio') >= 1, 'Faro suma minutos de uso por programa');
+  perform pg_temp.ok(exists (select 1 from cola_chat where tipo = 'faro_disco_salud'), 'un disco con advertencias avisa al chat');
+  update reservas set estado = 'cancelada' where id = g.id;
+  j := faro_estado(t6, '{"inactivo_seg": 5}');
+  perform pg_temp.ok(j -> 'actual' = 'null'::jsonb and j ? 'compartido', 'sin invitado, el equipo compartido queda libre para usarlo');
+  perform pg_temp.ok((faro_programas_resumen(v_hoy, v_hoy) -> 0 ->> 'programa') is not null, 'resumen de programas usados');
+
+  -- Diagnóstico automático al reportar una falla.
+  perform pg_temp.como('dora@unal.edu.co');
+  perform reportar_falla('UNAL-06', 'Lento o se congela', 'Va muy lento hoy, se congela al abrir R');
+  perform pg_temp.ok((select (diagnostico ->> 'en_linea')::boolean and diagnostico ->> 'version' = '0.5.0' from reportes
+                       where equipo_id = (select id from equipos where codigo = 'UNAL-06') order by creado_en desc limit 1),
+                     'la falla reportada trae el diagnóstico de Faro');
+
+  -- Clases: solo docentes solicitan; el personal aprueba con los equipos libres.
+  perform pg_temp.falla($q$select solicitar_clase('Estadística I', 'Prof. Uno', 2, array[2, 4], '14:00', '16:00', current_date + 7, current_date + 20)$q$,
+                        'Solo docentes');
+  perform pg_temp.como('doc@unal.edu.co');
+  perform pg_temp.falla(format($q$select solicitar_clase('Estadística I', 'Prof. Uno', 2, array[2, 4], '14:00', '16:00', %L, %L)$q$,
+                               v_hoy - 1, v_hoy + 10), 'pasado');
+  perform pg_temp.falla(format($q$select solicitar_clase('Estadística I', 'Prof. Uno', 2, array[2], '14:00', '16:00', %L, %L)$q$,
+                               v_hoy, v_hoy + 400), 'semanas');
+  c := solicitar_clase('Estadística I', 'Prof. Uno', 2, array[2, 4], '14:00', '16:00', v_hoy + 7, v_hoy + 20, 5, 'Taller de R');
+  perform pg_temp.ok(c.estado = 'pendiente' and c.dias = array[2, 4]::smallint[], 'un docente solicita la sala para una clase semanal');
+  perform pg_temp.ok(exists (select 1 from cola_chat where dedupe_key = 'clase:' || c.id), 'la solicitud de clase avisa al chat del personal');
+  perform pg_temp.como('lab@unal.edu.co');
+  j := clase_previa(c.id);
+  n := (j ->> 'total_sesiones')::int;
+  perform pg_temp.ok(n between 3 and 5 and jsonb_array_length(j -> 'equipos') > 10, 'la vista previa calcula sesiones y equipos libres');
+  j := aprobar_clase(c.id, array['unal-10', 'UNAL-11'], 'Lleguen 5 min antes');
+  perform pg_temp.ok((j ->> 'creadas')::int = 2 * n, 'aprobar crea un bloqueo por equipo y sesión');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where dedupe_key = 'clase_ok:' || c.id), 'el docente recibe la aprobación con los equipos');
+  perform pg_temp.ok((select ocupacion_publica.motivo from ocupacion_publica where codigo = 'UNAL-10' and motivo like 'Clase · Estadística I%' limit 1) is not null,
+                     'la agenda muestra la clase sin datos personales');
+  perform pg_temp.falla(format($q$select aprobar_clase(%s, array['UNAL-10'])$q$, c.id), 'ya fue aprobada');
+  perform pg_temp.como('doc@unal.edu.co');
+  perform pg_temp.ok(cancelar_clase(c.id, 'Cambio de horario') = 2 * n, 'el docente cancela y se liberan las sesiones futuras');
+
+  -- Clase en curso: el equipo habilitado queda desbloqueado en Faro.
+  perform pg_temp.como('lab@unal.edu.co');
+  t4 := faro_vincular(faro_codigo_vinculo('UNAL-04') ->> 'codigo', 'PC-04', 'Windows 11', '0.5.0') ->> 'token';
+  insert into reservas (tipo, equipo_id, usuario_id, inicio, fin, motivo, clase_id)
+  select 'bloqueo', e.id, p.id, now() - interval '5 minutes', now() + interval '1 hour', 'Clase · Estadística I · grupo 2', c.id
+    from equipos e, perfiles p where e.codigo = 'UNAL-04' and p.correo = 'lab@unal.edu.co';
+  j := faro_estado(t4, '{"inactivo_seg": 5}');
+  perform pg_temp.ok(j ->> 'desbloqueo_hasta' is not null, 'durante la clase, Faro deja usar los equipos habilitados');
+
+  -- Horario automático: apagar omite los equipos con reserva o uso compartido en curso.
+  v_hhmm := extract(hour from now() at time zone 'America/Bogota')::int * 100 + extract(minute from now() at time zone 'America/Bogota')::int;
+  update politicas set valor = to_jsonb(v_hhmm) where clave = 'sala_apagar_hhmm';
+  update politicas set valor = '1' where clave = 'sala_sabado';
+  update agentes set ultimo_latido = now() where token_hash is not null;
+  j := sala_tick();
+  if extract(isodow from now() at time zone 'America/Bogota') < 7 then
+    perform pg_temp.ok(j -> 'acciones' ? 'apagar', 'a la hora de cierre se ordena apagar la sala');
+    perform pg_temp.ok(not exists (select 1 from agente_comandos where tipo = 'apagar' and equipo_id in
+                                     (select id from equipos where codigo in ('UNAL-06', 'UNAL-04')) and creado_por is null),
+                       'no se apagan equipos con uso compartido o clase en curso');
+    perform pg_temp.ok(not (sala_tick() -> 'acciones' ? 'apagar'), 'el cierre se ordena una sola vez al día');
+  end if;
+  update politicas set valor = '0' where clave in ('sala_apagar_hhmm', 'sala_sabado');
+  -- Red caída: varios Faro dejan de responder a la vez.
+  update agentes set ultimo_latido = now() - interval '5 minutes' where token_hash is not null;
+  perform pg_temp.ok(sala_tick() -> 'acciones' ? 'red_caida', 'si varios Faro dejan de responder a la vez, se avisa de posible caída de red');
+end $$;
+
 -- Permisos reales del rol que usa la PWA.
 select pg_temp.como('ana@unal.edu.co') \gset sin_
 set role authenticated;
@@ -483,6 +590,9 @@ do $$ begin
   perform pg_temp.ok((select count(*) from reservas where usuario_id <> auth.uid()) = 0, 'un usuario solo ve sus reservas');
   perform pg_temp.ok((select count(*) from contactos) = 0, 'los contactos solo los ve el personal');
   perform pg_temp.ok((select count(*) from reportes) = 0, 'los reportes ajenos no se ven');
+  perform pg_temp.ok((select count(*) from clases) = 0, 'las solicitudes de clase ajenas no se ven');
+  perform pg_temp.falla($q$select sala_tick()$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from faro_programas$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from errores_app) = 0, 'el registro de errores solo lo ve el personal');
   perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id <> auth.uid()) = 0, 'cada quien ve solo sus avisos');
