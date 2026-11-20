@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { cancelarClase, listarClases, obtenerClase, salaPublica, solicitarClase, type EquipoSala } from '../lib/api'
+import { cancelarClase, claseHoja, listarClases, miVerificacion, obtenerClase, salaPublica, solicitarClase, totalEquiposSala, type EquipoSala, type HojaClase } from '../lib/api'
 import type { Clase, EstadoClase } from '../lib/types'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -51,37 +51,55 @@ const hoyIso = () => {
 function Formulario({ alEnviar }: { alEnviar: () => void }) {
   const { perfil } = useAuth()
   const [nombre, setNombre] = useState('')
-  const [docente, setDocente] = useState(perfil?.nombre ?? '')
   const [grupo, setGrupo] = useState('1')
   const [dias, setDias] = useState<number[]>([])
   const [inicio, setInicio] = useState('14:00')
   const [fin, setFin] = useState('16:00')
   const [desde, setDesde] = useState(hoyIso())
   const [hasta, setHasta] = useState('')
-  const [equipos, setEquipos] = useState('')
+  const [maxEquipos, setMaxEquipos] = useState(0)
+  const [equipos, setEquipos] = useState(8)
+  const [todosLibres, setTodosLibres] = useState(false)
   const [notas, setNotas] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const n = useMemo(() => (dias.length && desde && hasta ? sesiones({ dias, desde, hasta }).length : 0), [dias, desde, hasta])
+  useEffect(() => {
+    totalEquiposSala()
+      .then((n) => {
+        setMaxEquipos(n)
+        setEquipos((x) => Math.min(x, Math.max(1, n)))
+      })
+      .catch(() => setMaxEquipos(0))
+  }, [])
+
+  const fechas = useMemo(() => (dias.length && desde && hasta ? sesiones({ dias, desde, hasta }) : []), [dias, desde, hasta])
+  const n = fechas.length
+  // Sesiones que aún no empiezan (una sesión de hoy cuya hora ya pasó no cuenta).
+  const futuras = useMemo(
+    () => fechas.filter((f) => new Date(`${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}T${inicio}`) > new Date()).length,
+    [fechas, inicio]
+  )
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
     setError(null)
     if (!dias.length) return setError('Elija al menos un día de la semana.')
     if (!hasta) return setError('Indique hasta qué fecha se repite la clase.')
+    if (n === 0) return setError('Entre esas fechas no cae ninguno de los días elegidos.')
+    if (futuras === 0) return setError('Esas sesiones ya empezaron o pasaron: elija fechas u horas futuras.')
     setEnviando(true)
     try {
       await solicitarClase({
         nombre: nombre.trim(),
-        docente: docente.trim(),
+        docente: perfil?.nombre ?? '',
         grupo: Number(grupo),
         dias,
         horaInicio: inicio,
         horaFin: fin,
         desde,
         hasta,
-        equipos: equipos ? Number(equipos) : null,
+        equipos: todosLibres ? null : equipos,
         notas: notas.trim() || null
       })
       alEnviar()
@@ -105,12 +123,18 @@ function Formulario({ alEnviar }: { alEnviar: () => void }) {
         </div>
       </div>
       <div className="field">
-        <label className="field__label" htmlFor="cl-docente">Docente responsable</label>
-        <input id="cl-docente" required minLength={3} maxLength={120} value={docente} onChange={(e) => setDocente(e.target.value)} />
+        <span className="field__label">Docente responsable</span>
+        <div className="docente-fijo">
+          <Icon nombre="usuario" width={16} height={16} />
+          <span>
+            <strong>{perfil?.nombre}</strong>
+            <span className="small muted">{perfil?.correo}</span>
+          </span>
+        </div>
       </div>
       <div className="field">
         <span className="field__label">Días de clase</span>
-        <div className="chips" role="group" aria-label="Días de clase">
+        <div className="chips chips--envolver" role="group" aria-label="Días de clase">
           {[1, 2, 3, 4, 5, 6].map((d) => (
             <button
               key={d}
@@ -144,16 +168,37 @@ function Formulario({ alEnviar }: { alEnviar: () => void }) {
         </div>
       </div>
       <div className="field">
-        <label className="field__label" htmlFor="cl-equipos">Computadores que necesita (opcional)</label>
-        <input id="cl-equipos" type="number" min={1} max={200} inputMode="numeric" value={equipos} onChange={(e) => setEquipos(e.target.value)} placeholder="Número de estudiantes" />
+        <span className="field__label" id="cl-equipos-l">Computadores que necesita</span>
+        <div className={`rango-equipos ${todosLibres ? 'apagado' : ''}`}>
+          <input
+            type="range"
+            min={1}
+            max={Math.max(1, maxEquipos)}
+            value={equipos}
+            disabled={todosLibres || maxEquipos === 0}
+            aria-labelledby="cl-equipos-l"
+            onChange={(e) => setEquipos(Number(e.target.value))}
+            style={{ ['--p' as string]: `${maxEquipos > 1 ? ((equipos - 1) / (maxEquipos - 1)) * 100 : 100}%` }}
+          />
+          <output className="rango-equipos__n num">{todosLibres ? <small>Todos</small> : <>{equipos}<span>/{maxEquipos || '…'}</span></>}</output>
+        </div>
+        <label className="check-row compacto">
+          <input type="checkbox" checked={todosLibres} onChange={(e) => setTodosLibres(e.target.checked)} />
+          <span>Los que haya disponibles</span>
+        </label>
+        <p className="help">
+          Recuerde verificar la <Link to="/">agenda de los computadores</Link> para esos días y solicite una cantidad moderada.
+        </p>
       </div>
       <div className="field">
         <label className="field__label" htmlFor="cl-notas">Notas para el laboratorio (opcional)</label>
         <textarea id="cl-notas" maxLength={500} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Programas que usarán, si es un parcial…" />
       </div>
       {n > 0 && (
-        <p className="small muted" style={{ margin: 0 }}>
-          {n === 1 ? '1 sesión' : `${n} sesiones`} en total. El laboratorio asigna los computadores libres en todas ellas.
+        <p className={`small ${futuras === 0 ? 'texto-aviso' : 'muted'}`} style={{ margin: 0 }}>
+          {futuras === 0
+            ? 'Esas sesiones ya empezaron o pasaron: elija fechas u horas futuras.'
+            : `${futuras === 1 ? '1 sesión' : `${futuras} sesiones`}${futuras < n ? ` (${n - futuras} ya pasaron y no cuentan)` : ''}. El laboratorio asigna los computadores libres en todas ellas.`}
         </p>
       )}
       {error && (
@@ -172,7 +217,12 @@ function Formulario({ alEnviar }: { alEnviar: () => void }) {
 export default function Clases() {
   const { perfil } = useAuth()
   const staff = esStaff(perfil)
-  const docente = perfil?.tipo_usuario === 'Docente/Investigador' || staff
+  const docente = !!perfil?.docente_verificado_en || staff
+  const enRevision = !docente && perfil?.tipo_usuario === 'Docente/Investigador'
+  const [verif, setVerif] = useState<Awaited<ReturnType<typeof miVerificacion>>>(null)
+  useEffect(() => {
+    if (enRevision) void miVerificacion().then(setVerif)
+  }, [enRevision])
   const [lista, setLista] = useState<Clase[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nueva, setNueva] = useState(false)
@@ -202,14 +252,26 @@ export default function Clases() {
         }
       />
 
-      {!docente && (
+      {enRevision ? (
         <div className="alert info">
-          <Icon nombre="info" />
+          <Icon nombre="reloj" />
           <div className="alert__body">
-            Solo los docentes pueden solicitar la sala para una clase. Si es docente, cambie su tipo de usuario en{' '}
-            <Link to="/cuenta#perfil">Cuenta</Link>.
+            <strong>Su verificación como docente está en revisión.</strong> Cuando el laboratorio la confirme podrá pedir la sala.
+            {!verif?.mensaje && (
+              <> Para agilizarla, cuéntenos qué asignaturas dicta en <Link to="/cuenta#perfil">Cuenta</Link>.</>
+            )}
           </div>
         </div>
+      ) : (
+        !docente && (
+          <div className="alert info">
+            <Icon nombre="info" />
+            <div className="alert__body">
+              Solo los docentes verificados pueden solicitar la sala para una clase. Si es docente, elija «Docente/Investigador» en{' '}
+              <Link to="/cuenta#perfil">Cuenta</Link> y el laboratorio lo verificará.
+            </div>
+          </div>
+        )
       )}
       {enviada && (
         <div className="alert ok" role="status">
@@ -257,45 +319,146 @@ export default function Clases() {
   )
 }
 
-/** Detalle de una clase con la hoja imprimible de equipos habilitados. */
+const fechaLarga = (iso: string) =>
+  new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Bogota' })
+const diaCorto = (iso: string) =>
+  new Date(iso).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Bogota' })
+
+/** Autorización formal de la sala: lo que el docente imprime o guarda en PDF (también llega por correo). */
+export function HojaAutorizacion({ h, sala }: { h: HojaClase; sala: EquipoSala[] }) {
+  const habilitados = new Set(h.equipos)
+  const conPlano = sala.length > 0 && sala.every((e) => e.x && e.y)
+  const xs = sala.map((e) => e.x ?? 0)
+  const ys = sala.map((e) => e.y ?? 0)
+  const futuras = h.sesiones.filter((x) => !x.pasada).length
+  return (
+    <section className="card hoja-clase">
+      <header className="hoja-clase__cabecera">
+        <div>
+          <div className="eyebrow">LADME · Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede La Paz</div>
+          <h2>Autorización de uso de sala</h2>
+        </div>
+        <div className="hoja-clase__folio">
+          <span>N.º</span>
+          <strong>{h.consecutivo}</strong>
+        </div>
+      </header>
+
+      <dl className="hoja-clase__datos">
+        <div className="d2"><dt>Clase</dt><dd>{h.nombre}</dd></div>
+        <div><dt>Grupo</dt><dd>{h.grupo}</dd></div>
+        <div><dt>Sesiones</dt><dd>{h.sesiones.length}{futuras < h.sesiones.length ? ` (${futuras} por realizar)` : ''}</dd></div>
+        <div className="ancho"><dt>Docente responsable</dt><dd>{h.docente}{h.docente_correo && <span> · {h.docente_correo}</span>}</dd></div>
+        <div><dt>Horario</dt><dd>{h.dias.map((d) => DIAS[d]).join(', ')} · {h.hora_inicio}–{h.hora_fin}</dd></div>
+        <div><dt>Período</dt><dd>{fechaCorta(h.desde)} al {fechaCorta(h.hasta)}</dd></div>
+        <div className="d2"><dt>Aprobada</dt><dd>{h.resuelto_en ? `${fechaLarga(h.resuelto_en)}${h.aprobado_por ? ` · ${h.aprobado_por}` : ''}` : '—'}</dd></div>
+      </dl>
+
+      <div className="hoja-clase__seccion">
+        <h3>Equipos habilitados <span className="hoja-clase__n">{h.equipos.length}</span></h3>
+        <ul className="hoja-clase__codigos">
+          {h.equipos.map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+      </div>
+
+      {conPlano && (
+        <div className="hoja-clase__seccion">
+          <h3>Ubicación en la sala</h3>
+          <div
+            className="hoja-clase__plano"
+            style={{ gridTemplateColumns: `repeat(${Math.max(...xs)}, 1fr)`, gridTemplateRows: `repeat(${Math.max(...ys)}, auto)` }}
+          >
+            {sala.map((e) => (
+              <span key={e.codigo} className={habilitados.has(e.codigo) ? 'si' : ''} style={{ gridColumn: e.x ?? 1, gridRow: e.y ?? 1 }}>
+                {e.codigo.replace(/^[A-Z]+-/, '')}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="hoja-clase__seccion">
+        <h3>Fechas</h3>
+        <ul className="hoja-clase__fechas">
+          {h.sesiones.map((x) => (
+            <li key={x.inicio} className={x.pasada ? 'pasada' : x.equipos < h.equipos.length ? 'parcial' : ''}>
+              {diaCorto(x.inicio)}
+              {!x.pasada && x.equipos < h.equipos.length && <span> · {x.equipos} eq.</span>}
+            </li>
+          ))}
+        </ul>
+        {h.omitidos.length > 0 && (
+          <p className="small texto-aviso" style={{ margin: '6px 0 0' }}>
+            Algunos equipos no quedaron reservados en ciertas fechas porque ya estaban ocupados:{' '}
+            {h.omitidos.slice(0, 6).map((o) => `${o.codigo} (${diaCorto(o.inicio)})`).join(', ')}
+            {h.omitidos.length > 6 ? ` y ${h.omitidos.length - 6} más` : ''}.
+          </p>
+        )}
+      </div>
+
+      {h.respuesta && (
+        <p className="hoja-clase__nota-lab"><strong>Nota del laboratorio:</strong> {h.respuesta}</p>
+      )}
+
+      <ul className="hoja-clase__normas small">
+        <li>Use solo los equipos de esta lista; los demás pueden estar reservados por otras personas.</li>
+        <li>Durante la clase los equipos habilitados se desbloquean solos. Deje cada equipo como lo encontró y cierre su sesión.</li>
+        <li>Si un equipo habilitado falla, repórtelo desde su ficha (código QR del equipo) o avise al personal del laboratorio.</li>
+      </ul>
+      <footer className="hoja-clase__pie tiny">
+        Documento generado por LADME · {h.consecutivo} · {fechaLarga(new Date().toISOString())}
+      </footer>
+    </section>
+  )
+}
+
+/** Detalle de una clase con la autorización imprimible. */
 export function ClaseDetalle() {
   const { id } = useParams()
   const { perfil } = useAuth()
+  const staff = esStaff(perfil)
   const [c, setC] = useState<Clase | null | undefined>(undefined)
+  const [hoja, setHoja] = useState<HojaClase | null>(null)
   const [sala, setSala] = useState<EquipoSala[]>([])
   const [cancelar, setCancelar] = useState(false)
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const cargar = () =>
     obtenerClase(Number(id))
-      .then(setC)
+      .then((x) => {
+        setC(x)
+        if (x?.estado === 'aprobada') claseHoja(x.id).then(setHoja).catch(() => setHoja(null))
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'No se pudo cargar.'))
+
+  useEffect(() => {
+    void cargar()
     salaPublica().then(setSala).catch(() => setSala([]))
-  }, [id])
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (c === undefined && !error) return <Cargando texto="Cargando clase…" />
   if (!c) return <div className="card"><Empty icono="buscar" titulo="Clase no encontrada">{error ?? 'Puede que no tenga acceso a esta solicitud.'}</Empty></div>
 
-  const habilitados = new Set(c.equipos ?? [])
-  const xs = sala.map((e) => e.x ?? 0)
-  const ys = sala.map((e) => e.y ?? 0)
-  const conPlano = sala.length > 0 && sala.every((e) => e.x && e.y)
-  const fechas = sesiones(c)
-  const puedeCancelar = (c.estado === 'pendiente' || c.estado === 'aprobada') && (c.solicitante === perfil?.id || esStaff(perfil))
+  const puedeCancelar = (c.estado === 'pendiente' || c.estado === 'aprobada') && (c.solicitante === perfil?.id || staff)
 
   return (
     <div className="stack clase-detalle">
       <PageHeader
-        volver={{ a: '/clases', texto: 'Clases' }}
+        volver={staff && c.solicitante !== perfil?.id ? { a: '/admin?tab=solicitudes', texto: 'Solicitudes' } : { a: '/clases', texto: 'Clases' }}
         titulo={`${c.nombre} · grupo ${c.grupo}`}
         sub={textoHorario(c)}
         acciones={
           <span className="row tight no-imprimir">
             {c.estado === 'aprobada' && (
               <button type="button" onClick={() => window.print()}>
-                <Icon nombre="imprimir" width={16} height={16} /> Imprimir lista
+                <Icon nombre="imprimir" width={16} height={16} /> Imprimir o guardar PDF
               </button>
+            )}
+            {staff && c.estado === 'pendiente' && (
+              <Link className="btn" to={`/admin/clases/${c.id}`}>Revisar y aprobar</Link>
             )}
             {puedeCancelar && (
               <button type="button" className="btn ghost" onClick={() => setCancelar(true)}>
@@ -308,66 +471,17 @@ export function ClaseDetalle() {
       <span className={`badge ${TEXTO_ESTADO[c.estado].tono} no-imprimir`} style={{ alignSelf: 'flex-start' }}>
         {TEXTO_ESTADO[c.estado].texto}
       </span>
-      {c.respuesta && (
+      {c.estado !== 'aprobada' && c.respuesta && (
         <div className="alert info">
           <Icon nombre="info" />
           <div className="alert__body"><strong>Nota del laboratorio:</strong> {c.respuesta}</div>
         </div>
       )}
       {c.estado === 'pendiente' && (
-        <p className="small muted">El personal del laboratorio está revisando la solicitud. Recibirá un aviso cuando la apruebe.</p>
+        <p className="small muted">El personal del laboratorio está revisando la solicitud. Recibirá la autorización por correo y en la app.</p>
       )}
 
-      {c.estado === 'aprobada' && c.equipos && (
-        <section className="card hoja-clase">
-          <div className="hoja-clase__cabecera">
-            <div>
-              <div className="eyebrow">LADME · Laboratorio de Datos y Modelamiento Estadístico</div>
-              <h2>{c.nombre} · grupo {c.grupo}</h2>
-              <p className="small" style={{ margin: 0 }}>
-                Docente: <strong>{c.docente}</strong>
-              </p>
-              <p className="small" style={{ margin: 0 }}>
-                {c.dias.map((d) => DIAS[d]).join(', ')} de {hhmm(c.hora_inicio)} a {hhmm(c.hora_fin)} · del {fechaCorta(c.desde)} al{' '}
-                {fechaCorta(c.hasta)}
-              </p>
-            </div>
-            <div className="hoja-clase__total">
-              <strong>{c.equipos.length}</strong>
-              <span>equipos</span>
-            </div>
-          </div>
-          <h3>Equipos habilitados para la clase</h3>
-          <ul className="hoja-clase__codigos">
-            {c.equipos.map((e) => (
-              <li key={e}>{e}</li>
-            ))}
-          </ul>
-          {conPlano && (
-            <>
-              <h3>Ubicación en la sala</h3>
-              <div
-                className="hoja-clase__plano"
-                style={{ gridTemplateColumns: `repeat(${Math.max(...xs)}, 1fr)`, gridTemplateRows: `repeat(${Math.max(...ys)}, auto)` }}
-              >
-                {sala.map((e) => (
-                  <span key={e.codigo} className={habilitados.has(e.codigo) ? 'si' : ''} style={{ gridColumn: e.x ?? 1, gridRow: e.y ?? 1 }}>
-                    {e.codigo.replace(/^[A-Z]+-/, '')}
-                  </span>
-                ))}
-              </div>
-            </>
-          )}
-          <p className="small hoja-clase__nota">
-            Use solo los equipos de esta lista durante la clase. Los demás pueden estar reservados por otras personas. Si un equipo
-            habilitado falla, avise al personal del laboratorio.
-          </p>
-          <details className="no-imprimir">
-            <summary className="small">Ver las {fechas.length} sesiones</summary>
-            <p className="small muted">{fechas.map((f) => f.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })).join(' · ')}</p>
-          </details>
-        </section>
-      )}
+      {c.estado === 'aprobada' && (hoja ? <HojaAutorizacion h={hoja} sala={sala} /> : <Cargando texto="Preparando la autorización…" />)}
 
       <Modal abierto={cancelar} titulo="Cancelar la clase" onCerrar={() => setCancelar(false)}>
         <div className="stack">
@@ -382,7 +496,7 @@ export function ClaseDetalle() {
             className="btn danger"
             onClick={() =>
               void cancelarClase(c.id, motivo)
-                .then(() => obtenerClase(c.id).then(setC))
+                .then(() => cargar())
                 .then(() => setCancelar(false))
                 .catch((e: unknown) => setError(e instanceof Error ? e.message : 'No se pudo cancelar.'))
             }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  activarUsuario, actividadUsuario, asignarRol, buscarUsuarios, otorgarPermiso, resumenUsuarios,
+  activarUsuario, actividadUsuario, asignarRol, buscarUsuarios, marcarDocente, otorgarPermiso, resumenUsuarios,
   type FiltroUsuarios, type ResumenUsuarios
 } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -283,6 +283,28 @@ export default function Usuarios() {
                 Permiso técnico, independiente del rol.
               </span>
             </label>
+
+            {sel.rol === 'usuario' && (
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={!!sel.docente_verificado_en}
+                  disabled={ocupado}
+                  onChange={() => {
+                    const si = !sel.docente_verificado_en
+                    void cambiar(
+                      () => marcarDocente(sel.id, si),
+                      si ? { docente_verificado_en: new Date().toISOString(), tipo_usuario: 'Docente/Investigador' } : { docente_verificado_en: null },
+                      si ? 'Docente verificado: ya puede pedir la sala para clases.' : 'Verificación docente retirada.'
+                    )
+                  }}
+                />
+                <span>
+                  <strong>Docente verificado</strong>
+                  Puede pedir la sala para clases.
+                </span>
+              </label>
+            )}
 
             {error && (
               <div className="alert danger">

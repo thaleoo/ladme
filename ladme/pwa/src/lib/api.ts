@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type {
-  Aviso, Clase, Equipo, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+  Aviso, Clase, Equipo, EstadoClase, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
 } from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
@@ -962,9 +962,12 @@ export async function obtenerClase(id: number): Promise<Clase | null> {
 }
 
 export interface PreviaClase {
+  /** Sesiones que aún no empiezan (las únicas que se bloquean). */
   total_sesiones: number
+  pasadas: number
+  total_equipos: number
   sesiones: { inicio: string; fin: string; libres: number }[]
-  equipos: { codigo: string; libres: number }[]
+  equipos: { codigo: string; nombre: string; libres: number }[]
 }
 
 export async function clasePrevia(id: number): Promise<PreviaClase> {
@@ -977,6 +980,98 @@ export async function aprobarClase(id: number, equipos: string[], respuesta?: st
   const { data, error } = await supabase.rpc('aprobar_clase', { p_id: id, p_equipos: equipos, p_respuesta: respuesta ?? null })
   if (error) fail('No se pudo aprobar', error)
   return data as { creadas: number; omitidas: { codigo: string; inicio: string }[] }
+}
+
+/** Todo lo de la autorización de una clase: datos, sesiones con equipos bloqueados y quién la aprobó. */
+export interface HojaClase {
+  id: number
+  consecutivo: string
+  nombre: string
+  grupo: number
+  docente: string
+  docente_correo: string | null
+  estado: EstadoClase
+  dias: number[]
+  dias_texto: string
+  hora_inicio: string
+  hora_fin: string
+  desde: string
+  hasta: string
+  notas: string | null
+  equipos_pedidos: number | null
+  equipos: string[]
+  respuesta: string | null
+  aprobado_por: string | null
+  aprobado_correo: string | null
+  resuelto_en: string | null
+  sesiones: { inicio: string; fin: string; equipos: number; pasada: boolean }[]
+  omitidos: { codigo: string; inicio: string }[]
+}
+
+export async function claseHoja(id: number): Promise<HojaClase> {
+  const { data, error } = await supabase.rpc('clase_hoja', { p_id: id })
+  if (error) fail('No se pudo cargar la autorización', error)
+  return data as HojaClase
+}
+
+export async function claseReenviar(id: number): Promise<void> {
+  const { error } = await supabase.rpc('clase_reenviar', { p_id: id })
+  if (error) fail('No se pudo reenviar', error)
+}
+
+/** Equipos activos de la sala (el máximo que se puede pedir para una clase). */
+export async function totalEquiposSala(): Promise<number> {
+  const { count, error } = await supabase
+    .from('equipos')
+    .select('id', { count: 'exact', head: true })
+    .eq('archivado', false)
+    .eq('estado', 'activo')
+  if (error) fail('No se pudieron contar los equipos', error)
+  return count ?? 0
+}
+
+// ------------------------------------------------------------ Verificación docente
+export interface VerificacionDocente {
+  id: number
+  perfil_id: string
+  nombre: string
+  correo: string
+  programa: string | null
+  mensaje: string | null
+  creado_en: string
+}
+
+export async function pedirVerificacionDocente(mensaje: string): Promise<void> {
+  const { error } = await supabase.rpc('pedir_verificacion_docente', { p_mensaje: mensaje })
+  if (error) fail('No se pudo enviar la verificación', error)
+}
+
+export async function verificacionesPendientes(): Promise<VerificacionDocente[]> {
+  const { data, error } = await supabase.rpc('verificaciones_pendientes')
+  if (error) fail('No se pudieron cargar las verificaciones', error)
+  return (data ?? []) as VerificacionDocente[]
+}
+
+export async function resolverVerificacion(id: number, aprobar: boolean, respuesta?: string): Promise<void> {
+  const { error } = await supabase.rpc('resolver_verificacion', { p_id: id, p_aprobar: aprobar, p_respuesta: respuesta ?? null })
+  if (error) fail('No se pudo resolver la verificación', error)
+}
+
+export async function marcarDocente(perfil: string, verificado: boolean): Promise<void> {
+  const { error } = await supabase.rpc('marcar_docente', { p_perfil: perfil, p_verificado: verificado })
+  if (error) fail('No se pudo cambiar la verificación', error)
+}
+
+/** La propia verificación pendiente (para mostrar «en revisión» con lo que escribió). */
+export async function miVerificacion(): Promise<{ estado: string; mensaje: string | null; respuesta: string | null } | null> {
+  const { data, error } = await supabase
+    .from('verificaciones_docente')
+    .select('estado, mensaje, respuesta')
+    .order('creado_en', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return null
+  return data as { estado: string; mensaje: string | null; respuesta: string | null } | null
 }
 
 export async function rechazarClase(id: number, respuesta: string): Promise<void> {

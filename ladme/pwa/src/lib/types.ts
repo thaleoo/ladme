@@ -9,6 +9,8 @@ export interface Perfil {
   activo: boolean
   permisos: string[]
   tipo_usuario: 'Estudiante' | 'Docente/Investigador' | null
+  /** Fecha en que el personal verificó que es docente (habilita «Sala para clases»). */
+  docente_verificado_en?: string | null
   matricula: string | null
   reglamento_aceptado_en: string | null
   creado_en: string
@@ -259,6 +261,7 @@ export interface Clase {
   solicitante: string
   nombre: string
   docente: string
+  docente_correo?: string | null
   grupo: number
   dias: number[]
   hora_inicio: string

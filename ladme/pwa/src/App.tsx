@@ -11,7 +11,7 @@ import { Paginas, recordarDestino } from './lib/rutas'
 import CargaInicial from './components/CargaInicial'
 
 const {
-  AccionRapida, Admin, Sala, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Clases, ClaseDetalle, Reservar, Usuarios, Validar
+  AccionRapida, Admin, Sala, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Clases, ClaseDetalle, AprobarClase, Reservar, Usuarios, Validar
 } = Paginas
 
 function Cargando() {
@@ -128,6 +128,14 @@ export default function App() {
           element={
             <SoloStaff>
               <Admin />
+            </SoloStaff>
+          }
+        />
+        <Route
+          path="admin/clases/:id"
+          element={
+            <SoloStaff>
+              <AprobarClase />
             </SoloStaff>
           }
         />

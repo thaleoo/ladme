@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import { guardarPerfil } from '../lib/api'
-import { useAuth } from '../context/AuthContext'
+import { guardarPerfil, pedirVerificacionDocente } from '../lib/api'
+import { esStaff, useAuth } from '../context/AuthContext'
 import { MATRICULAS, PROGRAMAS, TIPOS_USUARIO } from '../lib/types'
 import Icon from './Icon'
 import { useToast } from './Toast'
@@ -16,10 +16,15 @@ export default function PerfilForm({ alGuardar }: { alGuardar?: () => void }) {
   const [tipo, setTipo] = useState<string>(perfil?.tipo_usuario ?? '')
   const [programa, setPrograma] = useState(perfil?.programa ?? '')
   const [matricula, setMatricula] = useState(perfil?.matricula ?? '')
+  const [verificacion, setVerificacion] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const estudiante = tipo === 'Estudiante'
+  const staff = esStaff(perfil)
+  const verificado = !!perfil?.docente_verificado_en
+  const eraDocente = perfil?.tipo_usuario === 'Docente/Investigador'
+  const pideDocente = tipo === 'Docente/Investigador' && !staff && !verificado
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -36,6 +41,7 @@ export default function PerfilForm({ alGuardar }: { alGuardar?: () => void }) {
         programa: programa.trim(),
         matricula: estudiante ? matricula : null
       })
+      if (pideDocente && verificacion.trim().length >= 5) await pedirVerificacionDocente(verificacion.trim())
       await recargarPerfil()
       toast.mostrar('Perfil actualizado.')
       alGuardar?.()
@@ -100,6 +106,34 @@ export default function PerfilForm({ alGuardar }: { alGuardar?: () => void }) {
           </div>
         )}
       </div>
+      {tipo === 'Docente/Investigador' && !staff && (
+        verificado ? (
+          <p className="small verif-docente ok" style={{ margin: 0 }}>
+            <Icon nombre="check" width={15} height={15} /> Docente verificado: puede pedir la sala para sus clases.
+          </p>
+        ) : (
+          <div className="field verif-docente">
+            <label className="field__label" htmlFor="pf-verif">
+              {eraDocente ? 'Verificación docente en revisión' : 'Verificación docente'}
+            </label>
+            <textarea
+              id="pf-verif"
+              rows={2}
+              maxLength={300}
+              value={verificacion}
+              onChange={(e) => setVerificacion(e.target.value)}
+              placeholder="Asignaturas que dicta o dependencia donde trabaja"
+            />
+            <p className="help">
+              Para pedir la sala para clases, el laboratorio confirma que es docente. Mientras tanto puede reservar equipos con
+              normalidad.
+            </p>
+          </div>
+        )
+      )}
+      {eraDocente && verificado && tipo !== 'Docente/Investigador' && !staff && (
+        <p className="small texto-aviso" style={{ margin: 0 }}>Si cambia de tipo de usuario, pierde la verificación docente.</p>
+      )}
       {error && (
         <div className="alert danger">
           <Icon nombre="alerta" />

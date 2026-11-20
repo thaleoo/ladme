@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { guardarEquipo, listarEquipos } from '../../lib/api'
 import { SISTEMAS, textoSO, type Equipo } from '../../lib/types'
 import { Cargando } from '../../components/PageHeader'
@@ -66,6 +66,21 @@ export default function Equipos() {
   const [error, setError] = useState<string | null>(null)
   const [b, setB] = useState<Borrador | null>(null)
   const [ocupado, setOcupado] = useState(false)
+  const [texto, setTexto] = useState('')
+  const [filtro, setFiltro] = useState<'todos' | Equipo['estado'] | 'archivados'>('todos')
+
+  const visibles = useMemo(() => {
+    const q = texto.trim().toLowerCase()
+    return equipos.filter((e) => {
+      if (filtro === 'archivados' ? !e.archivado : e.archivado) return false
+      if (filtro !== 'todos' && filtro !== 'archivados' && e.estado !== filtro) return false
+      if (!q) return true
+      return [e.codigo, e.nombre, e.marca, e.modelo, e.serial, e.placa_oficial, e.ubicacion, textoSO(e)]
+        .some((x) => x && String(x).toLowerCase().includes(q))
+    })
+  }, [equipos, texto, filtro])
+  const cuenta = (f: typeof filtro) =>
+    equipos.filter((e) => (f === 'archivados' ? e.archivado : !e.archivado && (f === 'todos' || e.estado === f))).length
 
   const cargar = useCallback(async () => {
     try {
@@ -146,13 +161,31 @@ export default function Equipos() {
 
   return (
     <>
-      <div className="row between">
-        <p className="small muted" style={{ margin: 0 }}>
-          {equipos.filter((e) => !e.archivado).length} equipos en el catálogo.
-        </p>
-        <button className="btn" type="button" onClick={() => { setError(null); setB(aBorrador()) }}>
-          <Icon nombre="mas2" /> Nuevo equipo
+      <div className="inv-barra">
+        <label className="inv-buscar">
+          <Icon nombre="buscar" width={16} height={16} />
+          <input type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Buscar por código, modelo, serial…" aria-label="Buscar equipos" />
+        </label>
+        <button className="btn sm" type="button" onClick={() => { setError(null); setB(aBorrador()) }}>
+          <Icon nombre="mas2" /> Nuevo
         </button>
+      </div>
+      <div className="chips inv-filtros" role="group" aria-label="Filtrar equipos">
+        {([
+          ['todos', 'Todos'],
+          ['activo', 'Activos'],
+          ['mantenimiento', 'Mantenimiento'],
+          ['fuera_de_servicio', 'Fuera de servicio'],
+          ['archivados', 'Archivados']
+        ] as const).map(([id, t]) => {
+          const n = cuenta(id)
+          if (n === 0 && id !== 'todos' && filtro !== id) return null
+          return (
+            <button key={id} type="button" className={`chip ${filtro === id ? 'activo' : ''}`} aria-pressed={filtro === id} onClick={() => setFiltro(id)}>
+              {t} <span className="chip__n">{n}</span>
+            </button>
+          )
+        })}
       </div>
       {error && !b && (
         <div className="alert danger">
@@ -160,35 +193,28 @@ export default function Equipos() {
           <div className="alert__body">{error}</div>
         </div>
       )}
-      <div className="grid cols-2">
-        {equipos.map((e) => {
-          const est = ESTADOS.find((x) => x.valor === e.estado)
-          return (
-            <article key={e.id} className="card tight" style={{ opacity: e.archivado ? 0.6 : 1 }}>
-              <div className="row between" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row tight">
-                    <strong style={{ fontSize: 'var(--text-lg)' }}>{e.codigo}</strong>
-                    <span className={`badge ${est?.tono ?? 'gray'}`}>{est?.texto ?? e.estado}</span>
-                    {e.archivado && <span className="badge gray">Archivado</span>}
-                  </div>
-                  <p className="small muted" style={{ margin: '2px 0 0' }}>
-                    {[e.categoria, textoSO(e) ?? 'Sistema sin registrar', e.nombre, e.ubicacion].filter(Boolean).join(' · ')}
-                  </p>
-                  {(e.serial || e.placa_oficial) && (
-                    <p className="tiny muted" style={{ margin: '2px 0 0' }}>
-                      {e.placa_oficial ? `Placa ${e.placa_oficial}` : ''} {e.serial ? `Serial ${e.serial}` : ''}
-                    </p>
-                  )}
-                </div>
-                <button className="btn ghost sm" type="button" onClick={() => { setError(null); setB(aBorrador(e)) }}>
-                  Editar
+      {visibles.length === 0 ? (
+        <p className="small muted">Ningún equipo coincide.</p>
+      ) : (
+        <ul className="inv-lista">
+          {visibles.map((e) => {
+            const est = ESTADOS.find((x) => x.valor === e.estado)
+            return (
+              <li key={e.id}>
+                <button type="button" className={`inv-fila ${e.archivado ? 'archivado' : ''}`} onClick={() => { setError(null); setB(aBorrador(e)) }}>
+                  <span className={`inv-punto ${est?.tono ?? 'gray'}`} title={est?.texto} aria-label={est?.texto} />
+                  <strong className="inv-codigo">{e.codigo}</strong>
+                  <span className="inv-nombre">{[e.marca, e.modelo || e.nombre].filter(Boolean).join(' ') || e.nombre}</span>
+                  <span className="inv-so">{textoSO(e) ?? 'Sin sistema'}</span>
+                  <span className="inv-id">{e.placa_oficial ? `Placa ${e.placa_oficial}` : e.serial ? `S/N ${e.serial}` : ''}</span>
+                  {e.estado !== 'activo' && <span className={`badge ${est?.tono} inv-estado`}>{est?.texto}</span>}
+                  <Icon nombre="flecha" width={14} height={14} />
                 </button>
-              </div>
-            </article>
-          )
-        })}
-      </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
 
       <Modal
         abierto={!!b}

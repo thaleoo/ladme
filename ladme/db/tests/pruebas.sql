@@ -475,6 +475,7 @@ declare h reservas; g reservas; j jsonb; t6 text; t4 text; c clases; n int; v_hh
 begin
   insert into auth.users (email, raw_user_meta_data) values ('dora@unal.edu.co', '{"name": "Dora"}'), ('doc@unal.edu.co', '{"name": "Docente Uno"}');
   update perfiles set tipo_usuario = 'Docente/Investigador', programa = 'Estadística', reglamento_aceptado_en = now() where correo = 'doc@unal.edu.co';
+  update perfiles set docente_verificado_en = now() where correo = 'doc@unal.edu.co';   -- 0013: docente verificado
 
   -- Uso compartido: Ana deja un proceso y comparte su reserva.
   insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
@@ -622,6 +623,64 @@ declare j jsonb; cod text; c clases; v_hoy date := (now() at time zone 'America/
   j := telegram_accion(555, 'aprobar', jsonb_build_object('id', c.id));
   perform pg_temp.ok((j ->> 'ok')::boolean and jsonb_array_length(j -> 'datos' -> 'equipos') = 2
                      and (select estado from clases where id = c.id) = 'aprobada', 'Telegram aprueba una clase con los equipos libres');
+
+  -- 0013: docentes verificados.
+  insert into auth.users (email, raw_user_meta_data) values ('eva@unal.edu.co', '{"name": "Eva Docente"}'), ('fer@unal.edu.co', '{"name": "Fer"}');
+  update perfiles set reglamento_aceptado_en = now(), programa = 'Estadística' where correo in ('eva@unal.edu.co', 'fer@unal.edu.co');
+  perform pg_temp.como('eva@unal.edu.co');
+  update perfiles set tipo_usuario = 'Docente/Investigador' where id = auth.uid();
+  perform pg_temp.ok(exists (select 1 from verificaciones_docente where perfil_id = auth.uid() and estado = 'pendiente'),
+                     'elegir «docente» en el perfil abre una verificación');
+  perform pg_temp.ok(exists (select 1 from cola_chat where tipo = 'verificacion_docente' and texto not like '%Eva%'),
+                     'el chat del personal se entera sin datos personales');
+  perform pg_temp.falla(format($q$select solicitar_clase('Cálculo', 'x', 1, array[1,2,3,4,5,6], '14:00', '16:00', %L, %L)$q$, v_hoy + 1, v_hoy + 8),
+                        'verificados');
+  perform pg_temp.falla($q$select pedir_verificacion_docente('x')$q$, 'asignaturas');
+  perform pedir_verificacion_docente('Dicto Cálculo I en Ingeniería');
+  perform pg_temp.ok((select mensaje from verificaciones_docente where perfil_id = auth.uid() and estado = 'pendiente') like 'Dicto%',
+                     'la persona explica qué asignaturas dicta');
+  perform pg_temp.falla($q$select * from verificaciones_pendientes()$q$, 'personal');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform resolver_verificacion((select v.id from verificaciones_docente v join perfiles p on p.id = v.perfil_id
+                                  where p.correo = 'eva@unal.edu.co' and v.estado = 'pendiente'), true);
+  perform pg_temp.ok((select docente_verificado_en is not null from perfiles where correo = 'eva@unal.edu.co'), 'el personal verifica al docente');
+  perform pg_temp.como('eva@unal.edu.co');
+  perform pg_temp.falla(format($q$select solicitar_clase('Cálculo', 'x', 1, array[1,2,3,4,5,6], '14:00', '16:00', %L, %L, 999)$q$, v_hoy + 1, v_hoy + 8),
+                        'entre 1 y');
+  perform pg_temp.falla(format($q$select solicitar_clase('Cálculo', 'x', 1, array[%s], '00:00', '00:30', %L, %L)$q$,
+                               extract(isodow from v_hoy)::int, v_hoy, v_hoy), 'pasaron');
+  c := solicitar_clase('Cálculo', 'Otro nombre', 1, array[1,2,3,4,5,6], '18:00', '20:00', v_hoy + 1, v_hoy + 3, null);
+  perform pg_temp.ok(c.docente = 'Eva Docente' and c.docente_correo = 'eva@unal.edu.co' and c.equipos_pedidos is null,
+                     'el docente es siempre quien solicita, con su correo; sin cantidad = los disponibles');
+  perform pg_temp.como('lab@unal.edu.co');
+  j := clase_previa(c.id);
+  perform pg_temp.ok(j ? 'pasadas' and (j ->> 'total_equipos')::int > 10, 'la vista previa dice cuántas sesiones ya pasaron y cuántos equipos hay');
+  j := aprobar_clase(c.id, array['UNAL-15', 'UNAL-16']);
+  perform pg_temp.ok((select responder_a from cola_notificaciones where dedupe_key = 'clase_ok:' || c.id) = 'lab@unal.edu.co',
+                     'el correo de autorización se responde a quien aprobó');
+  perform clase_reenviar(c.id);
+  perform pg_temp.ok((select count(*) from cola_notificaciones where dedupe_key like 'clase_ok:' || c.id || '%') = 2, 'el personal puede reenviar la autorización');
+  perform pg_temp.como('eva@unal.edu.co');
+  j := clase_hoja(c.id);
+  perform pg_temp.ok(j ->> 'consecutivo' = 'CL-' || lpad(c.id::text, 5, '0') and jsonb_array_length(j -> 'equipos') = 2
+                     and j ->> 'aprobado_por' is not null and jsonb_array_length(j -> 'sesiones') >= 2, 'la hoja de autorización trae todo');
+  perform pg_temp.como('beto@unal.edu.co');
+  perform pg_temp.falla(format('select clase_hoja(%s)', c.id), 'no encontrada');
+  -- Rechazo: vuelve a pedir el tipo de usuario.
+  perform pg_temp.como('fer@unal.edu.co');
+  update perfiles set tipo_usuario = 'Docente/Investigador' where id = auth.uid();
+  perform pg_temp.como('admin@unal.edu.co');
+  perform pg_temp.falla(format('select resolver_verificacion(%s, false, %L)',
+                        (select v.id from verificaciones_docente v join perfiles p on p.id = v.perfil_id where p.correo = 'fer@unal.edu.co' and v.estado = 'pendiente'), ''),
+                        'motivo');
+  perform resolver_verificacion((select v.id from verificaciones_docente v join perfiles p on p.id = v.perfil_id
+                                  where p.correo = 'fer@unal.edu.co' and v.estado = 'pendiente'), false, 'No aparece en la planta docente');
+  perform pg_temp.ok((select tipo_usuario is null from perfiles where correo = 'fer@unal.edu.co')
+                     and exists (select 1 from cola_notificaciones n join perfiles p on p.id = n.usuario_id
+                                  where p.correo = 'fer@unal.edu.co' and n.tipo = 'docente_rechazado'), 'si no se verifica, se le pide actualizar su tipo');
+  perform marcar_docente((select id from perfiles where correo = 'fer@unal.edu.co'), true);
+  perform pg_temp.ok((select docente_verificado_en is not null and tipo_usuario = 'Docente/Investigador' from perfiles where correo = 'fer@unal.edu.co'),
+                     'el personal puede marcar a alguien como docente directamente');
 end $$;
 
 -- Permisos reales del rol que usa la PWA.
@@ -643,6 +702,8 @@ do $$ begin
   perform pg_temp.falla($q$select * from faro_programas$q$, 'permission denied');
   perform pg_temp.falla($q$select telegram_accion(1, 'anuncio')$q$, 'permission denied');
   perform pg_temp.falla($q$select * from telegram_vinculos$q$, 'permission denied');
+  perform pg_temp.falla($q$select clase_hoja_correo(1)$q$, 'permission denied');
+  perform pg_temp.falla($q$update perfiles set docente_verificado_en = now() where id = auth.uid()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from errores_app) = 0, 'el registro de errores solo lo ve el personal');
   perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id <> auth.uid()) = 0, 'cada quien ve solo sus avisos');

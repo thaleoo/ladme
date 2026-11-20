@@ -55,6 +55,7 @@ export const Paginas = {
   MiUso: perezosa(cargadores['/mi-uso']),
   Clases: perezosa(cargadores['/clases']),
   ClaseDetalle: perezosa(() => cargadores['/clases']().then((m) => ({ default: m.ClaseDetalle }))),
+  AprobarClase: perezosa(() => import('../pages/admin/AprobarClase')),
   Admin: perezosa(cargadores['/admin']),
   Mantenimiento: perezosa(cargadores['/mantenimiento']),
   Usuarios: perezosa(cargadores['/usuarios'])

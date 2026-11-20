@@ -4,7 +4,7 @@ import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Pestanas from '../components/Pestanas'
 import Icon, { type NombreIcono } from '../components/Icon'
-import { listarClases, listarReportes, listarSolicitudes } from '../lib/api'
+import { listarClases, listarReportes, listarSolicitudes, verificacionesPendientes } from '../lib/api'
 import Errores from './admin/Errores'
 import Ronda from './admin/Ronda'
 import ReservasAdmin from './admin/ReservasAdmin'
@@ -77,8 +77,9 @@ function usePendientes(): Record<string, number> {
     Promise.all([
       listarSolicitudes().then((l) => l.filter((x) => x.estado === 'pendiente').length).catch(() => 0),
       listarClases(true).then((l) => l.length).catch(() => 0),
-      listarReportes().then((l) => l.filter((r) => r.estado === 'abierto' || r.estado === 'en_revision').length).catch(() => 0)
-    ]).then(([sol, cla, fal]) => vivo && setN({ solicitudes: sol + cla, reportes: fal }))
+      listarReportes().then((l) => l.filter((r) => r.estado === 'abierto' || r.estado === 'en_revision').length).catch(() => 0),
+      verificacionesPendientes().then((l) => l.length).catch(() => 0)
+    ]).then(([sol, cla, fal, ver]) => vivo && setN({ solicitudes: sol + cla + ver, reportes: fal }))
     return () => {
       vivo = false
     }

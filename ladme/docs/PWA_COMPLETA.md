@@ -297,6 +297,23 @@ El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
   sala y las que liberan o apagan piden `/si` (2 min). Cada acción usa los permisos de quien la
   escribe y queda en el Registro.
 
+## 18. Docentes verificados y aprobación de clases (migración 0013)
+
+- **Docente verificado:** cualquiera puede elegir «Docente/Investigador» en Cuenta y sigue reservando
+  normal, pero «Sala para clases» se habilita cuando el personal lo verifica (Administración → Reservas →
+  Solicitudes y clases → Verificación docente, o el interruptor en Usuarios).
+- **Formulario de clase:** el docente responsable es quien pide (nombre y correo, no editables); los
+  computadores se eligen con un deslizador de 1 al total de la sala o «Los que haya disponibles»; avisa
+  si las sesiones ya pasaron.
+- **Aprobación en página propia** (`/admin/clases/:id`): datos de la solicitud, libres por sesión,
+  selector de equipos libres en todas las sesiones (seleccionar todos / los pedidos / ninguno, y opción
+  de ver los ocupados en alguna sesión), nota y barra fija con Aprobar/Rechazar.
+- **Autorización:** `/clases/:id` muestra la hoja formal (N.º CL-00000, datos, equipos, plano, fechas,
+  normas) para imprimir o guardar en PDF. Al aprobar, el Apps Script manda al docente un correo con esos
+  datos y el PDF adjunto; responde a quien aprobó. Se puede reenviar.
+- **Telegram:** `registrarComandosTelegram()` (también lo corre `instalarDisparadores`) publica la lista de
+  comandos para que aparezcan al escribir «/» en el grupo.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

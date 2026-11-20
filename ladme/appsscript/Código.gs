@@ -2204,6 +2204,7 @@ function instalarDisparadores() {
   // Comandos de consulta desde el grupo de Telegram (/estado, /agenda 5…), cada minuto.
   if (prop_("TELEGRAM_BOT_TOKEN") && prop_("TELEGRAM_CHAT_ID")) {
     ScriptApp.newTrigger("telegramComandos_").timeBased().everyMinutes(1).create();
+    try { registrarComandosTelegram(); } catch (e) { Logger.log("registrarComandosTelegram: " + e); }
   }
   return { ok: true, mensaje: "Disparadores instalados: mantenimientos (07:00), recordatorios (30 min), correo de la PWA (5 min), copia de seguridad (domingos 03:00) y reporte mensual (día 1, 08:00)." };
 }
@@ -2997,6 +2998,13 @@ function enviarCorreosSupabase_() {
       var html = plantillaCorreo_(c, enlace, pwa);
       var opciones = { to: c.correo, subject: "LADME · " + c.titulo, htmlBody: html, name: NOMBRE_REMITENTE };
       opciones.replyTo = /@unal\.edu\.co$/i.test(String(c.responder_a || "")) ? c.responder_a : CUENTA_REMITENTE;
+      // La aprobación de una clase sale como autorización formal, con el PDF adjunto.
+      if (c.tipo === "clase_aprobada") {
+        try {
+          var aut = correoAutorizacionClase_(c, enlace, pwa);
+          if (aut) { opciones.htmlBody = aut.html; opciones.attachments = [aut.pdf]; opciones.subject = "LADME · " + aut.asunto; }
+        } catch (errAut) { Logger.log("Autorización de clase: " + errAut); }
+      }
       MailApp.sendEmail(opciones);
       supabaseRpc_("marcar_correos_enviados", { p_ids: [c.id] });
     }
@@ -3067,6 +3075,142 @@ function plantillaCorreo_(c, enlace, pwa) {
     + 'Si tiene dudas, responda a este mensaje.'
     + '</td></tr></table>'
     + '</td></tr></table></body></html>';
+}
+
+var MESES_ = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+var DIAS_SEM_ = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+/** «2026-11-24» o un ISO con hora → «24 de noviembre de 2026» (hora de Bogotá). */
+function fechaLarga_(v) {
+  var d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(v + "T12:00:00-05:00") : new Date(v);
+  var p = Utilities.formatDate(d, "America/Bogota", "d|M|yyyy").split("|");
+  return p[0] + " de " + MESES_[Number(p[1]) - 1] + " de " + p[2];
+}
+/** ISO → «mar 24 nov». */
+function diaCorto_(iso) {
+  var d = new Date(iso);
+  var p = Utilities.formatDate(d, "America/Bogota", "u|d|M").split("|");
+  return DIAS_SEM_[Number(p[0]) % 7].slice(0, 3) + " " + p[1] + " " + MESES_[Number(p[2]) - 1].slice(0, 3);
+}
+
+/**
+ * Correo de autorización de una clase aprobada: el cuerpo con los datos y los equipos, y un PDF
+ * con la autorización para imprimir o compartir con los estudiantes. Los datos salen de
+ * clase_hoja_correo (la misma información que la hoja de la app).
+ */
+function correoAutorizacionClase_(c, enlace, pwa) {
+  var m = /\/clases\/(\d+)/.exec(String(c.url || ""));
+  if (!m) return null;
+  var h = supabaseRpc_("clase_hoja_correo", { p_id: Number(m[1]) });
+  if (!h || h.estado !== "aprobada") return null;
+  var MORADO = "#6d28d9", TINTA = "#1f1a33", SUAVE = "#6b6485", LINEA = "#e8e5f3";
+  var DIAS = ["", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  var horario = (h.dias || []).map(function (d) { return DIAS[d]; }).join(", ") + " · " + h.hora_inicio + "–" + h.hora_fin;
+  var periodo = fechaLarga_(h.desde) + " al " + fechaLarga_(h.hasta);
+  var futuras = (h.sesiones || []).filter(function (x) { return !x.pasada; });
+  var fechas = futuras.map(function (x) { return diaCorto_(x.inicio); });
+  var equipos = h.equipos || [];
+  var normas = [
+    "Use solo los equipos de esta lista; los demás pueden estar reservados por otras personas.",
+    "Durante la clase los equipos habilitados se desbloquean solos. Deje cada equipo como lo encontró y cierre su sesión.",
+    "Si un equipo habilitado falla, repórtelo desde su ficha (código QR del equipo) o avise al personal del laboratorio."
+  ];
+  var fila = function (k, v) {
+    return '<tr><td style="padding:7px 12px;border-bottom:1px solid ' + LINEA + ';color:' + SUAVE + ';font-size:12px;text-transform:uppercase;letter-spacing:.5px;width:120px;vertical-align:top">' + k
+      + '</td><td style="padding:7px 12px;border-bottom:1px solid ' + LINEA + ';color:' + TINTA + ';font-size:14px;font-weight:bold">' + v + '</td></tr>';
+  };
+  var datos = fila("Clase", escH_(h.nombre)) + fila("Grupo", escH_(String(h.grupo)))
+    + fila("Docente", escH_(h.docente) + (h.docente_correo ? '<br><span style="font-weight:normal;color:' + SUAVE + '">' + escH_(h.docente_correo) + '</span>' : ""))
+    + fila("Horario", escH_(horario)) + fila("Período", escH_(periodo))
+    + fila("Sesiones", futuras.length + (futuras.length < (h.sesiones || []).length ? " por realizar (de " + h.sesiones.length + ")" : ""))
+    + (h.aprobado_por ? fila("Aprobada por", escH_(h.aprobado_por) + (h.resuelto_en ? " · " + escH_(fechaLarga_(h.resuelto_en)) : "")) : "");
+  var chips = equipos.map(function (e) {
+    return '<span style="display:inline-block;margin:0 6px 6px 0;padding:7px 12px;border:2px solid ' + MORADO + ';border-radius:9px;font-weight:bold;font-size:14px;color:' + TINTA + '">' + escH_(e) + '</span>';
+  }).join("");
+  var nota = h.respuesta ? '<p style="margin:16px 0 0;padding:10px 14px;border-left:3px solid ' + MORADO + ';background:#f6f4fd;font-size:14px;color:' + TINTA + '"><b>Nota del laboratorio:</b> ' + escH_(h.respuesta) + '</p>' : "";
+  var omit = (h.omitidos || []).length
+    ? '<p style="margin:12px 0 0;font-size:13px;color:#b45309">Algunos equipos no quedaron reservados en ciertas fechas porque ya estaban ocupados: '
+      + h.omitidos.slice(0, 8).map(function (o) { return escH_(o.codigo) + " (" + diaCorto_(o.inicio) + ")"; }).join(", ") + '.</p>'
+    : "";
+  var nombre = c.nombre ? " " + escH_(String(c.nombre).split(" ")[0]) : "";
+
+  var cuerpo = '<p style="margin:0 0 10px;font-size:15px;line-height:1.55;color:' + TINTA + '">Hola' + nombre + ':</p>'
+    + '<p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:' + TINTA + '">La sala del LADME quedó aprobada para su clase. '
+    + 'Adjuntamos la autorización en PDF para imprimirla o compartirla con sus estudiantes.</p>'
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ' + LINEA + ';border-radius:12px;border-collapse:separate;overflow:hidden">' + datos + '</table>'
+    + '<h2 style="margin:20px 0 10px;font-size:16px;color:' + TINTA + '">Equipos habilitados (' + equipos.length + ')</h2>' + chips + omit + nota
+    + (fechas.length ? '<p style="margin:16px 0 0;font-size:13px;color:' + SUAVE + '"><b>Fechas:</b> ' + escH_(fechas.join(" · ")) + '</p>' : "")
+    + '<ul style="margin:16px 0 0;padding-left:18px;font-size:13px;line-height:1.6;color:' + SUAVE + '">' + normas.map(function (n) { return "<li>" + escH_(n) + "</li>"; }).join("") + '</ul>';
+  var html = plantillaCorreo_({ titulo: "Sala aprobada: " + h.nombre + " · grupo " + h.grupo, cuerpo: "", tipo: "clase_aprobada", nombre: "" }, enlace, pwa)
+    .replace(/<p style="margin:0 0 10px;font-size:15px[^>]*>Hola:<\/p><p style="margin:0;font-size:15px[^>]*><\/p>/, cuerpo)
+    .replace(">Abrir LADME<", ">Ver la autorización en LADME<");
+
+  // PDF: la misma información en una página imprimible.
+  var celdas = "";
+  for (var i = 0; i < equipos.length; i += 6) {
+    celdas += "<tr>" + equipos.slice(i, i + 6).map(function (e) {
+      return '<td style="border:2px solid #111;border-radius:6px;padding:10px 4px;text-align:center;font-weight:bold;font-size:15px;width:16%">' + escH_(e) + "</td>";
+    }).join("") + "</tr>";
+  }
+  var dato = function (k, v) {
+    return '<tr><td style="border:1px solid #bbb;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#555;width:28%">' + k
+      + '</td><td style="border:1px solid #bbb;padding:6px 10px;font-size:13px;font-weight:bold">' + v + "</td></tr>";
+  };
+  var pdfHtml = '<html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;color:#111;margin:28px">'
+    + '<table width="100%"><tr><td><div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#555">LADME · Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede La Paz</div>'
+    + '<div style="font-size:22px;font-weight:bold;margin-top:4px">Autorización de uso de sala</div></td>'
+    + '<td style="text-align:right;vertical-align:top"><div style="font-size:10px;color:#555">N.º</div><div style="font-size:16px;font-weight:bold">' + escH_(h.consecutivo) + "</div></td></tr></table>"
+    + '<table width="100%" cellspacing="0" style="border-collapse:collapse;margin-top:16px">'
+    + dato("Clase", escH_(h.nombre)) + dato("Grupo", escH_(String(h.grupo)))
+    + dato("Docente responsable", escH_(h.docente) + (h.docente_correo ? " · " + escH_(h.docente_correo) : ""))
+    + dato("Horario", escH_(horario)) + dato("Período", escH_(periodo)) + dato("Sesiones", String((h.sesiones || []).length))
+    + (h.aprobado_por ? dato("Aprobada por", escH_(h.aprobado_por) + (h.resuelto_en ? " · " + escH_(fechaLarga_(h.resuelto_en)) : "")) : "")
+    + "</table>"
+    + '<div style="font-size:14px;font-weight:bold;margin:20px 0 8px">Equipos habilitados (' + equipos.length + ")</div>"
+    + '<table width="100%" cellspacing="6" style="border-collapse:separate">' + celdas + "</table>"
+    + (fechas.length ? '<div style="font-size:14px;font-weight:bold;margin:18px 0 6px">Fechas</div><div style="font-size:12px;line-height:1.7">' + escH_(fechas.join(" · ")) + "</div>" : "")
+    + (h.respuesta ? '<div style="margin-top:16px;padding:8px 12px;border-left:3px solid #111;font-size:12px"><b>Nota del laboratorio:</b> ' + escH_(h.respuesta) + "</div>" : "")
+    + '<ul style="margin-top:18px;padding-left:18px;font-size:11px;line-height:1.6;color:#333">' + normas.map(function (n) { return "<li>" + escH_(n) + "</li>"; }).join("") + "</ul>"
+    + '<div style="margin-top:24px;font-size:9px;color:#777;text-align:right">Documento generado por LADME · ' + escH_(h.consecutivo) + " · " + escH_(fechaLarga_(new Date().toISOString())) + "</div>"
+    + "</body></html>";
+  var pdf = Utilities.newBlob(pdfHtml, "text/html", "autorizacion.html").getAs("application/pdf")
+    .setName("Autorizacion LADME " + h.consecutivo + " - " + String(h.nombre).replace(/[\\/:*?"<>|]/g, "") + ".pdf");
+  return { html: html, pdf: pdf, asunto: "Sala aprobada: " + h.nombre + " · grupo " + h.grupo };
+}
+
+/** Ejecutar desde el editor: le envía a usted mismo el correo de autorización de una clase aprobada. */
+function probarCorreoClase() {
+  var id = Number(Browser.inputBox("Número de la clase aprobada (el de /clases/N)"));
+  var pwa = urlPwa_() || prop_("PWA_URL_PRUEBAS");
+  var aut = correoAutorizacionClase_({ url: "/clases/" + id, nombre: "Docente" }, pwa ? pwa + "/clases/" + id : "", pwa);
+  if (!aut) throw new Error("La clase " + id + " no existe o no está aprobada.");
+  MailApp.sendEmail({ to: Session.getEffectiveUser().getEmail(), subject: "LADME · " + aut.asunto + " (muestra)", htmlBody: aut.html,
+    attachments: [aut.pdf], name: NOMBRE_REMITENTE });
+}
+
+/**
+ * Registra los comandos del bot en Telegram para que aparezcan al escribir «/» en el grupo
+ * (con su descripción). Se ejecuta una vez desde el editor; instalarDisparadores también lo llama.
+ */
+function registrarComandosTelegram() {
+  var token = prop_("TELEGRAM_BOT_TOKEN"), chat = prop_("TELEGRAM_CHAT_ID");
+  if (!token || !chat) throw new Error("Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID en las propiedades del script.");
+  var comandos = [
+    ["estado", "Resumen de la sala ahora"], ["equipos", "Estado de cada equipo"], ["agenda", "Agenda de un equipo: /agenda 5 [mañana]"],
+    ["reservas", "Reservas de hoy: /reservas [5]"], ["clases", "Solicitudes de clase pendientes"],
+    ["aprobar", "Aprobar solicitud: /aprobar 12 [nota]"], ["rechazar", "Rechazar solicitud: /rechazar 12 motivo"],
+    ["liberar", "Liberar reserva en curso: /liberar 7"], ["bloquear", "Bloquear equipo: /bloquear 5 2h motivo"],
+    ["desbloquear", "Desbloquear en Faro: /desbloquear 5 [1h]"], ["anuncio", "Anuncio en la sala: /anuncio 3h texto"],
+    ["encender", "Encender: /encender 3 4 o sala"], ["apagar", "Apagar: /apagar 5 o sala"], ["reiniciar", "Reiniciar Faro: /reiniciar 5"],
+    ["actualizar", "Actualizar Faro: /actualizar sala"], ["vincular", "Vincular su cuenta: /vincular CÓDIGO"],
+    ["si", "Confirmar la última orden"], ["no", "Cancelar la última orden"], ["ayuda", "Lista de comandos"]
+  ].map(function (c) { return { command: c[0], description: c[1] }; });
+  var r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setMyCommands", {
+    method: "post", contentType: "application/json", muteHttpExceptions: true,
+    payload: JSON.stringify({ commands: comandos, scope: { type: "chat", chat_id: Number(chat) }, language_code: "" })
+  });
+  if (r.getResponseCode() !== 200) throw new Error("Telegram respondió " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
+  return { ok: true, mensaje: comandos.length + " comandos registrados en el grupo." };
 }
 
 /** Ejecutar desde el editor: le envía a usted mismo un correo de muestra con la plantilla. */

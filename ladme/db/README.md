@@ -180,3 +180,19 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
   con un código de 6 dígitos (`telegram_codigo()`, vence en 10 min) que escribe en el grupo como
   `/vincular 123456`. `telegram_accion()` (solo service_role, la llama el Apps Script) ejecuta la
   acción en nombre de esa persona con sus mismos permisos y deja el registro en la consola.
+
+## Migración 0013 — Docentes verificados y autorización de clases
+
+`migrations/0013_docentes_clases.sql`, después de 0012.
+
+- `perfiles.docente_verificado_en` y `verificaciones_docente`. Elegir «Docente/Investigador» en el
+  perfil abre una verificación (aviso al personal; al chat sin datos personales); la persona puede
+  explicar qué dicta con `pedir_verificacion_docente()`. El personal usa `verificaciones_pendientes()`,
+  `resolver_verificacion()` o `marcar_docente()`. Si se rechaza, el tipo de usuario queda vacío y se le
+  pide actualizarlo. Quien ya figuraba como docente queda con su verificación pendiente.
+- `solicitar_clase()` exige docente verificado, toma el nombre y correo del solicitante
+  (`clases.docente_correo`), acepta «los que haya disponibles» (`equipos_pedidos` nulo) o de 1 al total
+  de equipos activos, y rechaza solicitudes cuyas sesiones ya empezaron.
+- `clase_previa()` cuenta solo sesiones futuras y dice cuántas pasaron; `aprobar_clase()` no aprueba si no
+  queda ninguna. `clase_hoja()` (docente o personal) y `clase_hoja_correo()` (service_role) devuelven la
+  autorización completa; `clase_reenviar()` vuelve a mandarla (una vez cada 10 min).
