@@ -97,6 +97,8 @@ Más detalles:
     propiedades de la tarjeta de red → Administración de energía, «Permitir que este dispositivo
     reactive el equipo» y «Solo permitir un paquete mágico». Funciona en la misma red local; si el
     PC se desconectó de la corriente, el primer encendido debe ser manual.
+  - **Llegada** (0.5.2): con el modo QR, la isla muestra hasta qué hora se puede registrar la llegada
+    antes de que cuente como inasistencia.
   - **Apagar**: avisa y apaga en 1 minuto. Nunca apaga un equipo con una reserva en curso.
   - **Actualizar Faro** y **Reiniciar Faro**.
   - **Desinstalar** (solo administradores): Faro se quita solo y desvincula el equipo.

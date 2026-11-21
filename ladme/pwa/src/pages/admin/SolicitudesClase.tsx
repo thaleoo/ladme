@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { listarClases, resolverVerificacion, verificacionesPendientes, type VerificacionDocente } from '../../lib/api'
+import { inasistenciasApeladas, listarClases, resolverApelacion, resolverVerificacion, verificacionesPendientes, type Apelacion, type VerificacionDocente } from '../../lib/api'
 import type { Clase } from '../../lib/types'
 import { hace } from '../../lib/format'
 import { TEXTO_ESTADO, textoHorario } from '../Clases'
@@ -86,6 +86,76 @@ function Verificaciones({ alCambiar }: { alCambiar: () => void }) {
   )
 }
 
+/** Apelaciones de inasistencias: anular el strike (y su sanción) o mantenerlo con un motivo. */
+function Apelaciones() {
+  const toast = useToast()
+  const [lista, setLista] = useState<Apelacion[] | null>(null)
+  const [mantener, setMantener] = useState<{ a: Apelacion; motivo: string } | null>(null)
+  const [ocupado, setOcupado] = useState(false)
+  const cargar = useCallback(() => inasistenciasApeladas().then(setLista).catch(() => setLista([])), [])
+  useEffect(() => {
+    void cargar()
+  }, [cargar])
+
+  async function resolver(a: Apelacion, anular: boolean, motivo?: string) {
+    setOcupado(true)
+    try {
+      await resolverApelacion(a.id, anular, motivo)
+      toast.mostrar(anular ? 'Inasistencia anulada; la persona recibe el aviso.' : 'Inasistencia mantenida; la persona recibe el motivo.', 'ok')
+      setMantener(null)
+      await cargar()
+    } catch (e) {
+      toast.mostrar(e instanceof Error ? e.message : 'No se pudo resolver.', 'danger')
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  if (!lista || lista.length === 0) return null
+  const fecha = (iso: string) =>
+    new Date(iso).toLocaleString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'America/Bogota' })
+  return (
+    <section className="card tight stack">
+      <div className="section-title" style={{ marginTop: 0 }}>
+        <h2>Apelaciones de inasistencias <span className="pestanas__n">{lista.length}</span></h2>
+      </div>
+      <ul className="verificaciones" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {lista.map((a) => (
+          <li key={a.id} className="verificacion">
+            <span className="verificacion__d">
+              <strong>{a.nombre}</strong>
+              <span className="small muted">
+                {a.equipo_codigo} · {fecha(a.inicio)} · inasistencia {a.numero}
+                {a.sancion_hasta && new Date(a.sancion_hasta) > new Date() ? ' · con sanción' : ''}
+              </span>
+            </span>
+            <span className="row tight">
+              <button type="button" className="btn sm ghost" disabled={ocupado} onClick={() => setMantener({ a, motivo: '' })}>Mantener</button>
+              <button type="button" className="btn sm" disabled={ocupado} onClick={() => void resolver(a, true)}>Anular</button>
+            </span>
+            <p className="verificacion__m">«{a.apelacion}»</p>
+          </li>
+        ))}
+      </ul>
+      <Modal abierto={!!mantener} titulo="Mantener la inasistencia" onCerrar={() => setMantener(null)}>
+        {mantener && (
+          <div className="stack">
+            <div className="field">
+              <label className="field__label" htmlFor="ma-motivo">Motivo para {mantener.a.nombre}</label>
+              <textarea id="ma-motivo" rows={2} maxLength={300} value={mantener.motivo}
+                        onChange={(e) => setMantener({ ...mantener, motivo: e.target.value })} placeholder="El equipo no registró uso en esa franja…" />
+            </div>
+            <button type="button" className="btn danger" disabled={ocupado || mantener.motivo.trim().length < 5}
+                    onClick={() => void resolver(mantener.a, false, mantener.motivo.trim())}>
+              Mantener
+            </button>
+          </div>
+        )}
+      </Modal>
+    </section>
+  )
+}
+
 /**
  * Solicitudes de sala para clases. Cada una se revisa y aprueba en su propia página
  * (/admin/clases/:id), con el selector de equipos libres.
@@ -102,6 +172,7 @@ export default function SolicitudesClase() {
   return (
     <>
       <Verificaciones alCambiar={() => undefined} />
+      <Apelaciones />
       <section className="card tight stack">
         <div className="section-title" style={{ marginTop: 0 }}>
           <h2>Sala para clases</h2>

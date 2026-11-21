@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { AvisoSancion, useSancion } from '../components/Inasistencias'
 import { crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
 import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
@@ -23,6 +24,7 @@ export default function Reservar() {
   const lim = useLimites()
   const admin = esAdmin(perfil)
   const tope = useTopeReservas()
+  const sancion = useSancion()
   const [params] = useSearchParams()
   const [equipos, setEquipos] = useState<Equipo[]>([])
   const [equipo, setEquipo] = useState(params.get('equipo')?.toUpperCase() ?? '')
@@ -239,6 +241,7 @@ export default function Reservar() {
           <Link to="/clases">Solicite la sala para su clase</Link>.
         </p>
         <form onSubmit={enviar} className="card stack" noValidate>
+          {sancion.hasta && <AvisoSancion hasta={sancion.hasta} />}
           {tope.alcanzado && (
             <div className="alert warn" role="status">
               <Icon nombre="reloj" />

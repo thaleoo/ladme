@@ -255,7 +255,7 @@ export function etiquetaSO(e: Pick<Equipo, 'sistema_operativo' | 'so_version'>):
   return e.sistema_operativo ?? null
 }
 
-export type EstadoClase = 'pendiente' | 'aprobada' | 'rechazada' | 'cancelada'
+export type EstadoClase = 'pendiente' | 'aprobada' | 'rechazada' | 'cancelada' | 'vencida'
 export interface Clase {
   id: number
   solicitante: string
@@ -272,6 +272,23 @@ export interface Clase {
   notas: string | null
   estado: EstadoClase
   equipos: string[] | null
+  respuesta: string | null
+  resuelto_en: string | null
+  creado_en: string
+}
+
+/** Reserva sin llegada registrada dentro de la tolerancia (strike). */
+export interface Inasistencia {
+  id: number
+  reserva_id: string
+  usuario_id: string
+  equipo_codigo: string
+  inicio: string
+  numero: number
+  sancion_hasta: string | null
+  estado: 'vigente' | 'anulada'
+  apelacion: string | null
+  apelada_en: string | null
   respuesta: string | null
   resuelto_en: string | null
   creado_en: string

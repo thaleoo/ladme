@@ -25,6 +25,10 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
   llegada_modo: { titulo: 'Quién registra la llegada (0 = la persona desde la app · 1 = solo el personal · 2 = con el QR de la isla de Faro)', unidad: '', min: 0, max: 2 },
   liberar_no_show_min: { titulo: 'Liberar sola una reserva sin llegada ni uso del PC (0 = nunca)', unidad: 'minutos', min: 0, max: 120 },
   faro_sesion_limpia: { titulo: 'Faro ofrece borrar los archivos de la persona al terminar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
+  inasistencias_activas: { titulo: 'Contar inasistencias y sancionar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
+  inasistencia_ventana_dias: { titulo: 'Días en que se cuentan las inasistencias', unidad: 'días', min: 7, max: 365 },
+  inasistencia_sancion_2_dias: { titulo: 'Días sin reservar con 2 inasistencias', unidad: 'días', min: 0, max: 60 },
+  inasistencia_sancion_3_dias: { titulo: 'Días sin reservar con 3 o más inasistencias', unidad: 'días', min: 0, max: 120 },
   uso_compartido: { titulo: 'Permitir uso compartido de reservas (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
   clase_semanas_max: { titulo: 'Semanas máximas de una solicitud de sala para clase', unidad: 'semanas', min: 1, max: 30 },
   sala_encender_hhmm: { titulo: 'Encender la sala a las (HHMM, p. ej. 700; 0 = no)', unidad: '', min: 0, max: 2359 },
@@ -45,7 +49,8 @@ export default function Politicas() {
 
   async function cargar() {
     try {
-      const l = await listarPoliticas()
+      // Solo las numéricas son editables aquí (p. ej. inasistencias_desde es una fecha fija).
+      const l = (await listarPoliticas()).filter((p) => /^-?\d+$/.test(String(p.valor)))
       setLista(l)
       setValores(Object.fromEntries(l.map((p) => [p.clave, String(p.valor)])))
     } catch (e) {

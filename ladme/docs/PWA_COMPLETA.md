@@ -314,6 +314,29 @@ El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
 - **Telegram:** `registrarComandosTelegram()` (también lo corre `instalarDisparadores`) publica la lista de
   comandos para que aparezcan al escribir «/» en el grupo.
 
+## 19. Inasistencias, solicitudes vencidas y bot instantáneo (migración 0014, Faro 0.5.2)
+
+- **Llegada:** recordatorio (push y app) al empezar la reserva y 10 minutos antes del límite; la tarjeta de
+  Mis reservas muestra la hora límite. También aplica a los procesos desatendidos. En los PCs con Faro,
+  usar el equipo registra la llegada sola; con el modo QR, la isla muestra «Registra tu llegada · hasta
+  3:30 p. m.».
+- **Inasistencias (strikes):** sin llegada dentro de la tolerancia (30 min). En 60 días: 1.ª aviso, 2.ª
+  3 días sin reservar, 3.ª o más 7 días (políticas editables). Cancelar no cuenta. Mis reservas muestra
+  la lista y la sanción; cada strike se puede apelar. El personal las resuelve en Administración →
+  Reservas → Solicitudes y clases (o con los botones del chat), y puede anularlas desde Usuarios.
+- **Solicitudes de clase vencidas:** se cierran solas cuando ya no les queda ninguna sesión futura.
+- **Bot por webhook (respuesta inmediata y botones):**
+  1. Supabase → Edge Functions → crear `telegram-bot` con el código de
+     `supabase/functions/telegram-bot/index.ts` y **desactivar «Verify JWT»** (o
+     `supabase functions deploy telegram-bot --no-verify-jwt`).
+  2. Edge Functions → Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` y `TELEGRAM_WEBHOOK_SECRET`
+     (una cadena aleatoria de 32+ caracteres, como se hizo con `AVISOS_TOKEN`).
+  3. Apps Script → Propiedades del script: `TELEGRAM_WEBHOOK_SECRET` con la misma cadena.
+  4. Ejecutar `activarWebhookTelegram` en el editor. `estadoWebhookTelegram` muestra el último error;
+     `desactivarWebhookTelegram` vuelve al sondeo cada minuto.
+  Con el webhook, los avisos de clases, verificaciones y apelaciones llegan con botones; las órdenes de
+  sala piden confirmación con botones; los rechazos piden el motivo respondiendo al mensaje del bot.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

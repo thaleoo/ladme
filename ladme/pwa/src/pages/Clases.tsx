@@ -19,7 +19,8 @@ export const TEXTO_ESTADO: Record<EstadoClase, { texto: string; tono: string }> 
   pendiente: { texto: 'Pendiente', tono: 'warn' },
   aprobada: { texto: 'Aprobada', tono: 'ok' },
   rechazada: { texto: 'No aprobada', tono: 'danger' },
-  cancelada: { texto: 'Cancelada', tono: 'gray' }
+  cancelada: { texto: 'Cancelada', tono: 'gray' },
+  vencida: { texto: 'Vencida', tono: 'gray' }
 }
 
 const hhmm = (t: string) => t.slice(0, 5)

@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type {
-  Aviso, Clase, Equipo, EstadoClase, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+  Aviso, Clase, Equipo, EstadoClase, Inasistencia, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
 } from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
@@ -1090,4 +1090,48 @@ export async function programasUsados(desde: string, hasta: string): Promise<{ p
   const { data, error } = await supabase.rpc('faro_programas_resumen', { p_desde: desde, p_hasta: hasta })
   if (error) fail('No se pudo cargar el uso por programa', error)
   return (data ?? []) as { programa: string; horas: number; equipos: number }[]
+}
+
+// ------------------------------------------------------------ Inasistencias (strikes)
+/** Las inasistencias de una persona (la propia, o cualquiera si es personal), más recientes primero. */
+export async function listarInasistencias(usuario?: string): Promise<Inasistencia[]> {
+  let q = supabase.from('inasistencias').select('*').order('inicio', { ascending: false }).limit(30)
+  if (usuario) q = q.eq('usuario_id', usuario)
+  const { data, error } = await q
+  if (error) fail('No se pudieron cargar las inasistencias', error)
+  return (data ?? []) as Inasistencia[]
+}
+
+export async function apelarInasistencia(id: number, motivo: string): Promise<void> {
+  const { error } = await supabase.rpc('apelar_inasistencia', { p_id: id, p_motivo: motivo })
+  if (error) fail('No se pudo enviar la apelación', error)
+}
+
+export interface Apelacion {
+  id: number
+  usuario_id: string
+  nombre: string
+  correo: string
+  equipo_codigo: string
+  inicio: string
+  numero: number
+  sancion_hasta: string | null
+  apelacion: string
+  apelada_en: string
+}
+
+export async function inasistenciasApeladas(): Promise<Apelacion[]> {
+  const { data, error } = await supabase.rpc('inasistencias_apeladas')
+  if (error) fail('No se pudieron cargar las apelaciones', error)
+  return (data ?? []) as Apelacion[]
+}
+
+export async function resolverApelacion(id: number, anular: boolean, respuesta?: string): Promise<void> {
+  const { error } = await supabase.rpc('resolver_apelacion', { p_id: id, p_anular: anular, p_respuesta: respuesta ?? null })
+  if (error) fail('No se pudo resolver la apelación', error)
+}
+
+export async function anularInasistencia(id: number, motivo?: string): Promise<void> {
+  const { error } = await supabase.rpc('anular_inasistencia', { p_id: id, p_motivo: motivo ?? null })
+  if (error) fail('No se pudo anular', error)
 }

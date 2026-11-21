@@ -94,7 +94,7 @@ function htmlCompacta(v) {
       <span class="punto"></span>
       <span class="codigo">${esc(v.equipo ?? 'Faro')}</span>
       <span class="sep"></span>
-      <span class="etiqueta">${v.anuncio ? `<span class="megafono">${ICONOS.megafono}</span>` : ''}${v.llegada_pendiente ? 'Registra tu llegada' : etiqueta(v)}</span>
+      <span class="etiqueta">${v.anuncio ? `<span class="megafono">${ICONOS.megafono}</span>` : ''}${v.llegada_pendiente ? (v.llegada_hasta ? `Registra tu llegada · hasta ${textoHora(v.llegada_hasta)}` : 'Registra tu llegada') : etiqueta(v)}</span>
       ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
       <span class="valor num" data-vivo="valor">${valorCorto(v)}</span>
     </div>`;
@@ -124,6 +124,7 @@ function htmlAbierta(v) {
         <div class="qr">${svg ?? ''}</div>
         <div>
           <p><strong>${a.titulo}</strong>${a.cuerpo}</p>
+          ${accion === 'llegada' && v.llegada_hasta ? `<p class="corto">Hazlo antes de las ${textoHora(v.llegada_hasta)}: si no, cuenta como inasistencia.</p>` : ''}
           ${corto ? `<p class="corto">¿Sin cámara? Entra a <span class="num">${esc(corto)}</span></p>` : ''}
           ${accion === 'llegada' ? `<div class="barra fina"><i data-vivo="qr-llegada"></i></div>` : ''}
           ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}

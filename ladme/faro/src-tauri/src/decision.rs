@@ -94,6 +94,9 @@ pub struct Ocupacion {
     pub motivo: Option<String>,
     #[serde(default)]
     pub llegada: bool,
+    /// Hasta cuándo puede registrar la llegada sin que cuente como inasistencia (desde 0014).
+    #[serde(default)]
+    pub llegada_hasta: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -193,6 +196,8 @@ pub struct Vista {
     pub mensaje: Option<String>,
     /// Hay una reserva sin llegada registrada y la llegada se hace con el QR de la isla.
     pub llegada_pendiente: bool,
+    /// Límite para registrar la llegada (se muestra con la llegada pendiente).
+    pub llegada_hasta: Option<DateTime<Utc>>,
     pub anuncio: Option<String>,
     /// Ofrecer borrar los archivos creados desde este momento (la sesión que terminó).
     pub limpieza_desde: Option<DateTime<Utc>>,
@@ -236,6 +241,7 @@ pub fn decidir(e: &Entrada) -> Vista {
             titular: None,
             mensaje: None,
             llegada_pendiente: false,
+            llegada_hasta: None,
             anuncio: None,
             limpieza_desde: None,
             compartido: None,
@@ -268,6 +274,7 @@ pub fn decidir(e: &Entrada) -> Vista {
         titular: None,
         mensaje: None,
         llegada_pendiente: false,
+        llegada_hasta: None,
         anuncio: r.anuncio.as_ref().filter(|a| a.hasta > ahora).map(|a| a.texto.clone()),
         limpieza_desde: None,
         compartido: r.compartido.clone().filter(|c| c.hasta > ahora),
@@ -353,6 +360,7 @@ pub fn decidir(e: &Entrada) -> Vista {
             v.titular = o.titular.clone();
             v.mensaje = o.mensaje.clone();
             v.llegada_pendiente = !o.llegada && r.politicas.llegada_modo == 2 && r.qr.is_some();
+            v.llegada_hasta = if v.llegada_pendiente { o.llegada_hasta.filter(|h| *h > ahora) } else { None };
             v.cuenta_hasta = Some(o.fin);
             v.desde = Some(o.inicio);
             v.ruta_qr = ruta_ficha;
@@ -473,7 +481,7 @@ mod pruebas {
 
     fn reserva(desde: i64, hasta: i64) -> Ocupacion {
         Ocupacion { tipo: "reserva".into(), inicio: t(desde), fin: t(hasta), titular: Some("Ana".into()),
-                    desatendido: false, mensaje: None, motivo: None, llegada: true }
+                    desatendido: false, mensaje: None, motivo: None, llegada: true, llegada_hasta: None }
     }
 
     fn ver(r: &Remoto, min: i64, inactivo: Option<u64>, m: &Memoria) -> Vista {
@@ -574,8 +582,12 @@ mod pruebas {
         let mut r = remoto(Modo::Observar, Some(Ocupacion { llegada: false, ..reserva(-5, 60) }));
         assert!(!ver(&r, 0, None, &Memoria::default()).llegada_pendiente);
         r.politicas.llegada_modo = 2;
+        if let Some(o) = r.actual.as_mut() {
+            o.llegada_hasta = Some(o.inicio + Duration::minutes(30));
+        }
         r.qr = Some(QrLlegada { secreto: "x".into() });
-        assert!(ver(&r, 0, None, &Memoria::default()).llegada_pendiente);
+        let vl = ver(&r, 0, None, &Memoria::default());
+        assert!(vl.llegada_pendiente && vl.llegada_hasta.is_some());
 
         let antes = remoto(Modo::Observar, Some(reserva(-60, 0)));
         let despues = remoto(Modo::Observar, None);

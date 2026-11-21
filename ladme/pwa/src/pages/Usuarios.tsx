@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  activarUsuario, actividadUsuario, asignarRol, buscarUsuarios, marcarDocente, otorgarPermiso, resumenUsuarios,
+  activarUsuario, actividadUsuario, anularInasistencia, asignarRol, buscarUsuarios, listarInasistencias, marcarDocente, otorgarPermiso, resumenUsuarios,
   type FiltroUsuarios, type ResumenUsuarios
 } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
-import type { Perfil, Rol } from '../lib/types'
+import type { Inasistencia, Perfil, Rol } from '../lib/types'
 import { fecha, hace } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -47,6 +47,7 @@ export default function Usuarios() {
   const [masCargando, setMasCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sel, setSel] = useState<Perfil | null>(null)
+  const [strikes, setStrikes] = useState<Inasistencia[]>([])
   const [actividad, setActividad] = useState<Awaited<ReturnType<typeof actividadUsuario>> | null>(null)
   const [ocupado, setOcupado] = useState(false)
   const consulta = useRef(0)
@@ -92,7 +93,9 @@ export default function Usuarios() {
   function abrir(p: Perfil) {
     setSel(p)
     setActividad(null)
+    setStrikes([])
     actividadUsuario(p.id).then(setActividad).catch(() => undefined)
+    listarInasistencias(p.id).then(setStrikes).catch(() => setStrikes([]))
   }
 
   /** Aplica un cambio y actualiza la fila en la lista sin recargar todo. */
@@ -304,6 +307,28 @@ export default function Usuarios() {
                   Puede pedir la sala para clases.
                 </span>
               </label>
+            )}
+
+            {strikes.length > 0 && (
+              <div className="stack" style={{ gap: 6 }}>
+                <strong className="small">Inasistencias</strong>
+                {strikes.slice(0, 6).map((i) => (
+                  <div key={i.id} className="row between small" style={{ gap: 8 }}>
+                    <span style={{ minWidth: 0 }}>
+                      {i.equipo_codigo} · {new Date(i.inicio).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', timeZone: 'America/Bogota' })}
+                      {i.estado === 'anulada' ? ' · anulada' : i.sancion_hasta && new Date(i.sancion_hasta) > new Date() ? ' · con sanción' : ''}
+                    </span>
+                    {i.estado === 'vigente' && (
+                      <button type="button" className="btn ghost sm" disabled={ocupado}
+                              onClick={() => void anularInasistencia(i.id, 'Anulada por el personal')
+                                .then(() => listarInasistencias(sel.id).then(setStrikes))
+                                .catch((e: unknown) => setError(e instanceof Error ? e.message : 'No se pudo anular.'))}>
+                        Anular
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
 
             {error && (

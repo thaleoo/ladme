@@ -2203,7 +2203,7 @@ function instalarDisparadores() {
   ScriptApp.newTrigger("reporteMensual_").timeBased().onMonthDay(1).atHour(8).create();
   // Comandos de consulta desde el grupo de Telegram (/estado, /agenda 5…), cada minuto.
   if (prop_("TELEGRAM_BOT_TOKEN") && prop_("TELEGRAM_CHAT_ID")) {
-    ScriptApp.newTrigger("telegramComandos_").timeBased().everyMinutes(1).create();
+    if (!webhookTelegramActivo_()) ScriptApp.newTrigger("telegramComandos_").timeBased().everyMinutes(1).create();
     try { registrarComandosTelegram(); } catch (e) { Logger.log("registrarComandosTelegram: " + e); }
   }
   return { ok: true, mensaje: "Disparadores instalados: mantenimientos (07:00), recordatorios (30 min), correo de la PWA (5 min), copia de seguridad (domingos 03:00) y reporte mensual (día 1, 08:00)." };
@@ -3372,13 +3372,15 @@ function chatConfigurado_() {
   return (prop_("TELEGRAM_BOT_TOKEN") && prop_("TELEGRAM_CHAT_ID")) || prop_("GCHAT_WEBHOOK_URL");
 }
 
-function enviarMensajeChat_(texto) {
+function enviarMensajeChat_(texto, teclado) {
   var token = prop_("TELEGRAM_BOT_TOKEN"), chat = prop_("TELEGRAM_CHAT_ID"), hook = prop_("GCHAT_WEBHOOK_URL");
   var r;
   if (token && chat) {
+    var cuerpo = { chat_id: chat, text: texto, disable_web_page_preview: true };
+    if (teclado && teclado.length) cuerpo.reply_markup = { inline_keyboard: teclado };
     r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "post", contentType: "application/json", muteHttpExceptions: true,
-      payload: JSON.stringify({ chat_id: chat, text: texto, disable_web_page_preview: true })
+      payload: JSON.stringify(cuerpo)
     });
   } else if (hook) {
     r = UrlFetchApp.fetch(hook, {
@@ -3396,12 +3398,84 @@ function enviarChatPersonal_() {
   try { supabaseRpc_("encolar_alertas_faro", {}); } catch (err) { Logger.log(err); }
   var pendientes = supabaseRpc_("chat_pendientes", { p_limite: 20 }) || [];
   var pwa = urlPwa_() || prop_("PWA_URL_PRUEBAS");
+  var webhook = webhookTelegramActivo_();
   for (var i = 0; i < pendientes.length; i++) {
     var m = pendientes[i];
-    var texto = "LADME · " + m.texto + (pwa && m.url ? "\n" + pwa + m.url : "");
-    enviarMensajeChat_(texto);
+    var teclado = webhook ? botonesChat_(m) : [];
+    if (pwa && m.url && /^https:/.test(pwa)) teclado.push([{ text: "Abrir en LADME", url: pwa + m.url }]);
+    var texto = "LADME · " + m.texto + (pwa && m.url && !teclado.length ? "\n" + pwa + m.url : "");
+    enviarMensajeChat_(texto, teclado);
     supabaseRpc_("marcar_chat_enviado", { p_ids: [m.id] });
   }
+}
+
+/**
+ * Botones de cada aviso del chat (solo con el bot por webhook, que es quien los atiende):
+ * aprobar o rechazar una clase, verificar a un docente, resolver la apelación de un strike.
+ */
+function botonesChat_(m) {
+  var k = String(m.dedupe_key || ""), id;
+  if (m.tipo === "clase_solicitud" && (id = /^clase:(\d+)$/.exec(k))) {
+    return [[{ text: "✅ Aprobar", callback_data: "ap:" + id[1] }, { text: "✖ Rechazar", callback_data: "re:" + id[1] }]];
+  }
+  if (m.tipo === "verificacion_docente" && (id = /^verif:(\d+)$/.exec(k))) {
+    return [[{ text: "✅ Verificar docente", callback_data: "ve:" + id[1] }, { text: "✖ No", callback_data: "nv:" + id[1] }]];
+  }
+  if (m.tipo === "inasistencia_apelacion" && (id = /^apel:(\d+)$/.exec(k))) {
+    return [[{ text: "↩ Anular strike", callback_data: "an:" + id[1] }, { text: "Mantener", callback_data: "ma:" + id[1] }]];
+  }
+  return [];
+}
+
+function webhookTelegramActivo_() {
+  return PropertiesService.getScriptProperties().getProperty("TELEGRAM_WEBHOOK_ACTIVO") === "1";
+}
+
+/**
+ * Pasa el bot a webhook: Telegram avisa a la función telegram-bot de Supabase en el momento en que
+ * alguien escribe o toca un botón (respuesta inmediata). Antes de ejecutarla:
+ *   1. Desplegar la función telegram-bot en Supabase sin verificación de JWT.
+ *   2. En Supabase (Edge Functions → Secrets): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID y
+ *      TELEGRAM_WEBHOOK_SECRET (una cadena aleatoria larga).
+ *   3. Aquí, en Propiedades del script: TELEGRAM_WEBHOOK_SECRET con la MISMA cadena.
+ * Para volver al sondeo cada minuto: desactivarWebhookTelegram().
+ */
+function activarWebhookTelegram() {
+  var token = prop_("TELEGRAM_BOT_TOKEN"), secreto = prop_("TELEGRAM_WEBHOOK_SECRET"), base = String(prop_("SUPABASE_URL") || "").replace(/\/+$/, "");
+  if (!token || !base) throw new Error("Faltan TELEGRAM_BOT_TOKEN o SUPABASE_URL en las propiedades del script.");
+  if (!secreto || secreto.length < 24) throw new Error("Falta TELEGRAM_WEBHOOK_SECRET (24 caracteres o más, la misma cadena que en los secretos de Supabase).");
+  var url = base + "/functions/v1/telegram-bot";
+  // La función debe responder 401 sin la clave: así sabemos que está desplegada.
+  var prueba = UrlFetchApp.fetch(url, { method: "post", payload: "{}", contentType: "application/json", muteHttpExceptions: true });
+  if (prueba.getResponseCode() === 404) throw new Error("La función telegram-bot no está desplegada en Supabase.");
+  var r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/setWebhook", {
+    method: "post", contentType: "application/json", muteHttpExceptions: true,
+    payload: JSON.stringify({ url: url, secret_token: secreto, allowed_updates: ["message", "callback_query"], max_connections: 10 })
+  });
+  if (r.getResponseCode() !== 200) throw new Error("Telegram respondió " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === "telegramComandos_") ScriptApp.deleteTrigger(t); });
+  PropertiesService.getScriptProperties().setProperty("TELEGRAM_WEBHOOK_ACTIVO", "1");
+  try { registrarComandosTelegram(); } catch (e) { Logger.log(e); }
+  Logger.log("Webhook activo en " + url + ". El bot ya responde al instante y los avisos llevan botones.");
+  return { ok: true, url: url };
+}
+
+function desactivarWebhookTelegram() {
+  var token = prop_("TELEGRAM_BOT_TOKEN");
+  UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/deleteWebhook", { method: "post", muteHttpExceptions: true });
+  PropertiesService.getScriptProperties().deleteProperty("TELEGRAM_WEBHOOK_ACTIVO");
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === "telegramComandos_") ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("telegramComandos_").timeBased().everyMinutes(1).create();
+  Logger.log("Webhook retirado: el bot vuelve a revisar los mensajes cada minuto.");
+}
+
+/** Diagnóstico: qué dice Telegram del webhook (último error, mensajes en cola). */
+function estadoWebhookTelegram() {
+  var r = UrlFetchApp.fetch("https://api.telegram.org/bot" + prop_("TELEGRAM_BOT_TOKEN") + "/getWebhookInfo", { muteHttpExceptions: true });
+  var info = JSON.parse(r.getContentText()).result || {};
+  delete info.ip_address;
+  Logger.log(JSON.stringify(info, null, 2));
+  return info;
 }
 
 /** Ejecutar desde el editor para comprobar que el chat recibe mensajes. */
@@ -3480,7 +3554,7 @@ function enviarPush_() {
  * ========================================================================= */
 function telegramComandos_() {
   var token = prop_("TELEGRAM_BOT_TOKEN"), chat = String(prop_("TELEGRAM_CHAT_ID"));
-  if (!token || !chat) return;
+  if (!token || !chat || webhookTelegramActivo_()) return;
   var props = PropertiesService.getScriptProperties();
   var offset = Number(props.getProperty("TELEGRAM_OFFSET") || 0);
   var r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D" +

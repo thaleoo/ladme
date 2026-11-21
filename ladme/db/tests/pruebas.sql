@@ -88,11 +88,14 @@ begin
   perform pg_temp.falla($q$select contactar_titular('UNAL-03', 'otra vez')$q$, 'hace poco');
   perform pg_temp.falla($q$select contactar_titular('UNAL-04', 'hola')$q$, 'no hay una reserva en curso');
 
-  -- No-show: avisa una sola vez (titular + personal).
+  -- No-show (0014: cuenta como inasistencia): avisa una sola vez (titular + personal).
+  update politicas set valor = to_jsonb((now() - interval '3 days')::text) where clave = 'inasistencias_desde';
+  update politicas set valor = '0' where clave = 'llegada_modo';
   update reservas set inicio = now() - interval '45 minutes' where id = r.id;
   perform pg_temp.ok(encolar_avisos_no_show() = 1, 'no-show detectado');
   perform pg_temp.ok(encolar_avisos_no_show() = 0, 'el no-show no se repite');
   perform pg_temp.ok((select count(*) from cola_notificaciones where tipo = 'sin_llegada_staff') = 2, 'el no-show llega a todo el personal');
+  update politicas set valor = '1' where clave = 'llegada_modo';
 
   -- QR y llegada registrada por el personal.
   perform pg_temp.ok((validar_credencial(r.token_credencial)) ? 'titular' = false, 'un usuario común solo ve el veredicto');
@@ -729,3 +732,83 @@ do $$ begin
   perform pg_temp.ok(true, 'sin sesión solo se puede latir con un token válido');
 end $$;
 reset role;
+
+-- 0014: inasistencias, clases vencidas y bot con botones.
+do $$
+declare g uuid; e17 uuid; i inasistencias; c clases; j jsonb; n int; r reservas;
+begin
+  update politicas set valor = to_jsonb((now() - interval '3 days')::text) where clave = 'inasistencias_desde';
+  update politicas set valor = '0' where clave = 'llegada_modo';
+  insert into auth.users (email, raw_user_meta_data) values ('gil@unal.edu.co', '{"name": "Gil"}');
+  select id into g from perfiles where correo = 'gil@unal.edu.co';
+  update perfiles set reglamento_aceptado_en = now(), programa = 'Estadística', tipo_usuario = 'Estudiante', matricula = 'Primera' where id = g;
+  select id into e17 from equipos where codigo = 'UNAL-14';
+  perform pg_temp.como('lab@unal.edu.co');
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values
+    (e17, g, now() - interval '30 hours', now() - interval '29 hours', 'PAE'),
+    (e17, g, now() - interval '28 hours', now() - interval '27 hours', 'PAE'),
+    (e17, g, now() - interval '26 hours', now() - interval '25 hours', 'PAE'),
+    (e17, g, now() - interval '24 hours', now() - interval '23 hours', 'PAE');
+  update reservas set estado = 'cancelada' where equipo_id = e17 and inicio < now() - interval '25 hours' and inicio > now() - interval '27 hours';
+  update reservas set llegada_en = inicio + interval '5 minutes' where equipo_id = e17 and inicio < now() - interval '23 hours' and inicio > now() - interval '25 hours';
+  perform pg_temp.ok(not exists (select 1 from inasistencias where usuario_id = g), 'aún no hay inasistencias');
+  j := revisar_llegadas();
+  perform pg_temp.ok((select count(*) from inasistencias where usuario_id = g) = 2, 'cuentan solo las reservas sin llegada ni cancelación');
+  select * into i from inasistencias where usuario_id = g order by inicio desc limit 1;
+  perform pg_temp.ok(i.numero = 2 and i.sancion_hasta > now() + interval '2 days' and i.sancion_hasta < now() + interval '4 days',
+                     'la segunda inasistencia da 3 días sin reservar');
+  perform pg_temp.ok((select sancion_hasta is null from inasistencias where usuario_id = g and numero = 1), 'la primera es solo un aviso');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where usuario_id = g and tipo = 'inasistencia' and titulo like 'No podrá reservar%'),
+                     'la persona recibe el aviso con la sanción');
+  perform pg_temp.ok((revisar_llegadas() ->> 'inasistencias')::int = 0, 'no se cuenta dos veces');
+  perform pg_temp.como('gil@unal.edu.co');
+  perform pg_temp.falla(format($q$insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values (%L, %L, now() + interval '300 hours', now() + interval '301 hours', 'PAE')$q$, e17, g),
+                        'No puede reservar hasta');
+  -- Apelación.
+  perform pg_temp.falla(format('select apelar_inasistencia(%s, %L)', i.id, 'corto'), '10 caracteres');
+  perform apelar_inasistencia(i.id, 'Llegué a tiempo pero el QR no funcionó');
+  perform pg_temp.falla(format('select apelar_inasistencia(%s, %L)', i.id, 'Llegué a tiempo pero el QR no funcionó'), 'Ya apeló');
+  perform pg_temp.ok(exists (select 1 from cola_chat where dedupe_key = 'apel:' || i.id), 'el chat del personal recibe la apelación');
+  perform pg_temp.falla('select * from inasistencias_apeladas()', 'personal');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.ok((select count(*) from inasistencias_apeladas()) = 1, 'el personal ve las apelaciones pendientes');
+  perform pg_temp.falla(format('select resolver_apelacion(%s, false, %L)', i.id, ''), 'motivo');
+  -- Desde Telegram con el botón «Anular» (la cuenta 555 del personal se vinculó antes).
+  j := telegram_ejecutar(555, 'anular', jsonb_build_object('id', i.id));
+  perform pg_temp.ok((j ->> 'ok')::boolean and j ->> 'actor' is not null and (select estado from inasistencias where id = i.id) = 'anulada',
+                     'el botón de Telegram anula el strike y dice quién lo hizo');
+  perform pg_temp.como('gil@unal.edu.co');
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values (e17, g, now() + interval '300 hours', now() + interval '301 hours', 'PAE') returning * into r;
+  perform pg_temp.ok(r.id is not null, 'al anular la inasistencia se levanta la sanción');
+  update reservas set estado = 'cancelada' where id = r.id;
+  -- Recordatorios de llegada.
+  perform pg_temp.como('lab@unal.edu.co');
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad, creado_en) values
+    (e17, g, now() - interval '3 minutes', now() + interval '1 hour', 'PAE', now() - interval '2 hours') returning * into r;
+  perform revisar_llegadas();
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where dedupe_key = 'llegada1:' || r.id), 'recordatorio al empezar la reserva');
+  update reservas set inicio = now() - interval '25 minutes' where id = r.id;
+  perform revisar_llegadas();
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where dedupe_key = 'llegada2:' || r.id), 'último aviso 10 minutos antes del límite');
+  -- Sin forma de registrar la llegada (modo 1 y sin Faro): no cuenta.
+  update politicas set valor = '1' where clave = 'llegada_modo';
+  update reservas set inicio = now() - interval '45 minutes' where id = r.id;
+  perform revisar_llegadas();
+  perform pg_temp.ok(not exists (select 1 from inasistencias where reserva_id = r.id), 'si no podía registrar la llegada, no cuenta');
+  update politicas set valor = '0' where clave = 'llegada_modo';
+  -- El personal no acumula inasistencias.
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  select e17, id, now() - interval '20 hours', now() - interval '19 hours', 'PAE' from perfiles where correo = 'lab@unal.edu.co';
+  perform revisar_llegadas();
+  perform pg_temp.ok(not exists (select 1 from inasistencias i2 join perfiles p on p.id = i2.usuario_id where p.correo = 'lab@unal.edu.co'),
+                     'el personal no acumula inasistencias');
+  -- Solicitud de clase vencida.
+  insert into clases (solicitante, nombre, docente, grupo, dias, hora_inicio, hora_fin, desde, hasta)
+  select id, 'Vieja', 'Doc', 1, array[1,2,3,4,5,6]::smallint[], '08:00', '10:00', current_date - 10, current_date - 3
+    from perfiles where correo = 'doc@unal.edu.co' returning * into c;
+  n := cerrar_clases_vencidas();
+  perform pg_temp.ok((select estado from clases where id = c.id) = 'vencida'
+                     and exists (select 1 from cola_notificaciones where dedupe_key = 'clase_vencida:' || c.id),
+                     'la solicitud sin sesiones futuras se cierra sola y avisa al docente');
+  perform pg_temp.ok((select dedupe_key from chat_pendientes(50) where dedupe_key = 'apel:' || i.id) is not null, 'el bot recibe la clave de cada mensaje');
+end $$;

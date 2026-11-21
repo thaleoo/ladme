@@ -196,3 +196,21 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
 - `clase_previa()` cuenta solo sesiones futuras y dice cuántas pasaron; `aprobar_clase()` no aprueba si no
   queda ninguna. `clase_hoja()` (docente o personal) y `clase_hoja_correo()` (service_role) devuelven la
   autorización completa; `clase_reenviar()` vuelve a mandarla (una vez cada 10 min).
+
+## Migración 0014 — Inasistencias, solicitudes vencidas y bot con botones
+
+`migrations/0014_inasistencias_bot.sql`, después de 0013.
+
+- `encolar_avisos_no_show()` (el worker ya la llama cada 5 min) ahora hace tres cosas:
+  `revisar_llegadas()` (recordatorio al empezar la reserva y 10 min antes del límite; inasistencia al
+  vencer la tolerancia) y `cerrar_clases_vencidas()` (estado `vencida`, aviso al docente).
+- `inasistencias`: una por reserva sin llegada. En `inasistencia_ventana_dias` (60): 1.ª aviso, 2.ª
+  `inasistencia_sancion_2_dias` (3), 3.ª o más `inasistencia_sancion_3_dias` (7). Cancelar o liberar antes
+  no cuenta; el personal no acumula; solo cuenta si la persona tenía cómo registrar la llegada
+  (`_podia_llegar`) y desde `inasistencias_desde` (fecha de instalación). El trigger `reservas_sancion`
+  impide reservar con una sanción vigente. `apelar_inasistencia()`, `resolver_apelacion()`,
+  `anular_inasistencia()`, `inasistencias_apeladas()`.
+- `registrar_llegada()`: en el modo 2, si el equipo no tiene Faro activo, se permite desde la app.
+- `faro_estado` (envuelto otra vez, `_faro_estado_0011`) agrega `actual.llegada_hasta`.
+- Bot: `telegram_pendientes`, `chat_pendientes()` devuelve `dedupe_key` y `telegram_ejecutar()` (verificar,
+  anular o mantener strikes; lo demás lo delega en `telegram_accion`, y devuelve quién actuó).

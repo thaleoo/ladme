@@ -22,6 +22,7 @@ import {
   rango,
   rangoCorto
 } from '../lib/format'
+import Inasistencias from '../components/Inasistencias'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
@@ -299,7 +300,14 @@ export default function MisReservas() {
 
         {estado === 'Sin registrar llegada' && (
           <p className="reserva-card__nota aviso">
-            <Icon nombre="alerta" width={14} height={14} /> Registre su llegada: el laboratorio ya fue avisado.
+            <Icon nombre="alerta" width={14} height={14} /> No registró la llegada a tiempo: cuenta como inasistencia. Si fue un error, apélela.
+          </p>
+        )}
+        {empezo && vigente && !r.llegada_en && estado !== 'Sin registrar llegada' && (
+          <p className="reserva-card__nota aviso">
+            <Icon nombre="reloj" width={14} height={14} /> Registre su llegada antes de las{' '}
+            {new Date(new Date(r.inicio).getTime() + lim.toleranciaMin * 60000).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Bogota' })}
+            : si no, cuenta como inasistencia.
           </p>
         )}
         {r.llegada_en && vigente && (
@@ -377,6 +385,8 @@ export default function MisReservas() {
           <div className="alert__body">{error}</div>
         </div>
       )}
+
+      <Inasistencias />
 
       <div className="segmented" role="tablist" aria-label="Filtro de reservas">
         <button
