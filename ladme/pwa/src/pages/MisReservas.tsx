@@ -241,9 +241,15 @@ export default function MisReservas() {
     const acciones: Accion[] = []
     if (vigente && puedeLlegada && empezo)
       acciones.push({ id: 'llegada', nodo: (
-        <button key="llegada" className="btn ok sm" disabled={procesando} onClick={() => llegada(r)} type="button">
-          <Icon nombre="check" /> Registrar llegada
-        </button>) })
+        lim.llegadaModo === 0 ? (
+          <button key="llegada" className="btn ok sm" disabled={procesando} onClick={() => llegada(r)} type="button">
+            <Icon nombre="check" /> Registrar llegada
+          </button>
+        ) : (
+          <Link key="llegada" className="btn ok sm" to="/llegada">
+            <Icon nombre="check" /> Confirmar asistencia
+          </Link>
+        )) })
     acciones.push({ id: 'credencial', nodo: (
       <Link key="credencial" className="btn ghost sm" to={`/credencial/${r.id}`}>
         <Icon nombre="qr" /> Credencial
@@ -305,7 +311,7 @@ export default function MisReservas() {
         )}
         {empezo && vigente && !r.llegada_en && estado !== 'Sin registrar llegada' && (
           <p className="reserva-card__nota aviso">
-            <Icon nombre="reloj" width={14} height={14} /> Registre su llegada antes de las{' '}
+            <Icon nombre="reloj" width={14} height={14} /> Confirme su asistencia (código de Faro en el equipo) antes de las{' '}
             {new Date(new Date(r.inicio).getTime() + lim.toleranciaMin * 60000).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Bogota' })}
             : si no, cuenta como inasistencia.
           </p>

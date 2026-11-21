@@ -11,7 +11,7 @@ import { Paginas, recordarDestino } from './lib/rutas'
 import CargaInicial from './components/CargaInicial'
 
 const {
-  AccionRapida, Admin, Sala, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Clases, ClaseDetalle, AprobarClase, Reservar, Usuarios, Validar
+  AccionRapida, Admin, Sala, Avisos, Credencial, Cuenta, FichaEquipo, Mantenimiento, MiUso, MisReservas, Clases, ClaseDetalle, AprobarClase, ConfirmarAsistencia, Reservar, Usuarios, Validar
 } = Paginas
 
 function Cargando() {
@@ -114,6 +114,7 @@ export default function App() {
         <Route index element={<Disponibilidad />} />
         <Route path="reservar" element={<Reservar />} />
         <Route path="mis-reservas" element={<MisReservas />} />
+        <Route path="llegada" element={<ConfirmarAsistencia />} />
         <Route path="credencial/:id" element={<Credencial />} />
         <Route path="equipo/:codigo" element={<FichaEquipo />} />
         <Route path="pc/:codigo/:accion" element={<AccionRapida />} />

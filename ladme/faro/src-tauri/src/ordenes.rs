@@ -7,9 +7,19 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use tauri::AppHandle;
 
-/// Mismo cálculo que `_faro_codigo_llegada` en la base de datos.
+/// Mismo cálculo que `_faro_codigo_llegada` en la base de datos: el código del QR hasta la 0.5.2
+/// (el servidor lo sigue aceptando). Desde la 0.5.3 la isla usa `codigo_numero`.
+#[allow(dead_code)]
 pub fn codigo_llegada(secreto: &str, equipo: &str, ventana: i64) -> String {
     hex::encode(Sha256::digest(format!("{secreto}:{equipo}:{ventana}").as_bytes()))[..10].to_string()
+}
+
+/// Código de 6 dígitos para escribir en «Confirmar asistencia» (mismo resumen que el del QR).
+/// Mismo cálculo que `_faro_codigo_numero` en la base de datos.
+pub fn codigo_numero(secreto: &str, equipo: &str, ventana: i64) -> String {
+    let resumen = Sha256::digest(format!("{secreto}:{equipo}:{ventana}").as_bytes());
+    let n = u32::from_be_bytes([resumen[0], resumen[1], resumen[2], resumen[3]]);
+    format!("{:06}", n % 1_000_000)
 }
 
 /// Wake-on-LAN: «paquete mágico» (6 × 0xFF y la MAC 16 veces) por difusión UDP.
@@ -183,6 +193,8 @@ mod pruebas {
         // Valor calculado con _faro_codigo_llegada('abc', 'UNAL-08', 123) en PostgreSQL.
         assert_eq!(super::codigo_llegada("abc", "UNAL-08", 123), "e615fa3d14");
         assert_eq!(super::codigo_llegada("abc", "UNAL-08", 123).len(), 10);
+        // _faro_codigo_numero('abc', 'UNAL-08', 123) en PostgreSQL.
+        assert_eq!(super::codigo_numero("abc", "UNAL-08", 123), "199997");
     }
 
     #[test]

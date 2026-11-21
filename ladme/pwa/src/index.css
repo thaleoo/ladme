@@ -4114,3 +4114,36 @@ a.sala__equipo:hover { transform: translateY(-2px); box-shadow: inset 4px 0 0 va
 .inasistencias__lista li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--s2); padding: 8px 0; border-top: 1px solid var(--line); }
 .inasistencias__lista li.anulada .inasistencias__d { opacity: 0.55; text-decoration: line-through; }
 .inasistencias__d { display: grid; min-width: 0; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Confirmar asistencia: código de 6 dígitos de Faro. */
+.asistencia { display: grid; gap: var(--s3); }
+.asistencia__equipo { display: grid; gap: 2px; }
+.asistencia__codigo-eq { font-size: 1.6rem; font-weight: 800; letter-spacing: 0.01em; }
+.asistencia__pasos { margin: 0; padding-left: 1.2rem; display: grid; gap: 4px; color: var(--ink-700, var(--ink-600)); }
+.asistencia__form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); align-items: stretch; }
+.asistencia__input { font-size: 2rem; font-weight: 750; letter-spacing: 0.18em; text-align: center; padding: 10px 12px; min-height: 64px; border-radius: var(--r-lg); }
+.asistencia__input::placeholder { color: var(--ink-300, var(--ink-400)); letter-spacing: 0.18em; }
+.asistencia__input[aria-invalid='true'] { border-color: var(--danger); animation: sacudir 0.35s ease; }
+@keyframes sacudir { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+@media (max-width: 420px) { .asistencia__form { grid-template-columns: 1fr; } }
+.asistencia-ok { display: grid; justify-items: center; text-align: center; gap: var(--s2); padding: var(--s6, 32px) var(--s4); animation: panel-adelante 0.35s ease both; }
+.asistencia-ok h2 { margin: 0; }
+.asistencia-ok__icono { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); animation: aparecer-check 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+@keyframes aparecer-check { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Acceso temporal «Confirmar asistencia» (flota sobre la navegación mientras haga falta). */
+.asistencia-pill { position: fixed; z-index: 45; left: 50%; transform: translateX(-50%); bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 12px);
+  width: min(420px, calc(100vw - 24px)); display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border-radius: 999px;
+  background: var(--brand-600); color: #fff; text-decoration: none; box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); animation: pill-entrar 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.asistencia-pill:hover { color: #fff; filter: brightness(1.06); }
+.asistencia-pill.urgente { background: var(--warn); color: #1c1300; }
+.asistencia-pill__icono { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: rgb(255 255 255 / 0.2); }
+.asistencia-pill__t { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.asistencia-pill__t strong { font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.asistencia-pill__t span { font-size: var(--text-xs); opacity: 0.85; }
+@keyframes pill-entrar { from { transform: translate(-50%, 24px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@media (min-width: 1024px) { .asistencia-pill { left: auto; right: 24px; bottom: 24px; transform: none; animation-name: pill-entrar-d; } }
+@keyframes pill-entrar-d { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .asistencia-pill, .asistencia-ok, .asistencia-ok__icono { animation: none; } }

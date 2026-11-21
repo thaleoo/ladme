@@ -214,3 +214,17 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
 - `faro_estado` (envuelto otra vez, `_faro_estado_0011`) agrega `actual.llegada_hasta`.
 - Bot: `telegram_pendientes`, `chat_pendientes()` devuelve `dedupe_key` y `telegram_ejecutar()` (verificar,
   anular o mantener strikes; lo demás lo delega en `telegram_accion`, y devuelve quién actuó).
+
+## Migración 0015 — Confirmar asistencia con el código de Faro
+
+`migrations/0015_confirmar_asistencia.sql`, después de 0014.
+
+- `llegada_modo` pasa a 2: la persona confirma la llegada con el código de Faro (o la registra el personal).
+- `_faro_codigo_numero()`: 6 dígitos que cambian cada 30 s (mismo cálculo que Faro 0.5.3).
+- `confirmar_llegada(codigo)`: busca la reserva de la persona que está empezando y valida el código de
+  la isla de ese equipo (ventana actual, las dos anteriores y la siguiente). Devuelve `{ok, error}`; los
+  fallos quedan en `llegada_intentos` y 5 en 10 minutos bloquean un rato.
+- `mi_llegada_pendiente()`: la reserva que espera confirmación (desde 15 min antes hasta el límite).
+- `registrar_llegada()` ya no sirve a la persona en el modo 2 (sí al personal).
+- `_podia_llegar()`: con el modo 2, la inasistencia solo cuenta si Faro estuvo en línea en la reserva.
+- `revisar_llegadas()` corregida: numera en orden de fecha y los recordatorios llevan a `/llegada`.

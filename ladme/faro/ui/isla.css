@@ -139,3 +139,7 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
 .protegido svg, .espera svg { flex: none; width: 15px; height: 15px; margin-top: 1px; }
 .protegido svg { color: #6ee7b7; }
 .espera svg { color: #fcd34d; }
+
+/* Código de 6 dígitos para confirmar la asistencia desde el celular. */
+.codigo-llegada { display: flex; align-items: center; gap: 4px; margin: 2px 0 10px; font-size: 34px; font-weight: 750; letter-spacing: 0.08em; color: var(--texto); user-select: none; -webkit-user-select: none; }
+.codigo-llegada span { width: 8px; }

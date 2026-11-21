@@ -157,7 +157,7 @@ export default function MiReserva({ equipo, software = [], accion, codigoLlegada
         <div className="small mt" style={{ color: 'var(--ink-700, inherit)' }}>
           {lim.llegadaModo === 0 ? null
             : lim.llegadaModo === 1 ? 'Muestre su pase al personal del laboratorio para registrar la llegada.'
-            : 'Para registrar la llegada, abra la isla de Faro en el equipo y escanee el QR «Registrar llegada».'}
+            : <>Al llegar, toque «Confirmar asistencia» en la isla de Faro del equipo y escriba el código en <Link to="/llegada">Confirmar asistencia</Link>.</>}
         </div>
       )}
 

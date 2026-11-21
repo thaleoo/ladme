@@ -8,6 +8,7 @@ import InstalarApp, { instalarAhora, puedeInstalarse } from './InstalarApp'
 import BannerActualizacion from './BannerActualizacion'
 import { propsPrecarga } from '../lib/rutas'
 import AvisosPush from './AvisosPush'
+import AsistenciaPendiente from './AsistenciaPendiente'
 import Icon, { type NombreIcono } from './Icon'
 import Logo from './Logo'
 import Modal from './Modal'
@@ -27,6 +28,7 @@ const ROL_ETIQUETA: Record<string, string> = {
 }
 
 const TITULOS: Array<[RegExp, string]> = [
+  [/^\/llegada/, 'Confirmar asistencia'],
   [/^\/$/, 'Disponibilidad'],
   [/^\/reservar/, 'Nueva reserva'],
   [/^\/mis-reservas/, 'Mis reservas'],
@@ -281,6 +283,7 @@ export default function Shell() {
         </main>
       </div>
 
+      <AsistenciaPendiente />
       <BannerActualizacion />
 
       <nav className="bottomnav" aria-label="Navegación principal">

@@ -1135,3 +1135,28 @@ export async function anularInasistencia(id: number, motivo?: string): Promise<v
   const { error } = await supabase.rpc('anular_inasistencia', { p_id: id, p_motivo: motivo ?? null })
   if (error) fail('No se pudo anular', error)
 }
+
+// ------------------------------------------------------------ Confirmar asistencia (código de Faro)
+export interface LlegadaPendiente {
+  id: string
+  codigo_legible: string
+  equipo: string
+  inicio: string
+  fin: string
+  /** Hasta cuándo se puede confirmar sin que cuente como inasistencia. */
+  limite: string
+}
+
+/** La reserva propia que espera confirmar asistencia (o null). */
+export async function miLlegadaPendiente(): Promise<LlegadaPendiente | null> {
+  const { data, error } = await supabase.rpc('mi_llegada_pendiente')
+  if (error) return null
+  return (data ?? null) as LlegadaPendiente | null
+}
+
+/** Confirma la asistencia con el código de 6 dígitos que muestra Faro en el equipo. */
+export async function confirmarLlegada(codigo: string): Promise<{ ok: boolean; error?: string; equipo?: string; ya?: boolean }> {
+  const { data, error } = await supabase.rpc('confirmar_llegada', { p_codigo: codigo })
+  if (error) fail('No se pudo confirmar la asistencia', error)
+  return data as { ok: boolean; error?: string; equipo?: string; ya?: boolean }
+}

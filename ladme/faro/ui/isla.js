@@ -33,7 +33,7 @@ const ACCIONES = {
   extender: { texto: 'Extender', titulo: 'Extiende tu reserva', cuerpo: 'Escanea y elige cuánto tiempo más necesitas. Un toque y listo.', icono: ICONOS.reloj, principal: true },
   liberar:  { texto: 'Liberar', titulo: 'Libera el equipo', cuerpo: 'Si ya terminaste, escanea y confirma: el equipo queda libre para otra persona.', icono: ICONOS.salir },
   reportar: { texto: 'Reportar falla', titulo: 'Reporta una falla', cuerpo: 'Cuéntale al laboratorio qué pasa con este equipo.', icono: ICONOS.falla },
-  llegada:  { texto: 'Registrar llegada', titulo: 'Registra tu llegada', cuerpo: 'Escanéalo con tu celular, con tu sesión de LADME abierta. Solo funciona para quien hizo la reserva y el código cambia cada 30 s.', icono: ICONOS.check, principal: true },
+  llegada:  { texto: 'Confirmar asistencia', titulo: 'Confirma tu asistencia', cuerpo: 'En tu celular: LADME → «Confirmar asistencia». Escribe este código o escanea el QR.', icono: ICONOS.check, principal: true },
 };
 // Rutas que existen en la PWA: la reserva va con ?equipo= y lo demás abre la ficha del equipo.
 const ruta = (a, codigo) => {
@@ -94,7 +94,7 @@ function htmlCompacta(v) {
       <span class="punto"></span>
       <span class="codigo">${esc(v.equipo ?? 'Faro')}</span>
       <span class="sep"></span>
-      <span class="etiqueta">${v.anuncio ? `<span class="megafono">${ICONOS.megafono}</span>` : ''}${v.llegada_pendiente ? (v.llegada_hasta ? `Registra tu llegada · hasta ${textoHora(v.llegada_hasta)}` : 'Registra tu llegada') : etiqueta(v)}</span>
+      <span class="etiqueta">${v.anuncio ? `<span class="megafono">${ICONOS.megafono}</span>` : ''}${v.llegada_pendiente ? (v.llegada_hasta ? `Confirma tu asistencia · hasta ${textoHora(v.llegada_hasta)}` : 'Confirma tu asistencia') : etiqueta(v)}</span>
       ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
       <span class="valor num" data-vivo="valor">${valorCorto(v)}</span>
     </div>`;
@@ -124,6 +124,7 @@ function htmlAbierta(v) {
         <div class="qr">${svg ?? ''}</div>
         <div>
           <p><strong>${a.titulo}</strong>${a.cuerpo}</p>
+          ${accion === 'llegada' && qrLlegada?.numero ? `<div class="codigo-llegada num" aria-label="Código ${esc(qrLlegada.numero)}">${esc(qrLlegada.numero.slice(0, 3))}<span></span>${esc(qrLlegada.numero.slice(3))}</div>` : ''}
           ${accion === 'llegada' && v.llegada_hasta ? `<p class="corto">Hazlo antes de las ${textoHora(v.llegada_hasta)}: si no, cuenta como inasistencia.</p>` : ''}
           ${corto ? `<p class="corto">¿Sin cámara? Entra a <span class="num">${esc(corto)}</span></p>` : ''}
           ${accion === 'llegada' ? `<div class="barra fina"><i data-vivo="qr-llegada"></i></div>` : ''}
@@ -294,6 +295,7 @@ setInterval(() => {
 async function refrescarLlegada() {
   qrLlegada = await invocar('qr_llegada');
   if (!qrLlegada) aviso = 'No se pudo generar el código. Pide al personal que registre tu llegada.';
+  else aviso = null;
   dibujar();
 }
 

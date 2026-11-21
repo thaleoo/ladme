@@ -563,21 +563,24 @@ fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Resu
 #[derive(Serialize)]
 struct QrLlegada {
     svg: String,
+    /// Código de 6 dígitos que la persona escribe en «Confirmar asistencia».
+    numero: String,
     /// Segundos hasta que cambia el código.
     cambia_en: i64,
 }
 
-/// QR de llegada: abre la ficha del equipo con un código que cambia cada 30 s. Solo sirve a
-/// quien tiene la reserva de este equipo (lo verifica el servidor).
+/// Código para confirmar la asistencia: 6 dígitos que cambian cada 30 s y un QR que abre
+/// «Confirmar asistencia» con el código ya puesto. Solo sirve a quien tiene la reserva de este
+/// equipo (lo verifica el servidor).
 #[tauri::command]
 fn qr_llegada(estado: tauri::State<Compartido>) -> Option<QrLlegada> {
     let n = estado.lock().unwrap();
     let r = n.copia.remoto.as_ref()?;
     let secreto = &r.qr.as_ref()?.secreto;
     let ahora = (Utc::now() + Dur::milliseconds(n.copia.desfase_ms)).timestamp();
-    let codigo = ordenes::codigo_llegada(secreto, &r.equipo.codigo, ahora.div_euclid(30));
-    let url = n.config.url_pwa(&format!("/equipo/{}?llegada={codigo}", r.equipo.codigo))?;
-    Some(QrLlegada { svg: qr_svg(&url)?, cambia_en: 30 - ahora.rem_euclid(30) })
+    let numero = ordenes::codigo_numero(secreto, &r.equipo.codigo, ahora.div_euclid(30));
+    let url = n.config.url_pwa(&format!("/llegada?c={numero}"))?;
+    Some(QrLlegada { svg: qr_svg(&url)?, numero, cambia_en: 30 - ahora.rem_euclid(30) })
 }
 
 /// La isla no toma el foco al aparecer; lo pide cuando hay que escribir (clave del personal).

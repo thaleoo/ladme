@@ -315,7 +315,7 @@ begin
   select * into r from reservas x where x.equipo_id = (select id from equipos where codigo = 'UNAL-08') and x.estado = 'activa' and x.tipo = 'reserva';
   perform pg_temp.falla(format('select registrar_llegada(%L)', r.id), 'personal');
   update politicas set valor = '2' where clave = 'llegada_modo';
-  perform pg_temp.falla(format('select registrar_llegada(%L)', r.id), 'QR que muestra la isla');
+  perform pg_temp.falla(format('select registrar_llegada(%L)', r.id), 'código que muestra Faro');
 
   j := faro_estado(t8, '{"inactivo_seg": 900}');
   sec := j #>> '{qr,secreto}';
@@ -706,6 +706,8 @@ do $$ begin
   perform pg_temp.falla($q$select telegram_accion(1, 'anuncio')$q$, 'permission denied');
   perform pg_temp.falla($q$select * from telegram_vinculos$q$, 'permission denied');
   perform pg_temp.falla($q$select clase_hoja_correo(1)$q$, 'permission denied');
+  perform pg_temp.falla($q$select _faro_codigo_numero('a', 'b', 1)$q$, 'permission denied');
+  perform pg_temp.falla($q$select * from llegada_intentos$q$, 'permission denied');
   perform pg_temp.falla($q$update perfiles set docente_verificado_en = now() where id = auth.uid()$q$, 'permission denied');
   perform pg_temp.ok((select count(*) from errores_app) = 0, 'el registro de errores solo lo ve el personal');
   perform pg_temp.falla($q$select encolar_alertas_liberacion()$q$, 'permission denied');
@@ -811,4 +813,34 @@ begin
                      and exists (select 1 from cola_notificaciones where dedupe_key = 'clase_vencida:' || c.id),
                      'la solicitud sin sesiones futuras se cierra sola y avisa al docente');
   perform pg_temp.ok((select dedupe_key from chat_pendientes(50) where dedupe_key = 'apel:' || i.id) is not null, 'el bot recibe la clave de cada mensaje');
+end $$;
+
+-- 0015: confirmar asistencia con el código de 6 dígitos de Faro.
+do $$
+declare g uuid; e uuid; t text; sec text; r reservas; j jsonb; v_vent bigint := floor(extract(epoch from now()) / 30)::bigint;
+begin
+  perform pg_temp.ok(_faro_codigo_numero('abc', 'UNAL-08', 123) = '199997', 'el código de 6 dígitos coincide con el de Faro');
+  update politicas set valor = '2' where clave = 'llegada_modo';
+  select id into g from perfiles where correo = 'gil@unal.edu.co';
+  select id into e from equipos where codigo = 'UNAL-15';
+  update reservas set estado = 'cancelada' where usuario_id = g and estado = 'activa' and fin > now();
+  perform pg_temp.como('lab@unal.edu.co');
+  t := faro_vincular(faro_codigo_vinculo('UNAL-15') ->> 'codigo', 'PC-15', 'Windows 11', '0.5.3') ->> 'token';
+  j := faro_estado(t, '{}');
+  sec := j #>> '{qr,secreto}';
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values (e, g, now() - interval '2 minutes', now() + interval '1 hour', 'PAE') returning * into r;
+  perform pg_temp.como('gil@unal.edu.co');
+  perform pg_temp.falla(format('select registrar_llegada(%L)', r.id), 'código que muestra Faro');
+  perform pg_temp.ok(mi_llegada_pendiente() ->> 'equipo' = 'UNAL-15', 'la app sabe qué reserva espera confirmar asistencia');
+  j := confirmar_llegada('000000');
+  if j ->> 'ok' = 'true' then j := confirmar_llegada('999999'); end if;
+  perform pg_temp.ok(j ->> 'ok' = 'false' and j ->> 'error' like '%UNAL-15%' and (select llegada_en from reservas where id = r.id) is null,
+                     'un código equivocado no registra la llegada');
+  perform pg_temp.ok(exists (select 1 from llegada_intentos where usuario_id = g), 'el intento fallido queda contado');
+  j := confirmar_llegada(substr(_faro_codigo_numero(sec, 'UNAL-15', v_vent - 1), 1, 3) || ' ' || substr(_faro_codigo_numero(sec, 'UNAL-15', v_vent - 1), 4));
+  perform pg_temp.ok(j ->> 'ok' = 'true' and (select llegada_en from reservas where id = r.id) is not null,
+                     'con el código que muestra Faro se confirma la asistencia (acepta espacios y el código anterior)');
+  perform pg_temp.ok(mi_llegada_pendiente() is null and confirmar_llegada('123') ->> 'ya' = 'true', 'confirmar dos veces no falla');
+  insert into llegada_intentos (usuario_id) select g from generate_series(1, 5);
+  perform pg_temp.ok(confirmar_llegada('123456') ->> 'error' like 'Demasiados%', 'tras 5 códigos equivocados hay que esperar');
 end $$;

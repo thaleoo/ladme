@@ -337,6 +337,16 @@ El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
   Con el webhook, los avisos de clases, verificaciones y apelaciones llegan con botones; las órdenes de
   sala piden confirmación con botones; los rechazos piden el motivo respondiendo al mensaje del bot.
 
+## 20. Confirmar asistencia con el código de Faro (migración 0015, Faro 0.5.3)
+
+- La llegada solo vale estando frente al equipo: en la isla de Faro, «Confirmar asistencia» muestra un
+  código de 6 dígitos que cambia cada 30 s y un QR. En el celular, `/llegada` («Confirmar asistencia»)
+  pide el código; con el QR llega ya puesto y se confirma solo.
+- Mientras una reserva espera confirmación, aparece en toda la app un acceso flotante «Confirmar
+  asistencia · UNAL-07 · quedan 24 min» (se pone ámbar en los últimos 10 minutos).
+- El botón «Registrar llegada» de la app desaparece para las personas (sigue para el personal).
+- 5 códigos equivocados en 10 minutos bloquean los intentos un rato.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.
