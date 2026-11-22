@@ -650,8 +650,10 @@ declare j jsonb; cod text; c clases; v_hoy date := (now() at time zone 'America/
   perform pg_temp.como('eva@unal.edu.co');
   perform pg_temp.falla(format($q$select solicitar_clase('Cálculo', 'x', 1, array[1,2,3,4,5,6], '14:00', '16:00', %L, %L, 999)$q$, v_hoy + 1, v_hoy + 8),
                         'entre 1 y');
-  perform pg_temp.falla(format($q$select solicitar_clase('Cálculo', 'x', 1, array[%s], '00:00', '00:30', %L, %L)$q$,
-                               extract(isodow from v_hoy)::int, v_hoy, v_hoy), 'pasaron');
+  if extract(isodow from v_hoy) < 7 then   -- los domingos no hay clases
+    perform pg_temp.falla(format($q$select solicitar_clase('Cálculo', 'x', 1, array[%s], '00:00', '00:30', %L, %L)$q$,
+                                 extract(isodow from v_hoy)::int, v_hoy, v_hoy), 'pasaron');
+  end if;
   c := solicitar_clase('Cálculo', 'Otro nombre', 1, array[1,2,3,4,5,6], '18:00', '20:00', v_hoy + 1, v_hoy + 3, null);
   perform pg_temp.ok(c.docente = 'Eva Docente' and c.docente_correo = 'eva@unal.edu.co' and c.equipos_pedidos is null,
                      'el docente es siempre quien solicita, con su correo; sin cantidad = los disponibles');
@@ -843,4 +845,20 @@ begin
   perform pg_temp.ok(mi_llegada_pendiente() is null and confirmar_llegada('123') ->> 'ya' = 'true', 'confirmar dos veces no falla');
   insert into llegada_intentos (usuario_id) select g from generate_series(1, 5);
   perform pg_temp.ok(confirmar_llegada('123456') ->> 'error' like 'Demasiados%', 'tras 5 códigos equivocados hay que esperar');
+end $$;
+
+-- 0016: pausar las reservas.
+do $$
+declare g uuid; e uuid;
+begin
+  select id into g from perfiles where correo = 'gil@unal.edu.co';
+  select id into e from equipos where codigo = 'UNAL-14';
+  update politicas set valor = '1' where clave = 'reservas_pausadas';
+  perform pg_temp.como('gil@unal.edu.co');
+  perform pg_temp.falla(format($q$insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values (%L, %L, now() + interval '500 hours', now() + interval '501 hours', 'PAE')$q$, e, g),
+                        'pausadas');
+  perform pg_temp.como('lab@unal.edu.co');
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values (e, g, now() + interval '500 hours', now() + interval '501 hours', 'PAE');
+  perform pg_temp.ok(true, 'con las reservas pausadas, el personal sí puede crear reservas');
+  update politicas set valor = '0' where clave = 'reservas_pausadas';
 end $$;

@@ -15,6 +15,8 @@ export interface Limites {
   maxAbsolutoHoras: number
   /** 0 = la persona desde la app · 1 = solo el personal · 2 = con el QR de la isla de Faro. */
   llegadaModo: number
+  /** Reservas nuevas pausadas (mudanza o mantenimiento general). */
+  reservasPausadas: boolean
   /** Reservas vigentes o futuras que puede tener cada usuario a la vez (el personal está exento); 0 = sin límite. */
   reservasALaVez: number
   /** Permite marcar reservas como uso compartido. */
@@ -32,6 +34,7 @@ const POR_DEFECTO: Limites = {
   excepcionMaxHoras: 720,
   maxAbsolutoHoras: 720,
   llegadaModo: 0,
+  reservasPausadas: false,
   reservasALaVez: 1,
   usoCompartido: true,
   recargar: async () => {}
@@ -59,6 +62,7 @@ export function PoliticasProvider({ children }: { children: ReactNode }) {
     () => ({
       maxHoras: valores.duracion_max_horas ?? POR_DEFECTO.maxHoras,
       llegadaModo: valores.llegada_modo ?? POR_DEFECTO.llegadaModo,
+      reservasPausadas: (valores.reservas_pausadas ?? 0) === 1,
       reservasALaVez: valores.reservas_activas_max ?? POR_DEFECTO.reservasALaVez,
       usoCompartido: (valores.uso_compartido ?? 1) === 1,
       maxExtension: valores.extension_max_horas ?? POR_DEFECTO.maxExtension,

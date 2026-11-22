@@ -88,6 +88,9 @@ Se puede ejecutar varias veces sin duplicar. La cédula no se migra.
 
 ## 6. El corte (un solo día)
 
+El paso a paso completo, con la pausa de la PWA y el borrado de los datos de prueba, está en
+**`docs/MUDANZA.md`**. Resumen:
+
 Los dos sistemas no se sincronizan, así que no deben aceptar reservas a la vez.
 
 1. Avise la fecha a los usuarios.

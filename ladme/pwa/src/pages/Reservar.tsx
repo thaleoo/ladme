@@ -6,7 +6,7 @@ import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion } fro
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { useTopeReservas } from '../lib/reservaVigente'
-import { esAdmin, useAuth } from '../context/AuthContext'
+import { esAdmin, esStaff, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import PerfilForm from '../components/PerfilForm'
 import Icon from '../components/Icon'
@@ -241,6 +241,15 @@ export default function Reservar() {
           <Link to="/clases">Solicite la sala para su clase</Link>.
         </p>
         <form onSubmit={enviar} className="card stack" noValidate>
+          {lim.reservasPausadas && !esStaff(perfil) && (
+            <div className="alert warn">
+              <Icon nombre="reloj" />
+              <div className="alert__body">
+                <strong>Las reservas están pausadas unos minutos</strong> mientras el laboratorio actualiza el sistema. Intente de nuevo
+                en un rato.
+              </div>
+            </div>
+          )}
           {sancion.hasta && <AvisoSancion hasta={sancion.hasta} />}
           {tope.alcanzado && (
             <div className="alert warn" role="status">

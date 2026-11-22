@@ -228,3 +228,16 @@ directo desde la PWA). Funciones del personal: `faro_panel`, `faro_codigo_vincul
 - `registrar_llegada()` ya no sirve a la persona en el modo 2 (sí al personal).
 - `_podia_llegar()`: con el modo 2, la inasistencia solo cuenta si Faro estuvo en línea en la reserva.
 - `revisar_llegadas()` corregida: numera en orden de fecha y los recordatorios llevan a `/llegada`.
+
+## Migración 0016 — Pausar las reservas
+
+`migrations/0016_pausar_reservas.sql`, después de 0015. Política `reservas_pausadas` (0/1): con 1, el
+trigger `reservas_pausa` impide crear reservas a quien no es del personal. Sirve para la mudanza
+(`docs/MUDANZA.md`) o un mantenimiento general.
+
+## Reiniciar los datos de prueba
+
+`reiniciar_datos_prueba.sql` borra toda la actividad (reservas, clases, avisos, registro, eventos de
+Faro, inasistencias, reservas importadas…) y conserva la configuración (equipos, políticas, cuentas,
+Faro vinculado, push y Telegram). Pide confirmación editando una línea. Se usa una vez, justo antes de
+importar la hoja (`docs/MUDANZA.md`).
