@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { guardarEquipo, listarEquipos } from '../../lib/api'
+import { guardarEquipo, listarEquipos, quitarFotoEquipo, subirFotoEquipo } from '../../lib/api'
 import { SISTEMAS, textoSO, type Equipo } from '../../lib/types'
 import { Cargando } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
@@ -31,6 +31,7 @@ interface Borrador {
   fecha_adquisicion: string
   especificaciones: string
   archivado: boolean
+  foto_url: string | null
 }
 
 function aBorrador(e?: Equipo): Borrador {
@@ -54,7 +55,8 @@ function aBorrador(e?: Equipo): Borrador {
     especificaciones: Object.entries(e?.especificaciones ?? {})
       .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
       .join('\n'),
-    archivado: e?.archivado ?? false
+    archivado: e?.archivado ?? false,
+    foto_url: e?.foto_url ?? null
   }
 }
 
@@ -65,6 +67,7 @@ export default function Equipos() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [b, setB] = useState<Borrador | null>(null)
+  const [subiendo, setSubiendo] = useState(false)
   const [ocupado, setOcupado] = useState(false)
   const [texto, setTexto] = useState('')
   const [filtro, setFiltro] = useState<'todos' | Equipo['estado'] | 'archivados'>('todos')
@@ -303,6 +306,37 @@ export default function Equipos() {
               {campo('marca', 'Marca')}
               {campo('modelo', 'Modelo')}
               {campo('ubicacion', 'Ubicación')}
+              {b.id && (
+                <div className="field foto-equipo-campo">
+                  <span className="field__label">Foto del equipo</span>
+                  <div className="foto-equipo-campo__fila">
+                    {b.foto_url ? <img src={b.foto_url} alt="" /> : <span className="foto-equipo-campo__vacia"><Icon nombre="monitor" /></span>}
+                    <span className="row tight">
+                      <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
+                        {subiendo ? 'Subiendo…' : b.foto_url ? 'Cambiar' : 'Subir foto'}
+                        <input type="file" accept="image/*" capture="environment" hidden disabled={subiendo}
+                               onChange={(e) => {
+                                 const f = e.target.files?.[0]
+                                 e.target.value = ''
+                                 if (!f || !b.id) return
+                                 setSubiendo(true)
+                                 void subirFotoEquipo(b.id, b.codigo, f)
+                                   .then((url) => { setB((x) => (x ? { ...x, foto_url: url } : x)); void cargar() })
+                                   .catch((err: unknown) => setError(err instanceof Error ? err.message : 'No se pudo subir la foto.'))
+                                   .finally(() => setSubiendo(false))
+                               }} />
+                      </label>
+                      {b.foto_url && (
+                        <button type="button" className="btn ghost sm" disabled={subiendo}
+                                onClick={() => b.id && void quitarFotoEquipo(b.id).then(() => { setB((x) => (x ? { ...x, foto_url: null } : x)); void cargar() })}>
+                          Quitar
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  <p className="help">Se ve en la ficha del equipo. Se reduce sola antes de subirla.</p>
+                </div>
+              )}
               <div className="field">
                 <span className="field__label">Lugar en el plano de la sala</span>
                 <div className="row tight">

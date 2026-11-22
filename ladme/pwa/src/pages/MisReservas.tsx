@@ -23,6 +23,7 @@ import {
   rangoCorto
 } from '../lib/format'
 import Inasistencias from '../components/Inasistencias'
+import MisSoftware from '../components/Software'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
@@ -393,6 +394,7 @@ export default function MisReservas() {
       )}
 
       <Inasistencias />
+      <MisSoftware />
 
       <div className="segmented" role="tablist" aria-label="Filtro de reservas">
         <button

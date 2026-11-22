@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AvisoSancion, useSancion } from '../components/Inasistencias'
-import { crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
+import { CamposSoftware, SOFTWARE_VACIO, alcanzaParaSoftware, type DatosSoftware } from '../components/Software'
+import { solicitarSoftware, crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
 import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
@@ -42,6 +43,8 @@ export default function Reservar() {
   const [desatendido, setDesatendido] = useState(false)
   const [mensaje, setMensaje] = useState('')
   const [compartida, setCompartida] = useState(false)
+  const [pideSoftware, setPideSoftware] = useState(false)
+  const [software, setSoftware] = useState<DatosSoftware>(SOFTWARE_VACIO)
   const [protegidos, setProtegidos] = useState<string[]>([])
   const [otrosProtegidos, setOtrosProtegidos] = useState('')
   const [ocupEquipo, setOcupEquipo] = useState<Ocupacion[]>([])
@@ -174,6 +177,14 @@ export default function Reservar() {
         mensaje: mensaje.trim() || undefined,
         idSolicitud
       })
+      if (pideSoftware && software.software.trim()) {
+        try {
+          await solicitarSoftware({ ...software, version: software.version || undefined, enlace: software.enlace || undefined, reserva: reserva.id })
+          toast.mostrar('Reserva creada y solicitud de software enviada al laboratorio.')
+        } catch (e) {
+          toast.mostrar(`La reserva quedó creada, pero la solicitud de software no se envió: ${e instanceof Error ? e.message : ''}`)
+        }
+      }
       if (compartida && desatendido) {
         const todos = [...protegidos, ...otrosProtegidos.split(',').map((x) => x.trim()).filter(Boolean)]
         try {
@@ -437,6 +448,25 @@ export default function Reservar() {
               placeholder="Nombre del proyecto, tutor, software que va a usar."
             />
           </div>
+
+          {!esLarga && (() => {
+            const alcanza = alcanzaParaSoftware(aIso(inicio), lim.softwareAnticipacion)
+            return (
+              <div className="stack software-reserva">
+                <label className="check-row">
+                  <input type="checkbox" checked={pideSoftware && alcanza} disabled={!alcanza}
+                         onChange={(e) => setPideSoftware(e.target.checked)} />
+                  <span>
+                    <strong>Necesito un software que no está instalado</strong>
+                    {alcanza
+                      ? 'El laboratorio lo gestiona con TI. Su reserva queda igual aunque no alcancen a instalarlo.'
+                      : `Para pedir software se necesitan ${lim.softwareAnticipacion} días hábiles: esta reserva empieza antes. Puede pedirlo para otra fecha desde Disponibilidad.`}
+                  </span>
+                </label>
+                {pideSoftware && alcanza && <CamposSoftware valor={software} cambiar={setSoftware} equipos={equipos} />}
+              </div>
+            )
+          })()}
 
           {!esLarga && (
             <label className="check-row">

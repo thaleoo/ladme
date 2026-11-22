@@ -4,13 +4,14 @@ import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Pestanas from '../components/Pestanas'
 import Icon, { type NombreIcono } from '../components/Icon'
-import { inasistenciasApeladas, listarClases, listarReportes, listarSolicitudes, verificacionesPendientes } from '../lib/api'
+import { inasistenciasApeladas, listarClases, listarReportes, listarSoftware, listarSolicitudes, verificacionesPendientes } from '../lib/api'
 import Errores from './admin/Errores'
 import Ronda from './admin/Ronda'
 import ReservasAdmin from './admin/ReservasAdmin'
 import Bloqueos from './admin/Bloqueos'
 import Solicitudes from './admin/Solicitudes'
 import Reportes from './admin/Reportes'
+import Software from './admin/Software'
 import Equipos from './admin/Equipos'
 import Estadisticas from './admin/Estadisticas'
 import Politicas from './admin/Politicas'
@@ -41,7 +42,8 @@ const GRUPOS = [
     secciones: [
       { id: 'faro', texto: 'Faro' },
       { id: 'equipos', texto: 'Inventario' },
-      { id: 'reportes', texto: 'Fallas' }
+      { id: 'reportes', texto: 'Fallas' },
+      { id: 'software', texto: 'Software' }
     ]
   },
   {
@@ -79,8 +81,9 @@ function usePendientes(): Record<string, number> {
       listarClases(true).then((l) => l.length).catch(() => 0),
       listarReportes().then((l) => l.filter((r) => r.estado === 'abierto' || r.estado === 'en_revision').length).catch(() => 0),
       verificacionesPendientes().then((l) => l.length).catch(() => 0),
-      inasistenciasApeladas().then((l) => l.length).catch(() => 0)
-    ]).then(([sol, cla, fal, ver, ape]) => vivo && setN({ solicitudes: sol + cla + ver + ape, reportes: fal }))
+      inasistenciasApeladas().then((l) => l.length).catch(() => 0),
+      listarSoftware({ abiertas: true }).then((l) => l.filter((x) => x.estado === 'pendiente').length).catch(() => 0)
+    ]).then(([sol, cla, fal, ver, ape, sw]) => vivo && setN({ solicitudes: sol + cla + ver + ape, reportes: fal, software: sw }))
     return () => {
       vivo = false
     }
@@ -202,6 +205,7 @@ export default function Admin() {
       {actual === 'reservas' && <ReservasAdmin />}
       {actual === 'bloqueos' && <Bloqueos />}
       {actual === 'reportes' && <Reportes />}
+      {actual === 'software' && <Software />}
       {actual === 'solicitudes' && <Solicitudes />}
       {actual === 'equipos' && <Equipos />}
       {actual === 'faro' && <Faro />}

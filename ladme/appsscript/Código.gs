@@ -3411,7 +3411,8 @@ function enviarChatPersonal_() {
 
 /**
  * Botones de cada aviso del chat (solo con el bot por webhook, que es quien los atiende):
- * aprobar o rechazar una clase, verificar a un docente, resolver la apelación de un strike.
+ * aprobar o rechazar una clase, verificar a un docente, resolver la apelación de un strike,
+ * avanzar una solicitud de software.
  */
 function botonesChat_(m) {
   var k = String(m.dedupe_key || ""), id;
@@ -3420,6 +3421,10 @@ function botonesChat_(m) {
   }
   if (m.tipo === "verificacion_docente" && (id = /^verif:(\d+)$/.exec(k))) {
     return [[{ text: "✅ Verificar docente", callback_data: "ve:" + id[1] }, { text: "✖ No", callback_data: "nv:" + id[1] }]];
+  }
+  if (m.tipo === "software_solicitud" && (id = /^soft:(\d+)$/.exec(k))) {
+    return [[{ text: "🛠 Enviada a TI", callback_data: "sT:" + id[1] }, { text: "✅ Instalado en…", callback_data: "sI:" + id[1] }],
+            [{ text: "✖ No instalar", callback_data: "sR:" + id[1] }]];
   }
   if (m.tipo === "inasistencia_apelacion" && (id = /^apel:(\d+)$/.exec(k))) {
     return [[{ text: "↩ Anular strike", callback_data: "an:" + id[1] }, { text: "Mantener", callback_data: "ma:" + id[1] }]];

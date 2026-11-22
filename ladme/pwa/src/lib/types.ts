@@ -38,6 +38,8 @@ export interface Equipo {
   /** Posición en el plano de la sala (columna y fila, desde 1). */
   plano_x?: number | null
   plano_y?: number | null
+  /** Foto del equipo (almacenamiento público «equipos»). */
+  foto_url?: string | null
 }
 
 export interface Reserva {
@@ -292,4 +294,26 @@ export interface Inasistencia {
   respuesta: string | null
   resuelto_en: string | null
   creado_en: string
+}
+
+export type EstadoSoftware = 'pendiente' | 'en_tramite' | 'instalado' | 'rechazada' | 'cancelada'
+
+/** Pedido de instalación de un programa (con o sin reserva). */
+export interface SolicitudSoftware {
+  id: number
+  solicitante: string
+  reserva_id: string | null
+  equipo_id: string | null
+  software: string
+  version: string | null
+  uso: string
+  enlace: string | null
+  para_fecha: string | null
+  estado: EstadoSoftware
+  equipos_instalados: string[]
+  respuesta: string | null
+  creado_en: string
+  actualizado_en: string
+  perfiles?: { nombre: string; correo: string } | null
+  equipos?: { codigo: string } | null
 }

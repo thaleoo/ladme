@@ -350,6 +350,18 @@ El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
 - El botón «Registrar llegada» de la app desaparece para las personas (sigue para el personal).
 - 5 códigos equivocados en 10 minutos bloquean los intentos un rato.
 
+## 21. Solicitudes de software, foto y plano en la ficha (migración 0017)
+
+- **Software que no está instalado:** casilla en «Nueva reserva» (si la reserva deja los días hábiles
+  de anticipación) y enlace en Disponibilidad para pedirlo sin reserva. Si algún equipo ya lo tiene,
+  la app lo sugiere. La persona ve el estado en Mis reservas y recibe avisos.
+- **Administración → Equipos → Software:** «Enviada a TI», «Instalado» (eligiendo equipos; el programa
+  queda en su lista) o «No se instalará» con motivo. En el chat llegan con botones.
+- **Ficha del equipo:** foto (se sube en Inventario, se reduce sola) y plano de la sala con el equipo
+  resaltado y el estado de los demás (usa columna y fila del Inventario).
+- Tras ejecutar 0017: pegar `Código.gs` (botones nuevos) y, si el bot ya está por webhook, volver a
+  desplegar la función `telegram-bot`.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

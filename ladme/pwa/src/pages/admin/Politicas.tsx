@@ -25,6 +25,7 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
   llegada_modo: { titulo: 'Quién registra la llegada (0 = la persona desde la app · 1 = solo el personal · 2 = con el QR de la isla de Faro)', unidad: '', min: 0, max: 2 },
   liberar_no_show_min: { titulo: 'Liberar sola una reserva sin llegada ni uso del PC (0 = nunca)', unidad: 'minutos', min: 0, max: 120 },
   faro_sesion_limpia: { titulo: 'Faro ofrece borrar los archivos de la persona al terminar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
+  software_anticipacion_dias: { titulo: 'Anticipación para pedir software', unidad: 'días hábiles', min: 0, max: 30 },
   reservas_pausadas: { titulo: 'Pausar las reservas nuevas (1 = pausadas, 0 = abiertas)', unidad: '', min: 0, max: 1 },
   inasistencias_activas: { titulo: 'Contar inasistencias y sancionar (1 = sí, 0 = no)', unidad: '', min: 0, max: 1 },
   inasistencia_ventana_dias: { titulo: 'Días en que se cuentan las inasistencias', unidad: 'días', min: 7, max: 365 },

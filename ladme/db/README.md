@@ -241,3 +241,15 @@ trigger `reservas_pausa` impide crear reservas a quien no es del personal. Sirve
 Faro, inasistencias, reservas importadas…) y conserva la configuración (equipos, políticas, cuentas,
 Faro vinculado, push y Telegram). Pide confirmación editando una línea. Se usa una vez, justo antes de
 importar la hoja (`docs/MUDANZA.md`).
+
+## Migración 0017 — Solicitudes de software y foto del equipo
+
+`migrations/0017_software_fotos.sql`, después de 0016.
+
+- `solicitudes_software` (pendiente → en_tramite → instalado / rechazada; la persona puede cancelar).
+  `solicitar_software()` con o sin reserva (la reserva no depende de la solicitud); exige
+  `software_anticipacion_dias` días hábiles (3). `actualizar_software()` (personal): al marcar
+  «instalado» agrega el programa a `equipos.software` de esos equipos. Avisos a la persona en cada
+  cambio; al chat sin datos personales y con botones (`telegram_ejecutar` suma software_tramite,
+  software_instalado —entiende «3 5 UNAL-07» o «sala»— y software_rechazar).
+- `equipos.foto_url` y el almacenamiento público `equipos` (solo el personal sube; 3 MB, webp/jpeg/png).

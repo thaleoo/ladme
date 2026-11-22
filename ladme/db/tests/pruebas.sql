@@ -862,3 +862,42 @@ begin
   perform pg_temp.ok(true, 'con las reservas pausadas, el personal sí puede crear reservas');
   update politicas set valor = '0' where clave = 'reservas_pausadas';
 end $$;
+
+-- 0017: solicitudes de software.
+do $$
+declare g uuid; e uuid; s solicitudes_software; r reservas; j jsonb; v_lejos date;
+begin
+  select id into g from perfiles where correo = 'gil@unal.edu.co';
+  select id into e from equipos where codigo = 'UNAL-14';
+  v_lejos := (now() at time zone 'America/Bogota')::date + 14;
+  perform pg_temp.como('gil@unal.edu.co');
+  perform pg_temp.falla($q$select solicitar_software('', 'Para la tesis de grado')$q$, 'qué software');
+  perform pg_temp.falla($q$select solicitar_software('QGIS', 'corto')$q$, '10 caracteres');
+  perform pg_temp.falla(format($q$select solicitar_software('QGIS', 'Mapas para la tesis de grado', null, null, null, null, %L)$q$,
+                               (now() at time zone 'America/Bogota')::date + 1), 'días hábiles');
+  s := solicitar_software('QGIS', 'Mapas para la tesis de grado', '3.34', null, null, 'unal-14', v_lejos);
+  perform pg_temp.ok(s.estado = 'pendiente' and s.equipo_id = e and s.para_fecha = v_lejos, 'se pide software sin reserva, para un equipo y una fecha');
+  perform pg_temp.ok(exists (select 1 from cola_chat where dedupe_key = 'soft:' || s.id and texto not like '%Gil%'), 'el chat recibe la solicitud sin datos personales');
+  perform pg_temp.falla(format('select actualizar_software(%s, %L)', s.id, 'en_tramite'), 'personal');
+  -- Con una reserva: la fecha es la de la reserva.
+  perform pg_temp.como('lab@unal.edu.co');
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values (e, g, now() + interval '20 days', now() + interval '20 days 2 hours', 'PAE') returning * into r;
+  perform pg_temp.como('gil@unal.edu.co');
+  perform pg_temp.ok((solicitar_software('Stata', 'Modelos de panel para la clase', null, null, r.id)).para_fecha = (r.inicio at time zone 'America/Bogota')::date,
+                     'con reserva, la fecha sale de la reserva');
+  -- El personal avanza la primera.
+  perform pg_temp.como('lab@unal.edu.co');
+  perform actualizar_software(s.id, 'en_tramite');
+  perform pg_temp.falla(format('select actualizar_software(%s, %L)', s.id, 'instalado'), 'qué equipos');
+  -- Desde el botón de Telegram, con los equipos escritos.
+  j := telegram_ejecutar(555, 'software_instalado', jsonb_build_object('id', s.id, 'motivo', '14 7'));
+  perform pg_temp.ok((j ->> 'ok')::boolean and (select equipos_instalados from solicitudes_software where id = s.id) = array['UNAL-07', 'UNAL-14'],
+                     'el botón «Instalado en…» de Telegram entiende «14 7»');
+  perform pg_temp.ok((select 'QGIS' = any (software) from equipos where codigo = 'UNAL-14'), 'el programa instalado se agrega al equipo');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where usuario_id = g and tipo = 'software_instalado'), 'la persona recibe el aviso de instalado');
+  perform pg_temp.falla(format('select actualizar_software(%s, %L)', s.id, 'rechazada'), 'ya está');
+  perform pg_temp.como('gil@unal.edu.co');
+  perform pg_temp.ok((select count(*) from solicitudes_software) = 2, 'cada persona ve sus solicitudes');
+  perform cancelar_software((select id from solicitudes_software where software = 'Stata'));
+  perform pg_temp.ok((select estado from solicitudes_software where software = 'Stata') = 'cancelada', 'la persona puede cancelar la suya');
+end $$;

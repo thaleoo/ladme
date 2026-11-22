@@ -9,6 +9,7 @@ import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion, type
 import ReporteFalla from '../components/ReporteFalla'
 import MiReserva from '../components/MiReserva'
 import AgendaEquipo from '../components/AgendaEquipo'
+import MapaSala from '../components/MapaSala'
 import { useTopeReservas } from '../lib/reservaVigente'
 import { conPunto, dia, fecha, hora, nuevoIdSolicitud } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
@@ -230,6 +231,16 @@ export default function FichaEquipo() {
         }
       />
 
+      {equipo.foto_url && (
+        <figure className="equipo-foto">
+          <img src={equipo.foto_url} alt={`Foto del ${equipo.codigo}`} loading="lazy" />
+          <figcaption>
+            <strong>{equipo.codigo}</strong>
+            <span>{[equipo.marca, equipo.modelo].filter(Boolean).join(' ') || equipo.nombre}</span>
+          </figcaption>
+        </figure>
+      )}
+
       <div className="stats stats--2">
         <div className={`stat ${libre ? 'ok' : 'warn'}`}>
           <div className="stat__label">
@@ -391,6 +402,8 @@ export default function FichaEquipo() {
         </div>
         <AgendaEquipo codigo={equipo.codigo} ocupacion={ocupacion} fueraDeServicio={equipo.estado !== 'activo'} />
       </section>
+
+      <MapaSala codigo={equipo.codigo} />
 
       <section className="card">
         <div className="row between" style={{ gap: 'var(--s3)' }}>

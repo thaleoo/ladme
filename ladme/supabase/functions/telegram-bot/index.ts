@@ -260,7 +260,10 @@ async function ejecutar(de: Usuario, accion: string, args: Record<string, unknow
     verificar: () => 'Docente verificado: ya puede pedir la sala para clases.',
     no_verificar: () => 'Verificación rechazada; la persona recibe el motivo.',
     anular: () => 'Inasistencia anulada; la persona recibe el aviso.',
-    mantener: () => 'Inasistencia mantenida; la persona recibe el motivo.'
+    mantener: () => 'Inasistencia mantenida; la persona recibe el motivo.',
+    software_tramite: () => `Solicitud de ${d.software} marcada como enviada a TI.`,
+    software_instalado: () => `${d.software} instalado en ${(d.equipos ?? []).join(', ')}; la persona recibe el aviso.`,
+    software_rechazar: () => `Solicitud de ${d.software} rechazada; la persona recibe el motivo.`
   }
   return { ok: true, texto: textos[accion]?.() ?? 'Hecho.', actor: r.actor }
 }
@@ -358,13 +361,16 @@ async function accion(cmd: string, args: string[], de: Usuario): Promise<{ texto
 }
 
 // ------------------------------------------------------------------ Botones
-const BOTONES: Record<string, { accion: string; motivo?: string; hecho: string }> = {
+const BOTONES: Record<string, { accion: string; motivo?: string; pedido?: string; minimo?: number; hecho: string }> = {
   ap: { accion: 'aprobar', hecho: '✅ Aprobada' },
   re: { accion: 'rechazar', motivo: 'rechazar la solicitud', hecho: '✖ Rechazada' },
   ve: { accion: 'verificar', hecho: '✅ Verificado' },
   nv: { accion: 'no_verificar', motivo: 'no verificar a esta persona como docente', hecho: '✖ No verificado' },
   an: { accion: 'anular', hecho: '↩ Strike anulado' },
-  ma: { accion: 'mantener', motivo: 'mantener la inasistencia', hecho: '• Strike mantenido' }
+  ma: { accion: 'mantener', motivo: 'mantener la inasistencia', hecho: '• Strike mantenido' },
+  sT: { accion: 'software_tramite', hecho: '🛠 Enviada a TI' },
+  sI: { accion: 'software_instalado', motivo: 'x', pedido: 'responda a este mensaje con los equipos donde quedó instalado (por ejemplo: 3 5 7, o «sala»).', minimo: 1, hecho: '✅ Instalado' },
+  sR: { accion: 'software_rechazar', motivo: 'no instalar este software', hecho: '✖ No instalado' }
 }
 
 async function boton(cq: Callback) {
@@ -390,11 +396,11 @@ async function boton(cq: Callback) {
   if (b.motivo) {
     // Pide el motivo como respuesta a un mensaje del bot; al llegar, ejecuta y actualiza el aviso.
     const pid = await pendiente(cq.from, `motivo:${b.accion}`, { id }, m)
-    const pedido = await enviar(`${nombreDe(cq.from)}, responda a este mensaje con el motivo para ${b.motivo}.`, undefined, {
-      reply_markup: { force_reply: true, input_field_placeholder: 'Motivo…' }
+    const pedido = await enviar(`${nombreDe(cq.from)}, ${b.pedido ?? `responda a este mensaje con el motivo para ${b.motivo}.`}`, undefined, {
+      reply_markup: { force_reply: true, input_field_placeholder: b.pedido ? 'Equipos…' : 'Motivo…' }
     })
     if (pedido && pid) await db.from('telegram_pendientes').update({ mensaje_id: pedido.message_id }).eq('id', pid)
-    return contestar(cq, 'Escriba el motivo respondiendo al mensaje del bot.')
+    return contestar(cq, b.pedido ? 'Escriba los equipos respondiendo al mensaje del bot.' : 'Escriba el motivo respondiendo al mensaje del bot.')
   }
   const r = await ejecutar(cq.from, b.accion, { id })
   if (!r.ok) return contestar(cq, r.texto, true)
@@ -409,12 +415,13 @@ async function motivo(m: Mensaje): Promise<boolean> {
   if (!p || !p.accion.startsWith('motivo:')) return false
   const acc = p.accion.slice(7)
   const texto = (m.text ?? '').trim()
-  if (texto.length < 5) {
-    await enviar('El motivo es muy corto. Toque el botón otra vez y escriba al menos 5 caracteres.')
+  const boton = Object.values(BOTONES).find((b) => b.accion === acc)
+  if (texto.length < (boton?.minimo ?? 5)) {
+    await enviar('La respuesta es muy corta. Toque el botón otra vez y escriba al menos 5 caracteres.')
     return true
   }
   const r = await ejecutar(m.from, acc, { ...p.args, motivo: texto })
-  const hecho = Object.values(BOTONES).find((b) => b.accion === acc)?.hecho ?? 'Hecho'
+  const hecho = boton?.hecho ?? 'Hecho'
   if (r.ok && p.origen) {
     await tg('editMessageText', {
       chat_id: p.origen.chat,

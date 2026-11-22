@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type {
-  Aviso, Clase, Equipo, EstadoClase, Inasistencia, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+  Aviso, Clase, Equipo, EstadoClase, EstadoSoftware, Inasistencia, SolicitudSoftware, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
 } from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
@@ -1159,4 +1159,81 @@ export async function confirmarLlegada(codigo: string): Promise<{ ok: boolean; e
   const { data, error } = await supabase.rpc('confirmar_llegada', { p_codigo: codigo })
   if (error) fail('No se pudo confirmar la asistencia', error)
   return data as { ok: boolean; error?: string; equipo?: string; ya?: boolean }
+}
+
+// ------------------------------------------------------------ Solicitudes de software
+export async function solicitarSoftware(s: {
+  software: string
+  uso: string
+  version?: string
+  enlace?: string
+  reserva?: string
+  equipo?: string
+  fecha?: string
+}): Promise<SolicitudSoftware> {
+  const { data, error } = await supabase.rpc('solicitar_software', {
+    p_software: s.software,
+    p_uso: s.uso,
+    p_version: s.version ?? null,
+    p_enlace: s.enlace ?? null,
+    p_reserva: s.reserva ?? null,
+    p_equipo: s.equipo ?? null,
+    p_fecha: s.fecha ?? null
+  })
+  if (error) fail('No se pudo enviar la solicitud de software', error)
+  return data as SolicitudSoftware
+}
+
+/** Las propias (o todas, para el personal). Con `abiertas`, solo las que esperan algo. */
+export async function listarSoftware(opciones: { mias?: string; abiertas?: boolean } = {}): Promise<SolicitudSoftware[]> {
+  let q = supabase
+    .from('solicitudes_software')
+    .select('*, perfiles!solicitudes_software_solicitante_fkey(nombre, correo), equipos(codigo)')
+    .order('creado_en', { ascending: false })
+    .limit(50)
+  if (opciones.mias) q = q.eq('solicitante', opciones.mias)
+  if (opciones.abiertas) q = q.in('estado', ['pendiente', 'en_tramite'])
+  const { data, error } = await q
+  if (error) fail('No se pudieron cargar las solicitudes de software', error)
+  return (data ?? []) as SolicitudSoftware[]
+}
+
+export async function cancelarSoftware(id: number): Promise<void> {
+  const { error } = await supabase.rpc('cancelar_software', { p_id: id })
+  if (error) fail('No se pudo cancelar', error)
+}
+
+export async function actualizarSoftware(id: number, estado: Exclude<EstadoSoftware, 'pendiente' | 'cancelada'>, equipos?: string[], respuesta?: string): Promise<void> {
+  const { error } = await supabase.rpc('actualizar_software', { p_id: id, p_estado: estado, p_equipos: equipos ?? null, p_respuesta: respuesta ?? null })
+  if (error) fail('No se pudo actualizar la solicitud', error)
+}
+
+// ------------------------------------------------------------ Foto del equipo
+/** Reduce la imagen (máx. 1600 px, WebP) antes de subirla: las fotos del celular pesan varios MB. */
+async function reducirImagen(archivo: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(archivo)
+  const escala = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
+  const lienzo = document.createElement('canvas')
+  lienzo.width = Math.round(bitmap.width * escala)
+  lienzo.height = Math.round(bitmap.height * escala)
+  lienzo.getContext('2d')?.drawImage(bitmap, 0, 0, lienzo.width, lienzo.height)
+  return await new Promise((resolver, rechazar) =>
+    lienzo.toBlob((b) => (b ? resolver(b) : rechazar(new Error('No se pudo procesar la imagen.'))), 'image/webp', 0.82)
+  )
+}
+
+export async function subirFotoEquipo(equipoId: string, codigo: string, archivo: File): Promise<string> {
+  const blob = await reducirImagen(archivo)
+  const ruta = `${codigo}-${Date.now()}.webp`
+  const { error } = await supabase.storage.from('equipos').upload(ruta, blob, { contentType: 'image/webp', upsert: false })
+  if (error) fail('No se pudo subir la foto', error)
+  const url = supabase.storage.from('equipos').getPublicUrl(ruta).data.publicUrl
+  const { error: e2 } = await supabase.from('equipos').update({ foto_url: url }).eq('id', equipoId)
+  if (e2) fail('No se pudo guardar la foto', e2)
+  return url
+}
+
+export async function quitarFotoEquipo(equipoId: string): Promise<void> {
+  const { error } = await supabase.from('equipos').update({ foto_url: null }).eq('id', equipoId)
+  if (error) fail('No se pudo quitar la foto', error)
 }

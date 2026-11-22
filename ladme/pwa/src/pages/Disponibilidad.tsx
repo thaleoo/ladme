@@ -9,6 +9,7 @@ import Icon from '../components/Icon'
 import Modal from '../components/Modal'
 import Pestanas from '../components/Pestanas'
 import Deslizar from '../components/Deslizar'
+import { PedirSoftware } from '../components/Software'
 import { guardarCache, leerCache } from '../lib/cacheLocal'
 
 
@@ -192,6 +193,7 @@ export default function Disponibilidad() {
   const categorias = useMemo(() => [...new Set(equipos.map((e) => e.categoria))].sort(), [equipos])
   const sistemas = useMemo(() => [...new Set(equipos.map((e) => e.sistema_operativo).filter(Boolean) as string[])].sort(), [equipos])
   // Programas que Faro detectó en los equipos (R, Python, SPSS…), para filtrar.
+  const [pedirSoftware, setPedirSoftware] = useState(false)
   const programas = useMemo(() => [...new Set(equipos.flatMap((e) => e.software ?? []))].sort((a, b) => a.localeCompare(b, 'es')), [equipos])
   const cuenta = (s: Situacion) => celdas.filter((c) => c.situacion === s).length
   const libres = cuenta('libre')
@@ -303,17 +305,25 @@ export default function Disponibilidad() {
         </div>
       )}
 
-      {programas.length > 0 && (
-        <div className="field" style={{ maxWidth: 320 }}>
-          <label className="field__label" htmlFor="filtro-programa">Programa instalado</label>
-          <select id="filtro-programa" value={programa} onChange={(e) => setPrograma(e.target.value)}>
-            <option value="TODOS">Cualquier programa</option>
-            {programas.map((p) => (
-              <option key={p} value={p}>{p} ({equipos.filter((e) => (e.software ?? []).includes(p)).length})</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="filtro-programa">
+        {programas.length > 0 && (
+          <div className="field" style={{ maxWidth: 320, flex: '1 1 240px' }}>
+            <label className="field__label" htmlFor="filtro-programa">Programa instalado</label>
+            <select id="filtro-programa" value={programa} onChange={(e) => setPrograma(e.target.value)}>
+              <option value="TODOS">Cualquier programa</option>
+              {programas.map((p) => (
+                <option key={p} value={p}>{p} ({equipos.filter((e) => (e.software ?? []).includes(p)).length})</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {!staff && (
+          <button type="button" className="link-btn small pedir-software" onClick={() => setPedirSoftware(true)}>
+            <Icon nombre="mas2" width={15} height={15} /> ¿Necesita un software que no está instalado?
+          </button>
+        )}
+      </div>
+      <PedirSoftware abierto={pedirSoftware} cerrar={() => setPedirSoftware(false)} equipos={equipos} />
 
       {!staff && (espera ? (
         <div className="alert info">
