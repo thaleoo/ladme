@@ -252,6 +252,7 @@ export default function Credencial() {
             <div>
               <dt>Actividad</dt>
               <dd>{reserva.actividad ?? '—'}</dd>
+              {reserva.docente && <dd className="pase__sub">{reserva.docente}</dd>}
             </div>
             <div>
               <dt>Reserva</dt>

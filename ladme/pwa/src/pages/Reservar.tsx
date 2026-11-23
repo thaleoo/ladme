@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AvisoSancion, useSancion } from '../components/Inasistencias'
 import { CamposSoftware, SOFTWARE_VACIO, alcanzaParaSoftware, type DatosSoftware } from '../components/Software'
+import CampoDocente, { docenteRecordado, recordarDocente, validarDocente } from '../components/CampoDocente'
 import { solicitarSoftware, crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
-import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion } from '../lib/types'
+import { ACTIVIDADES, perfilCompleto, pideDocente, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { useTopeReservas } from '../lib/reservaVigente'
@@ -39,6 +40,7 @@ export default function Reservar() {
     const a = params.get('actividad') ?? ''
     return (ACTIVIDADES as readonly string[]).includes(a) ? a : ''
   })
+  const [docente, setDocente] = useState(() => params.get('docente') || docenteRecordado(actividad))
   const [detalle, setDetalle] = useState('')
   const [desatendido, setDesatendido] = useState(false)
   const [mensaje, setMensaje] = useState('')
@@ -149,6 +151,12 @@ export default function Reservar() {
     if (problema) return setError(problema)
     if (!equipo) return setError('Seleccione un equipo.')
     if (!actividad) return setError('Seleccione el tipo de actividad.')
+    const conDocente = pideDocente(actividad)
+    if (conDocente) {
+      const falta = validarDocente(docente)
+      if (falta) return setError(falta)
+    }
+    const docenteFinal = conDocente ? docente.trim().replace(/\s+/g, ' ') : undefined
     if (esLarga && justificacion.trim().length < 10) {
       return setError('Explique por qué necesita más tiempo (mínimo 10 caracteres).')
     }
@@ -161,8 +169,10 @@ export default function Reservar() {
           fin: aIso(fin),
           actividad,
           detalle: detalle.trim() || undefined,
-          justificacion: justificacion.trim()
+          justificacion: justificacion.trim(),
+          docente: docenteFinal
         })
+        if (docenteFinal) recordarDocente(actividad, docenteFinal)
         toast.mostrar('Solicitud enviada. La administración le responderá por aquí y por correo.')
         navigate('/mis-reservas', { replace: true })
         return
@@ -175,8 +185,10 @@ export default function Reservar() {
         detalle: detalle.trim() || undefined,
         desatendido,
         mensaje: mensaje.trim() || undefined,
-        idSolicitud
+        idSolicitud,
+        docente: docenteFinal
       })
+      if (docenteFinal) recordarDocente(actividad, docenteFinal)
       if (pideSoftware && software.software.trim()) {
         try {
           await solicitarSoftware({ ...software, version: software.version || undefined, enlace: software.enlace || undefined, reserva: reserva.id })
@@ -320,7 +332,14 @@ export default function Reservar() {
               <label className="field__label" htmlFor="actividad">
                 Tipo de actividad
               </label>
-              <select id="actividad" value={actividad} onChange={(e) => setActividad(e.target.value)}>
+              <select
+                id="actividad"
+                value={actividad}
+                onChange={(e) => {
+                  setActividad(e.target.value)
+                  if (pideDocente(e.target.value) && !docente.trim()) setDocente(docenteRecordado(e.target.value))
+                }}
+              >
                 <option value="" disabled>
                   Seleccione
                 </option>
@@ -329,6 +348,12 @@ export default function Reservar() {
                 ))}
               </select>
             </div>
+
+            {pideDocente(actividad) && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <CampoDocente id="docente" actividad={actividad} valor={docente} onCambio={setDocente} />
+              </div>
+            )}
 
             <div className="field">
               <label className="field__label" htmlFor="inicio">

@@ -362,6 +362,22 @@ El código ya está; falta desplegarlo una vez (docs/DESPLIEGUE.md §4):
 - Tras ejecutar 0017: pegar `Código.gs` (botones nuevos) y, si el bot ya está por webhook, volver a
   desplegar la función `telegram-bot`.
 
+## 22. Detalle completo de las reservas y docente responsable (migración 0018)
+
+- **Administración → Reservas:** cada fila muestra titular, correo, tipo de usuario, programa y matrícula,
+  actividad y docente, detalle y marcas (llegó a tal hora, liberada, desatendido, compartida, larga,
+  extendida, clase, migrada). Filtro por actividad, búsqueda también por docente y matrícula, CSV con todas
+  las columnas. Las reservas migradas que su titular aún no reclama aparecen con su nombre original.
+  Los filtros se conservan al volver.
+- **Detalle (`/admin/reservas/:id`):** se abre tocando la fila. Resumen (reservado, llegada y minutos de
+  retraso, uso real, extensiones), uso, origen (reserva larga, clase o migración), titular y su historial
+  (reservas, inasistencias), equipo con foto, software pedido, fallas reportadas y una línea de tiempo que
+  junta los cambios de la reserva (y quién los hizo), Faro, inasistencias, software y fallas. Las acciones
+  (llegó, extender, liberar, cancelar) y la credencial están arriba.
+- **Docente responsable:** campo obligatorio al elegir Trabajo de grado, PAE o Semilleros, en «Nueva
+  reserva», en la reserva rápida de la ficha y en las reservas largas. Sugiere los docentes ya usados y los
+  verificados, y recuerda el último por actividad. Se ve en la credencial y en Solicitudes.
+
 ## Qué queda fuera
 
 - **Pase en Google/Apple Wallet**: descartado (ROADMAP C-01). La credencial vive en la PWA y se actualiza sola.

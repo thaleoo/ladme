@@ -5,11 +5,12 @@ import {
   type EstadoMantenimientoEquipo
 } from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { ACTIVIDADES, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
+import { ACTIVIDADES, pideDocente, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
 import MiReserva from '../components/MiReserva'
 import AgendaEquipo from '../components/AgendaEquipo'
 import MapaSala from '../components/MapaSala'
+import CampoDocente, { docenteRecordado, recordarDocente, validarDocente } from '../components/CampoDocente'
 import { useTopeReservas } from '../lib/reservaVigente'
 import { conPunto, dia, fecha, hora, nuevoIdSolicitud } from '../lib/format'
 import PageHeader, { Cargando } from '../components/PageHeader'
@@ -93,6 +94,7 @@ export default function FichaEquipo() {
   }
   const [horasRapida, setHorasRapida] = useState(2)
   const [actividad, setActividad] = useState(() => localStorage.getItem(CLAVE_ACTIVIDAD) ?? '')
+  const [docente, setDocente] = useState(() => docenteRecordado(localStorage.getItem(CLAVE_ACTIVIDAD) ?? ''))
   const [desatendido, setDesatendido] = useState(false)
   const [mensaje, setMensaje] = useState('')
   const [texto, setTexto] = useState('')
@@ -103,6 +105,12 @@ export default function FichaEquipo() {
   async function reservarYa() {
     if (!equipo) return
     if (!actividad) return setErrorDialogo('Seleccione el tipo de actividad.')
+    const conDocente = pideDocente(actividad)
+    if (conDocente) {
+      const falta = validarDocente(docente)
+      if (falta) return setErrorDialogo(falta)
+    }
+    const docenteFinal = conDocente ? docente.trim().replace(/\s+/g, ' ') : undefined
     setOcupado(true)
     setErrorDialogo(null)
     try {
@@ -114,8 +122,10 @@ export default function FichaEquipo() {
         actividad,
         desatendido,
         mensaje: desatendido ? mensaje.trim() || undefined : undefined,
-        idSolicitud
+        idSolicitud,
+        docente: docenteFinal
       })
+      if (docenteFinal) recordarDocente(actividad, docenteFinal)
       // Está frente al equipo: la llegada queda registrada de una vez.
       await registrarLlegada(r.id).catch(() => undefined)
       localStorage.setItem(CLAVE_ACTIVIDAD, actividad)
@@ -488,7 +498,14 @@ export default function FichaEquipo() {
               <label className="field__label" htmlFor="rapida-actividad">
                 Tipo de actividad
               </label>
-              <select id="rapida-actividad" value={actividad} onChange={(e) => setActividad(e.target.value)}>
+              <select
+                id="rapida-actividad"
+                value={actividad}
+                onChange={(e) => {
+                  setActividad(e.target.value)
+                  if (pideDocente(e.target.value) && !docente.trim()) setDocente(docenteRecordado(e.target.value))
+                }}
+              >
                 <option value="" disabled>
                   Seleccione
                 </option>
@@ -497,6 +514,7 @@ export default function FichaEquipo() {
                 ))}
               </select>
             </div>
+            {pideDocente(actividad) && <CampoDocente id="rapida-docente" actividad={actividad} valor={docente} onCambio={setDocente} />}
             <label className="check-row">
               <input type="checkbox" checked={desatendido} onChange={(e) => setDesatendido(e.target.checked)} />
               <span>

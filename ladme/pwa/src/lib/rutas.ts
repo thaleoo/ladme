@@ -56,6 +56,7 @@ export const Paginas = {
   Clases: perezosa(cargadores['/clases']),
   ClaseDetalle: perezosa(() => cargadores['/clases']().then((m) => ({ default: m.ClaseDetalle }))),
   AprobarClase: perezosa(() => import('../pages/admin/AprobarClase')),
+  ReservaDetalle: perezosa(() => import('../pages/admin/ReservaDetalle')),
   ConfirmarAsistencia: perezosa(() => import('../pages/ConfirmarAsistencia')),
   Admin: perezosa(cargadores['/admin']),
   Mantenimiento: perezosa(cargadores['/mantenimiento']),

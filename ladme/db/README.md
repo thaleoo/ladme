@@ -253,3 +253,17 @@ importar la hoja (`docs/MUDANZA.md`).
   cambio; al chat sin datos personales y con botones (`telegram_ejecutar` suma software_tramite,
   software_instalado —entiende «3 5 UNAL-07» o «sala»— y software_rechazar).
 - `equipos.foto_url` y el almacenamiento público `equipos` (solo el personal sube; 3 MB, webp/jpeg/png).
+
+## Migración 0018 — Detalle de cada reserva y docente responsable
+
+`migrations/0018_detalle_reservas.sql`, después de 0017.
+
+- `reservas.docente` y `solicitudes_excepcion.docente`. Obligatorio (3–120 caracteres) cuando la actividad
+  es Trabajo de grado, PAE o Semilleros (`_actividad_pide_docente`). `crear_reserva` y `solicitar_excepcion`
+  ganan `p_docente` al final (con valor por omisión, así que las llamadas anteriores siguen sirviendo para las
+  demás actividades); `resolver_excepcion` lo pasa a la reserva. Las reservas anteriores e importadas no lo exigen.
+- `docentes_sugeridos()`: nombres para autocompletar (los que la persona ya usó y los docentes verificados).
+- `reserva_detalle(id)` (solo personal): reserva, titular, equipo, reserva larga, clase, migración, historial con
+  quién hizo cada cambio y qué cambió, eventos de Faro durante la reserva, inasistencia, software pedido y fallas.
+- `grant select on reservas_importadas` (la política existente lo limita al personal) para mostrar el titular
+  original de las reservas migradas en el panel.

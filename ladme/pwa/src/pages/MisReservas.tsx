@@ -269,7 +269,7 @@ export default function MisReservas() {
     if (!vigente && r.equipos?.codigo)
       acciones.push({ id: 'otra', nodo: (
         <Link key="otra" className="btn ghost sm"
-              to={`/reservar?equipo=${r.equipos.codigo}&actividad=${encodeURIComponent(r.actividad ?? '')}&horas=${Math.min(horasEntre(r.inicio, r.fin), lim.maxHoras).toFixed(1)}`}>
+              to={`/reservar?equipo=${r.equipos.codigo}&actividad=${encodeURIComponent(r.actividad ?? '')}${r.docente ? `&docente=${encodeURIComponent(r.docente)}` : ''}&horas=${Math.min(horasEntre(r.inicio, r.fin), lim.maxHoras).toFixed(1)}`}>
           <Icon nombre="actualizar" /> Reservar otra vez
         </Link>) })
     const visibles = acciones.slice(0, 2)

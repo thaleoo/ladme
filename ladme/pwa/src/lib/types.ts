@@ -53,6 +53,8 @@ export interface Reserva {
   estado: 'activa' | 'cancelada'
   estado_vigente?: string
   actividad: string | null
+  /** Docente responsable (obligatorio en Trabajo de grado, PAE y Semilleros). */
+  docente?: string | null
   detalle: string | null
   desatendido: boolean
   mensaje_llegada: string | null
@@ -71,6 +73,10 @@ export interface Reserva {
   creado_en: string
   equipos?: { codigo: string; nombre: string; ubicacion: string | null } | null
   perfiles?: { nombre: string; correo: string; programa: string | null } | null
+  clase_id?: number | null
+  tipo_usuario?: string | null
+  /** Solo en el panel: la reserva vino del sistema anterior (titular original). */
+  reservas_importadas?: Array<{ nombre_titular: string | null; correo_titular: string | null; reclamada_en: string | null }>
 }
 
 export interface Ocupacion {
@@ -134,6 +140,7 @@ export interface Solicitud {
   inicio: string
   fin: string
   actividad: string | null
+  docente?: string | null
   detalle: string | null
   justificacion: string
   estado: 'pendiente' | 'aprobada' | 'rechazada' | 'retirada'
@@ -171,6 +178,10 @@ export interface Politica {
 }
 
 export const ACTIVIDADES = ['Docencia', 'Investigación', 'PAE', 'Semilleros', 'Trabajo de grado', 'Otro'] as const
+
+/** Actividades que exigen el docente responsable (igual que _actividad_pide_docente en la base). */
+export const ACTIVIDADES_CON_DOCENTE: readonly string[] = ['Trabajo de grado', 'PAE', 'Semilleros']
+export const pideDocente = (actividad: string | null | undefined) => !!actividad && ACTIVIDADES_CON_DOCENTE.includes(actividad)
 export const TIPOS_USUARIO = ['Estudiante', 'Docente/Investigador'] as const
 export const PROGRAMAS = [
   'Estadística',

@@ -39,17 +39,22 @@ begin
 
   -- Perfil y actividad obligatorios.
   perform pg_temp.como('ana@unal.edu.co');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'PAE')$q$, t0, t0 + interval '2 hours'), 'Complete su perfil');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'Docencia')$q$, t0, t0 + interval '2 hours'), 'Complete su perfil');
   update perfiles set tipo_usuario = 'Estudiante', programa = 'Ingeniería Mecatrónica', matricula = 'Décima matrícula' where correo = 'ana@unal.edu.co';
   perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'Fiesta')$q$, t0, t0 + interval '2 hours'), 'tipo de actividad');
 
-  r := crear_reserva('UNAL-01', t0, t0 + interval '2 hours', 'Trabajo de grado', 'Tesis', true, 'No apagar', 'sol-0000000000000001');
+  -- 0018: TDG, PAE y Semilleros exigen el docente responsable.
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'Trabajo de grado', 'Tesis')$q$, t0, t0 + interval '2 hours'), 'docente responsable');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'Semilleros', null, false, null, null, '  ')$q$, t0, t0 + interval '2 hours'), 'docente responsable');
+  r := crear_reserva('UNAL-01', t0, t0 + interval '2 hours', 'Trabajo de grado', 'Tesis', true, 'No apagar', 'sol-0000000000000001', '  Marta   Ruiz ');
+  perform pg_temp.ok(r.docente = 'Marta Ruiz', 'el docente se guarda limpio');
   perform pg_temp.ok(r.programa = 'Ingeniería Mecatrónica' and r.matricula = 'Décima matrícula', 'la reserva congela programa y matrícula');
+  perform pg_temp.ok(docentes_sugeridos() ->> 0 = 'Marta Ruiz', 'el docente ya usado se sugiere primero');
   perform pg_temp.ok((crear_reserva('UNAL-01', t0, t0 + interval '2 hours', 'Trabajo de grado', null, false, null, 'sol-0000000000000001')).id = r.id, 'reintento con el mismo id no duplica');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'PAE')$q$, t0 + interval '1 hour', t0 + interval '3 hours'), 'ya está reservado');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-01', %L, %L, 'Docencia')$q$, t0 + interval '1 hour', t0 + interval '3 hours'), 'ya está reservado');
 
   -- Límites: usuario y laboratorista no los saltan; administrador sí.
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-02', %L, %L, 'PAE')$q$, t0, t0 + interval '169 hours'), 'Supera el máximo');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-02', %L, %L, 'Docencia')$q$, t0, t0 + interval '169 hours'), 'Supera el máximo');
   perform pg_temp.como('lab@unal.edu.co');
   perform pg_temp.falla(format($q$select crear_reserva('UNAL-02', %L, %L, 'Docencia')$q$, t0, t0 + interval '169 hours'), 'Supera el máximo');
   perform pg_temp.como('admin@unal.edu.co');
@@ -79,7 +84,7 @@ begin
   perform pg_temp.ok((select count(*) from cola_notificaciones where usuario_id = auth.uid() and leido_en is null) = 0, 'marcar avisos como leídos');
 
   -- Contacto anónimo al titular (reserva en curso).
-  r := crear_reserva('UNAL-03', now(), now() + interval '3 hours', 'PAE');
+  r := crear_reserva('UNAL-03', now(), now() + interval '3 hours', 'Docencia');
   perform pg_temp.falla($q$select contactar_titular('UNAL-03', 'hola')$q$, 'Usted es quien');
   perform pg_temp.como('beto@unal.edu.co');
   perform contactar_titular('UNAL-03', E'¿Le falta\nmucho?');
@@ -116,14 +121,16 @@ begin
 
   -- Solicitud de reserva larga.
   perform pg_temp.como('beto@unal.edu.co');
-  perform pg_temp.falla(format($q$select solicitar_excepcion('UNAL-07', %L, %L, 'PAE', null, 'Necesito correr un modelo largo')$q$, t0, t0 + interval '10 hours'), 'no necesita solicitud');
-  s := solicitar_excepcion('UNAL-07', t0, t0 + interval '300 hours', 'Trabajo de grado', null, 'Entrenamiento de 12 días para la tesis');
+  perform pg_temp.falla(format($q$select solicitar_excepcion('UNAL-07', %L, %L, 'Docencia', null, 'Necesito correr un modelo largo')$q$, t0, t0 + interval '10 hours'), 'no necesita solicitud');
+  perform pg_temp.falla(format($q$select solicitar_excepcion('UNAL-07', %L, %L, 'Trabajo de grado', null, 'Entrenamiento de 12 días para la tesis')$q$, t0, t0 + interval '300 hours'), 'docente responsable');
+  s := solicitar_excepcion('UNAL-07', t0, t0 + interval '300 hours', 'Trabajo de grado', null, 'Entrenamiento de 12 días para la tesis', 'Luis Pérez');
   perform pg_temp.falla(format($q$select resolver_excepcion(%L, true)$q$, s.id), 'Solo un administrador');
   perform pg_temp.como('admin@unal.edu.co');
   s := resolver_excepcion(s.id, true, 'Aprobado por el comité');
   perform pg_temp.ok(s.estado = 'aprobada' and (select excepcion and usuario_id = s.usuario_id from reservas where id = s.reserva_id), 'aprobar crea la reserva a nombre del solicitante');
+  perform pg_temp.ok((select docente from reservas where id = s.reserva_id) = 'Luis Pérez', 'el docente de la solicitud pasa a la reserva');
   perform pg_temp.como('beto@unal.edu.co');
-  s := solicitar_excepcion('UNAL-08', t0, t0 + interval '200 hours', 'Trabajo de grado', null, 'Otra corrida larga de la tesis');
+  s := solicitar_excepcion('UNAL-08', t0, t0 + interval '200 hours', 'Trabajo de grado', null, 'Otra corrida larga de la tesis', 'Luis Pérez');
   perform pg_temp.como('admin@unal.edu.co');
   perform pg_temp.falla(format($q$select resolver_excepcion(%L, false, '')$q$, s.id), 'motivo del rechazo');
   s := resolver_excepcion(s.id, false, 'Equipo comprometido para un curso');
@@ -152,9 +159,9 @@ begin
 
   -- 0003: reglamento, reportes, alerta de liberación, valoración, categorías.
   perform pg_temp.como('beto@unal.edu.co');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-12', %L, %L, 'PAE')$q$, t0, t0 + interval '1 hour'), 'aceptar el reglamento');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-12', %L, %L, 'Docencia')$q$, t0, t0 + interval '1 hour'), 'aceptar el reglamento');
   perform aceptar_reglamento();
-  r := crear_reserva('UNAL-12', now() - interval '1 minute', now() + interval '1 hour', 'PAE');
+  r := crear_reserva('UNAL-12', now() - interval '1 minute', now() + interval '1 hour', 'Docencia');
   perform pg_temp.ok(r.id is not null, 'tras aceptar el reglamento se puede reservar');
   perform pg_temp.falla($q$select reportar_falla('UNAL-12', 'Magia', 'No prende')$q$, 'tipo de problema');
   perform reportar_falla('UNAL-12', 'No enciende', E'El equipo no da\nvideo');
@@ -284,7 +291,7 @@ begin
   perform pg_temp.ok(j -> 'omitidos' ? 'UNAL-16' and j -> 'equipos' ? 'UNAL-08',
                      'el modo clase omite los equipos con reserva y bloquea los demás');
   perform pg_temp.como('ana@unal.edu.co');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-08', %L, %L, 'PAE')$q$, now() + interval '5 minutes', now() + interval '30 minutes'), '');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-08', %L, %L, 'Docencia')$q$, now() + interval '5 minutes', now() + interval '30 minutes'), '');
   perform pg_temp.como('lab@unal.edu.co');
   perform pg_temp.ok(faro_clase_terminar(null) = 1, 'terminar la clase libera los equipos');
   perform pg_temp.falla($q$select faro_clase(null, 5, 'Corta')$q$, 'entre 15 minutos');
@@ -415,19 +422,19 @@ begin
   update perfiles set reglamento_aceptado_en = now(), tipo_usuario = 'Estudiante', programa = 'Biología', matricula = 'Novena matrícula'
    where correo = 'caro@unal.edu.co';
   perform pg_temp.como('caro@unal.edu.co');
-  r := crear_reserva('UNAL-15', t0, t0 + interval '2 hours', 'PAE');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-16', %L, %L, 'PAE')$q$, t0 + interval '5 hours', t0 + interval '6 hours'), 'Solo se permite una a la vez');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-16', %L, %L, 'PAE')$q$, t0, t0 + interval '2 hours'), 'UNAL-15');
+  r := crear_reserva('UNAL-15', t0, t0 + interval '2 hours', 'Docencia');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-16', %L, %L, 'Docencia')$q$, t0 + interval '5 hours', t0 + interval '6 hours'), 'Solo se permite una a la vez');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-16', %L, %L, 'Docencia')$q$, t0, t0 + interval '2 hours'), 'UNAL-15');
   perform cancelar_reserva(r.id, 'cambio de planes');
-  r2 := crear_reserva('UNAL-16', t0 + interval '5 hours', t0 + interval '6 hours', 'PAE');
+  r2 := crear_reserva('UNAL-16', t0 + interval '5 hours', t0 + interval '6 hours', 'Docencia');
   perform pg_temp.ok(r2.id is not null, 'al cancelar la reserva puede hacer otra');
   -- Una reserva ya terminada no cuenta.
   update reservas set inicio = now() - interval '3 hours', fin = now() - interval '1 hour' where id = r2.id;
-  r := crear_reserva('UNAL-14', t0, t0 + interval '1 hour', 'PAE');
+  r := crear_reserva('UNAL-14', t0, t0 + interval '1 hour', 'Docencia');
   perform pg_temp.ok(r.id is not null, 'una reserva terminada no cuenta para el límite');
   -- Reintento con el mismo id de solicitud: devuelve la misma reserva, no choca con el límite.
   update reservas set id_solicitud = 'sol-0000000000000099' where id = r.id;
-  perform pg_temp.ok((crear_reserva('UNAL-14', t0, t0 + interval '1 hour', 'PAE', null, false, null, 'sol-0000000000000099')).id = r.id,
+  perform pg_temp.ok((crear_reserva('UNAL-14', t0, t0 + interval '1 hour', 'Docencia', null, false, null, 'sol-0000000000000099')).id = r.id,
                      'el reintento de la misma reserva no choca con el límite');
   -- El personal queda exento.
   perform pg_temp.como('lab@unal.edu.co');
@@ -437,8 +444,8 @@ begin
   -- Con la política en 2, se permiten dos.
   update politicas set valor = '2' where clave = 'reservas_activas_max';
   perform pg_temp.como('caro@unal.edu.co');
-  r := crear_reserva('UNAL-16', t0 + interval '8 hours', t0 + interval '9 hours', 'PAE');
-  perform pg_temp.falla(format($q$select crear_reserva('UNAL-15', %L, %L, 'PAE')$q$, t0 + interval '10 hours', t0 + interval '11 hours'), 'el máximo permitido');
+  r := crear_reserva('UNAL-16', t0 + interval '8 hours', t0 + interval '9 hours', 'Docencia');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-15', %L, %L, 'Docencia')$q$, t0 + interval '10 hours', t0 + interval '11 hours'), 'el máximo permitido');
   update politicas set valor = '1' where clave = 'reservas_activas_max';
 end $$;
 
@@ -721,6 +728,9 @@ do $$ begin
   perform pg_temp.falla($q$select * from faro_uso$q$, 'permission denied');
   perform pg_temp.falla($q$select * from registro_v$q$, 'permission denied');
   perform pg_temp.falla($q$select * from consola_registro$q$, 'permission denied');
+  perform pg_temp.falla($q$select reserva_detalle(gen_random_uuid())$q$, 'Solo el personal');
+  perform pg_temp.ok((select count(*) from reservas_importadas) = 0, 'las reservas importadas solo las ve el personal');
+  perform pg_temp.falla($q$select _docente_para('PAE', 'Ana')$q$, 'permission denied');
 end $$;
 reset role;
 
@@ -900,4 +910,20 @@ begin
   perform pg_temp.ok((select count(*) from solicitudes_software) = 2, 'cada persona ve sus solicitudes');
   perform cancelar_software((select id from solicitudes_software where software = 'Stata'));
   perform pg_temp.ok((select estado from solicitudes_software where software = 'Stata') = 'cancelada', 'la persona puede cancelar la suya');
+end $$;
+
+-- 0018: detalle completo de una reserva para el personal.
+do $$
+declare r reservas; j jsonb; begin
+  select * into r from reservas where docente = 'Marta Ruiz' limit 1;
+  perform pg_temp.como('lab@unal.edu.co');
+  update reservas set fin = fin + interval '30 minutes' where id = r.id;
+  j := reserva_detalle(r.id);
+  perform pg_temp.ok(j -> 'reserva' ->> 'docente' = 'Marta Ruiz' and not (j -> 'reserva' ? 'token_credencial'), 'el detalle trae el docente y no el token de la credencial');
+  perform pg_temp.ok(j -> 'titular' ->> 'correo' = 'ana@unal.edu.co' and j -> 'equipo' ->> 'codigo' = 'UNAL-01', 'el detalle trae titular y equipo');
+  perform pg_temp.ok(exists (select 1 from jsonb_array_elements(j -> 'historial') h
+                              where h ->> 'accion' = 'extendida' and h ->> 'actor' is not null
+                                and exists (select 1 from jsonb_array_elements(h -> 'cambios') c where c ->> 'campo' = 'fin')),
+                     'el historial dice quién extendió y qué cambió');
+  perform pg_temp.ok(reserva_detalle(gen_random_uuid()) is null, 'una reserva que no existe da nulo');
 end $$;

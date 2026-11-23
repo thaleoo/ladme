@@ -95,6 +95,7 @@ export default function Solicitudes() {
                 </div>
                 <p className="small" style={{ margin: '4px 0 0' }}>
                   <strong>{s.solicitante?.nombre}</strong> · {s.solicitante?.programa ?? 'sin programa'} · {s.actividad}
+                  {s.docente && <> · Docente: {s.docente}</>}
                 </p>
                 <p className="tiny muted" style={{ margin: '2px 0 0', wordBreak: 'break-all' }}>
                   {s.solicitante?.correo} · pedida {hace(s.creado_en)}

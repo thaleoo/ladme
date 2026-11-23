@@ -51,6 +51,7 @@ export async function crearReserva(input: {
   desatendido?: boolean
   mensaje?: string
   idSolicitud?: string
+  docente?: string
 }): Promise<Reserva> {
   const { data, error } = await supabase.rpc('crear_reserva', {
     p_equipo: input.equipo,
@@ -60,7 +61,8 @@ export async function crearReserva(input: {
     p_detalle: input.detalle ?? null,
     p_desatendido: input.desatendido ?? false,
     p_mensaje: input.mensaje ?? null,
-    p_id_solicitud: input.idSolicitud ?? null
+    p_id_solicitud: input.idSolicitud ?? null,
+    p_docente: input.docente ?? null
   })
   if (error) fail('No se pudo crear la reserva', error)
   return data as Reserva
@@ -309,6 +311,7 @@ export async function solicitarExcepcion(input: {
   actividad: string
   detalle?: string
   justificacion: string
+  docente?: string
 }): Promise<void> {
   const { error } = await supabase.rpc('solicitar_excepcion', {
     p_equipo: input.equipo,
@@ -316,7 +319,8 @@ export async function solicitarExcepcion(input: {
     p_fin: input.fin,
     p_actividad: input.actividad,
     p_detalle: input.detalle ?? null,
-    p_justificacion: input.justificacion
+    p_justificacion: input.justificacion,
+    p_docente: input.docente ?? null
   })
   if (error) fail('No se pudo enviar la solicitud', error)
 }
@@ -363,13 +367,80 @@ export async function resolverSolicitud(id: string, aprobar: boolean, respuesta:
 export async function listarReservasAdmin(desde: string, hasta: string): Promise<Reserva[]> {
   const { data, error } = await supabase
     .from('reservas')
-    .select(SELECT_RESERVA)
+    .select(`${SELECT_RESERVA}, reservas_importadas(nombre_titular, correo_titular, reclamada_en)`)
     .lt('inicio', hasta)
     .gt('fin', desde)
     .order('inicio', { ascending: false })
     .limit(1000)
   if (error) fail('No se pudieron cargar las reservas', error)
   return (data ?? []) as Reserva[]
+}
+
+/** Nombres para autocompletar el docente responsable: los ya usados y los docentes verificados. */
+export async function docentesSugeridos(): Promise<string[]> {
+  const { data, error } = await supabase.rpc('docentes_sugeridos')
+  if (error) return []
+  return (data ?? []) as string[]
+}
+
+export interface CambioHistorial {
+  campo: string
+  antes: unknown
+  despues: unknown
+}
+
+/** Todo lo que se sabe de una reserva (solo el personal). */
+export interface DetalleReserva {
+  reserva: Reserva
+  estado_vigente: string | null
+  equipo: {
+    codigo: string
+    nombre: string
+    ubicacion: string | null
+    marca: string | null
+    modelo: string | null
+    sistema_operativo: string | null
+    so_version: string | null
+    foto_url: string | null
+    estado: string
+  } | null
+  titular: {
+    id: string
+    nombre: string
+    correo: string
+    rol: string
+    activo: boolean
+    tipo_usuario: string | null
+    programa: string | null
+    matricula: string | null
+    docente_verificado_en: string | null
+    creado_en: string
+    reservas: number
+    inasistencias: number
+  } | null
+  importada: { nombre: string | null; correo: string | null; codigo_origen: string | null; reclamada_en: string | null; importado_en: string } | null
+  solicitud_larga: { justificacion: string; creado_en: string; respuesta: string | null; resuelto_en: string | null; resuelto_por: string | null } | null
+  clase: { id: number; nombre: string; grupo: number; docente: string } | null
+  historial: Array<{ en: string; accion: string; actor: string | null; actor_es_titular: boolean | null; cambios: CambioHistorial[] }>
+  faro: Array<{ en: string; tipo: string; detalle: Record<string, unknown>; actor: string | null }>
+  inasistencia: {
+    numero: number
+    estado: string
+    sancion_hasta: string | null
+    apelacion: string | null
+    apelada_en: string | null
+    respuesta: string | null
+    resuelto_en: string | null
+    creado_en: string
+  } | null
+  software: Array<{ id: number; software: string; version: string | null; estado: string; creado_en: string; respuesta: string | null }>
+  fallas: Array<{ id: string; categoria: string; descripcion: string; estado: string; respuesta: string | null; creado_en: string }>
+}
+
+export async function reservaDetalle(id: string): Promise<DetalleReserva | null> {
+  const { data, error } = await supabase.rpc('reserva_detalle', { p_id: id })
+  if (error) fail('No se pudo cargar la reserva', error)
+  return (data ?? null) as DetalleReserva | null
 }
 
 export async function crearBloqueo(input: {
