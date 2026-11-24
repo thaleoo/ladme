@@ -4892,3 +4892,10 @@ a.ronda-fila__codigo:hover { text-decoration: underline; text-underline-offset: 
 .verificacion > :nth-child(2):not(.verificacion__m) { order: 3; justify-self: start; display: flex; gap: 6px; margin-top: 4px; }
 .verificacion__m { order: 2; padding-left: 12px; border-left: 2px solid var(--line-strong); color: var(--ink-900); }
 .verificacion__d strong { font-weight: 600; }
+
+/* Disponibilidad: fila propia de programas, con selección múltiple */
+.disp-programas { display: flex; flex-direction: column; gap: 8px; }
+.disp-programas__cabeza { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
+.disp-programas__t { font-size: var(--text-sm); font-weight: 600; }
+.disp-programas__res { color: var(--ink-500); font-size: var(--text-sm); }
+.disp-programas__res .link-btn { font-size: inherit; }

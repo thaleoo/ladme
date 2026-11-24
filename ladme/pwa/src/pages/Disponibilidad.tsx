@@ -122,7 +122,9 @@ export default function Disponibilidad() {
   // Las categorías se muestran como grupos de la lista, sin pestañas.
   const categoria: string = 'TODAS'
   const [so, setSo] = useState('TODOS')
-  const [programa, setPrograma] = useState('TODOS')
+  // Programas elegidos: se muestran solo los equipos que los tienen todos.
+  const [elegidos, setElegidos] = useState<string[]>([])
+  const alternar = (x: string) => setElegidos((l) => (l.includes(x) ? l.filter((y) => y !== x) : [...l, x]))
   const [espera, setEspera] = useState<Espera | null>(null)
   const [esperaOcupado, setEsperaOcupado] = useState(false)
   useEffect(() => { void miEspera().then(setEspera) }, [])
@@ -216,7 +218,7 @@ export default function Disponibilidad() {
   const visibles = celdas.filter((c) => {
     if (categoria !== 'TODAS' && c.equipo.categoria !== categoria) return false
     if (so !== 'TODOS' && c.equipo.sistema_operativo !== so) return false
-    if (programa !== 'TODOS' && !(c.equipo.software ?? []).includes(programa)) return false
+    if (elegidos.length && !elegidos.every((x) => (c.equipo.software ?? []).includes(x))) return false
     if (filtro === 'LIBRES' && c.situacion !== 'libre') return false
     if (filtro === 'OCUPADOS' && c.situacion === 'libre') return false
     const q = texto.trim().toLowerCase()
@@ -235,8 +237,12 @@ export default function Disponibilidad() {
   const programasOrdenados = [...programas].sort(
     (x, y) => equipos.filter((e) => (e.software ?? []).includes(y)).length - equipos.filter((e) => (e.software ?? []).includes(x)).length || x.localeCompare(y, 'es')
   )
-  const programasChips = programasOrdenados.slice(0, 6)
-  if (programa !== 'TODOS' && !programasChips.includes(programa)) programasChips.push(programa)
+  // En la fila caben todos si son pocos; si no, los más comunes y los elegidos, y el resto en «Todos».
+  const MAX_FILA = 10
+  const programasChips = programasOrdenados.length <= MAX_FILA + 2 ? programasOrdenados
+    : [...programasOrdenados.slice(0, MAX_FILA), ...elegidos.filter((x) => !programasOrdenados.slice(0, MAX_FILA).includes(x))]
+  const conTodos = equipos.filter((e) => elegidos.every((x) => (e.software ?? []).includes(x))).length
+  const listaElegidos = elegidos.length > 1 ? `${elegidos.slice(0, -1).join(', ')} y ${elegidos[elegidos.length - 1]}` : (elegidos[0] ?? '')
 
   return (
     <>
@@ -274,23 +280,42 @@ export default function Disponibilidad() {
               {x}
             </button>
           ))}
-        {programasChips.map((x) => (
-          <button key={x} type="button" className="chip" aria-pressed={programa === x} onClick={() => setPrograma(programa === x ? 'TODOS' : x)}>
-            <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
-            {x}
-          </button>
-        ))}
-        {programas.length > programasChips.length && (
-          <button type="button" className="chip" onClick={() => setMasProgramas(true)}>
-            Más programas
-          </button>
-        )}
-        {!staff && (
-          <button type="button" className="chip chip--suave" onClick={() => setPedirSoftware(true)}>
-            <Icon nombre="mas2" width={16} height={16} /> Pedir un programa
-          </button>
-        )}
       </div>
+
+      {(programas.length > 0 || !staff) && (
+        <div className="disp-programas">
+          <div className="disp-programas__cabeza">
+            <span className="disp-programas__t" id="disp-programas-t">Programas</span>
+            {elegidos.length > 0 ? (
+              <span className="disp-programas__res" aria-live="polite">
+                {conTodos === 0 ? 'Ningún equipo los tiene todos' : `${conTodos} ${conTodos === 1 ? 'equipo tiene' : 'equipos tienen'} ${elegidos.length === 1 ? listaElegidos : 'todos'}`}
+                {' · '}
+                <button type="button" className="link-btn" onClick={() => setElegidos([])}>Quitar</button>
+              </span>
+            ) : (
+              <span className="disp-programas__res">Elija los que necesita</span>
+            )}
+          </div>
+          <div className="chips-desliza" role="group" aria-labelledby="disp-programas-t">
+            {programasChips.map((x) => (
+              <button key={x} type="button" className="chip" aria-pressed={elegidos.includes(x)} onClick={() => alternar(x)}>
+                <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
+                {x}
+              </button>
+            ))}
+            {programas.length > programasChips.length && (
+              <button type="button" className="chip" onClick={() => setMasProgramas(true)}>
+                Todos ({programas.length})
+              </button>
+            )}
+            {!staff && (
+              <button type="button" className="chip chip--suave" onClick={() => setPedirSoftware(true)}>
+                <Icon nombre="mas2" width={16} height={16} /> Pedir un programa
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <PedirSoftware abierto={pedirSoftware} cerrar={() => setPedirSoftware(false)} equipos={equipos} />
 
       {!staff && (espera ? (
@@ -304,15 +329,15 @@ export default function Disponibilidad() {
             </button>
           </div>
         </div>
-      ) : !cargando && (libres === 0 || (programa !== 'TODOS' && visibles.every((c) => c.situacion !== 'libre'))) ? (
+      ) : !cargando && (libres === 0 || (elegidos.length > 0 && visibles.every((c) => c.situacion !== 'libre'))) ? (
         <div className="alert warn">
           <Icon nombre="reloj" />
           <div className="alert__body">
-            No hay equipos libres{programa !== 'TODOS' ? ` con ${programa}` : ''} en este momento.{' '}
+            No hay equipos libres{elegidos.length ? ` con ${listaElegidos}` : ''} en este momento.{' '}
             <button className="link-btn" type="button" disabled={esperaOcupado}
                     onClick={() => {
                       setEsperaOcupado(true)
-                      void unirseEspera(programa !== 'TODOS' ? programa : null).then(() => miEspera()).then(setEspera).finally(() => setEsperaOcupado(false))
+                      void unirseEspera(elegidos.length === 1 ? elegidos[0] : null).then(() => miEspera()).then(setEspera).finally(() => setEsperaOcupado(false))
                     }}>
               Avísenme cuando haya uno
             </button>
@@ -406,11 +431,16 @@ export default function Disponibilidad() {
           </section>
         ))}
 
-      <Modal abierto={masProgramas} titulo="Programas instalados" onCerrar={() => setMasProgramas(false)}>
+      <Modal
+        abierto={masProgramas}
+        titulo="Programas instalados"
+        descripcion="Elija todos los que necesita: se muestran los equipos que los tienen todos."
+        onCerrar={() => setMasProgramas(false)}
+        pie={<button type="button" onClick={() => setMasProgramas(false)}>{elegidos.length ? `Ver ${conTodos} ${conTodos === 1 ? 'equipo' : 'equipos'}` : 'Listo'}</button>}
+      >
         <div className="lista-programas">
           {programasOrdenados.map((x) => (
-            <button key={x} type="button" className="chip" aria-pressed={programa === x}
-                    onClick={() => { setPrograma(programa === x ? 'TODOS' : x); setMasProgramas(false) }}>
+            <button key={x} type="button" className="chip" aria-pressed={elegidos.includes(x)} onClick={() => alternar(x)}>
               <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
               {x}
               <span className="chip__n">{equipos.filter((e) => (e.software ?? []).includes(x)).length}</span>
