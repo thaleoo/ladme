@@ -33,6 +33,7 @@ interface Mensaje {
   from?: Usuario
   text?: string
   reply_to_message?: { message_id: number }
+  reply_markup?: { inline_keyboard?: Teclado }
 }
 interface Callback { id: string; from: Usuario; data?: string; message?: Mensaje }
 
@@ -47,23 +48,42 @@ async function tg<T = unknown>(metodo: string, cuerpo: Record<string, unknown>):
   return (j?.result ?? null) as T | null
 }
 
-const enviar = (texto: string, teclado?: Teclado, extra: Record<string, unknown> = {}) =>
+// Todo lo que el bot escribe va en HTML de Telegram: los textos que vienen de personas o de la
+// base de datos pasan por esc() antes de llegar aquí.
+const esc = (t: unknown) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+const enviar = (html: string, teclado?: Teclado, extra: Record<string, unknown> = {}) =>
   tg<Mensaje>('sendMessage', {
     chat_id: CHAT,
-    text: texto.slice(0, 4000),
+    text: html.slice(0, 4000),
+    parse_mode: 'HTML',
     disable_web_page_preview: true,
     ...(teclado ? { reply_markup: { inline_keyboard: teclado } } : {}),
     ...extra
   })
 
-const editar = (m: Mensaje, texto: string, teclado: Teclado = []) =>
+const editar = (m: { chat: { id: number }; message_id: number }, html: string, teclado: Teclado = []) =>
   tg('editMessageText', {
     chat_id: m.chat.id,
     message_id: m.message_id,
-    text: texto.slice(0, 4000),
+    text: html.slice(0, 4000),
+    parse_mode: 'HTML',
     disable_web_page_preview: true,
     reply_markup: { inline_keyboard: teclado }
   })
+
+/**
+ * Telegram devuelve el texto de un aviso sin formato. Para anotarle quién actuó se rearma:
+ * la primera línea (punto de color y título) vuelve a ir en negrita y se agrega el resultado.
+ */
+function avisoCon(textoPlano: string, anotacion: string): string {
+  const [titulo, ...resto] = String(textoPlano ?? '').split('\n')
+  return `<b>${esc(titulo)}</b>${resto.length ? '\n' + esc(resto.join('\n')) : ''}\n\n${anotacion}`
+}
+
+/** Botones que siguen sirviendo después de actuar: los enlaces y los que se indiquen. */
+const botonesQueQuedan = (m: Mensaje, seguir: (b: Boton) => boolean = () => false): Teclado =>
+  (m.reply_markup?.inline_keyboard ?? []).map((fila) => fila.filter((b) => b.url || seguir(b))).filter((fila) => fila.length)
 
 const contestar = (cq: Callback, texto = '', alerta = false) =>
   tg('answerCallbackQuery', { callback_query_id: cq.id, text: texto.slice(0, 190), show_alert: alerta })
@@ -105,29 +125,45 @@ function equiposTexto(args: string[]): string[] | null | undefined {
 
 // ------------------------------------------------------------------ Consultas
 const AYUDA =
-  'Comandos de LADME\n' +
-  'Consultas: /estado · /equipos · /agenda 5 [mañana] · /reservas [5] · /clases\n' +
-  'Acciones (personal con cuenta vinculada): /aprobar 12 · /rechazar 12 motivo · /liberar 7 · /bloquear 5 2h motivo · ' +
-  '/desbloquear 5 [1h] · /anuncio 3h texto · /encender 3 4 · /apagar sala · /reiniciar 5 · /actualizar sala\n' +
-  'En los avisos del chat también hay botones para aprobar, rechazar o verificar sin escribir comandos.\n' +
-  'Vincular la cuenta: en la app, Administración → Herramientas → Consola → Vincular, y luego /vincular CÓDIGO.'
+  '<b>Comandos de LADME</b>\n\n' +
+  '<b>Consultar</b>\n/estado · /equipos · /agenda 5 [mañana] · /reservas [5] · /clases\n\n' +
+  '<b>Actuar</b> (personal con cuenta vinculada)\n/aprobar 12 · /rechazar 12 motivo · /liberar 7 · /bloquear 5 2h motivo · ' +
+  '/desbloquear 5 [1h] · /anuncio 3h texto · /encender 3 4 · /apagar sala · /reiniciar 5 · /actualizar sala\n\n' +
+  'En los avisos también hay botones para aprobar, rechazar o verificar sin escribir comandos.\n\n' +
+  '<b>Vincular su cuenta</b>\nEn la app: Administración → Herramientas → Consola → Vincular. Luego /vincular CÓDIGO.'
 
-async function consulta(cmd: string, args: string[]): Promise<{ texto: string; teclado?: Teclado } | null> {
-  if (cmd === '/ayuda' || cmd === '/start' || cmd === '/help') return { texto: AYUDA }
+/** Respuesta a un comando: texto plano (se escapa al enviar) o html ya armado. */
+type Respuesta = { texto: string; html?: string; teclado?: Teclado }
+
+async function consulta(cmd: string, args: string[]): Promise<Respuesta | null> {
+  if (cmd === '/ayuda' || cmd === '/start' || cmd === '/help') return { texto: '', html: AYUDA }
   if (cmd === '/estado' || cmd === '/equipos') {
     const { data: sala } = await db.rpc('sala_publica')
     const lista = (sala ?? []) as { codigo: string; estado: string; hasta?: string | null }[]
     if (cmd === '/equipos') {
-      return { texto: lista.map((x) => `${x.codigo}  ${x.estado}${x.hasta ? ' hasta ' + horaCorta(x.hasta) : ''}`).join('\n') || 'Sin equipos.' }
+      if (!lista.length) return { texto: 'Sin equipos.' }
+      const PUNTO: Record<string, string> = { libre: '🟢', ocupado: '🟠', bloqueado: '⚫', mantenimiento: '🔧' }
+      const NOMBRE: Record<string, string> = { libre: 'libre', ocupado: 'en uso', bloqueado: 'bloqueado', mantenimiento: 'en mantenimiento' }
+      return {
+        texto: '',
+        html: '<b>Equipos</b>\n' + lista
+          .map((x) => `${PUNTO[x.estado] ?? '⚪'} <b>${esc(x.codigo)}</b> ${esc(NOMBRE[x.estado] ?? x.estado)}${x.hasta ? ' hasta ' + esc(horaCorta(x.hasta)) : ''}`)
+          .join('\n'),
+        teclado: [[{ text: 'Ver la sala ↗', url: `${PWA}/sala` }]]
+      }
     }
     const cuenta = (e: string) => lista.filter((x) => x.estado === e).length
     const { data: ag } = await db.from('agentes').select('ultimo_latido').not('token_hash', 'is', null)
     const vivos = (ag ?? []).filter((a) => a.ultimo_latido && Date.now() - new Date(a.ultimo_latido).getTime() < 120000).length
     const { count: fallas } = await db.from('reportes').select('id', { count: 'exact', head: true }).in('estado', ['abierto', 'en_revision'])
+    const n = (e: string, uno: string, varios: string) => `<b>${cuenta(e)}</b> ${cuenta(e) === 1 ? uno : varios}`
     return {
-      texto:
-        `LADME ahora\nLibres: ${cuenta('libre')} · Ocupados: ${cuenta('ocupado')} · Bloqueados: ${cuenta('bloqueado')} · ` +
-        `Mantenimiento: ${cuenta('mantenimiento')}\nFaro en línea: ${vivos} de ${(ag ?? []).length}\nFallas abiertas: ${fallas ?? 0}`
+      texto: '',
+      html:
+        `<b>La sala ahora</b>\n${n('libre', 'libre', 'libres')} · ${n('ocupado', 'en uso', 'en uso')}\n` +
+        `${n('bloqueado', 'bloqueado', 'bloqueados')} · ${n('mantenimiento', 'en mantenimiento', 'en mantenimiento')}\n\n` +
+        `Faro en línea: ${vivos} de ${(ag ?? []).length}\nFallas abiertas: ${fallas ?? 0}`,
+      teclado: [[{ text: 'Ver la sala ↗', url: `${PWA}/sala` }]]
     }
   }
   if (cmd === '/agenda') {
@@ -144,14 +180,16 @@ async function consulta(cmd: string, args: string[]): Promise<{ texto: string; t
       .lt('inicio', fin.toISOString())
       .gt('fin', dia.toISOString())
       .order('inicio')
-    if (!data?.length) return { texto: `${codigo}: libre todo el día.` }
+    const titulo = `<b>${esc(codigo)} · ${esc(fmt(dia.toISOString(), { weekday: 'long', day: 'numeric', month: 'short' }))}</b>`
+    if (!data?.length) return { texto: '', html: `${titulo}\n🟢 Libre todo el día.` }
     return {
-      texto:
-        `${codigo} · ${fmt(dia.toISOString(), { day: '2-digit', month: '2-digit' })}\n` +
+      texto: '',
+      html:
+        `${titulo}\n` +
         data
           .map((o) => {
             const tipo = o.compartida ? 'compartido' : o.tipo === 'bloqueo' ? 'bloqueado' : 'reservado'
-            return `${soloHora(o.inicio)}–${soloHora(o.fin)}  ${tipo}${o.tipo === 'bloqueo' && o.motivo ? ' · ' + o.motivo : ''}`
+            return `${o.tipo === 'bloqueo' ? '⚫' : '🟠'} ${esc(soloHora(o.inicio))}–${esc(soloHora(o.fin))} ${tipo}${o.tipo === 'bloqueo' && o.motivo ? ' · ' + esc(o.motivo) : ''}`
           })
           .join('\n')
     }
@@ -171,13 +209,17 @@ async function consulta(cmd: string, args: string[]): Promise<{ texto: string; t
     const { data } = await q
     if (!data?.length) return { texto: 'No hay reservas en las próximas 24 horas.' }
     return {
-      texto: data
-        .map((x) => {
-          const eq = (x.equipos as unknown as { codigo: string }).codigo
-          const extra = x.tipo === 'bloqueo' ? ' (bloqueo)' : new Date(x.inicio) < ahora && !x.llegada_en ? ' · sin llegada' : ''
-          return `${eq}  ${horaCorta(x.inicio)}–${soloHora(x.fin)}  ${x.codigo_legible}${extra}`
-        })
-        .join('\n')
+      texto: '',
+      html:
+        '<b>Próximas 24 horas</b>\n' +
+        data
+          .map((x) => {
+            const eq = (x.equipos as unknown as { codigo: string }).codigo
+            const sinLlegada = x.tipo !== 'bloqueo' && new Date(x.inicio) < ahora && !x.llegada_en
+            const extra = x.tipo === 'bloqueo' ? ' · bloqueo' : sinLlegada ? ' · <b>sin llegada</b>' : ''
+            return `${x.tipo === 'bloqueo' ? '⚫' : sinLlegada ? '🟠' : '⚪'} <b>${esc(eq)}</b> ${esc(horaCorta(x.inicio))}–${esc(soloHora(x.fin))} · ${esc(x.codigo_legible)}${extra}`
+          })
+          .join('\n')
     }
   }
   if (cmd === '/clases') {
@@ -189,15 +231,16 @@ async function consulta(cmd: string, args: string[]): Promise<{ texto: string; t
       .limit(8)
     if (!data?.length) return { texto: 'No hay solicitudes de sala pendientes.' }
     return {
-      texto:
-        'Solicitudes de sala pendientes:\n' +
+      texto: '',
+      html:
+        '<b>Salas para clase por aprobar</b>\n' +
         data
-          .map((c) => `#${c.id} ${c.nombre} (grupo ${c.grupo}) ${c.hora_inicio.slice(0, 5)}–${c.hora_fin.slice(0, 5)}, ${c.desde} a ${c.hasta}` +
+          .map((c) => `🟣 <b>#${c.id} ${esc(c.nombre)}</b> · grupo ${esc(c.grupo)}\n${c.hora_inicio.slice(0, 5)}–${c.hora_fin.slice(0, 5)}, ${esc(c.desde)} a ${esc(c.hasta)}` +
             ` · ${c.equipos_pedidos ? c.equipos_pedidos + ' equipos' : 'los disponibles'}`)
-          .join('\n'),
+          .join('\n\n'),
       teclado: data.map((c) => [
-        { text: `✅ Aprobar #${c.id}`, callback_data: `ap:${c.id}` },
-        { text: `✖ Rechazar #${c.id}`, callback_data: `re:${c.id}` }
+        { text: `✓ Aprobar #${c.id}`, callback_data: `ap:${c.id}` },
+        { text: `✕ Rechazar #${c.id}`, callback_data: `re:${c.id}` }
       ])
     }
   }
@@ -275,7 +318,12 @@ async function ejecutar(de: Usuario, accion: string, args: Record<string, unknow
 async function pendiente(de: Usuario, accion: string, args: Record<string, unknown>, origen?: Mensaje): Promise<number | null> {
   const { data } = await db
     .from('telegram_pendientes')
-    .insert({ telegram_id: de.id, accion, args, origen: origen ? { chat: origen.chat.id, id: origen.message_id, texto: origen.text ?? '' } : null })
+    .insert({
+      telegram_id: de.id,
+      accion,
+      args,
+      origen: origen ? { chat: origen.chat.id, id: origen.message_id, texto: origen.text ?? '', enlaces: botonesQueQuedan(origen) } : null
+    })
     .select('id')
     .single()
   return data?.id ?? null
@@ -286,11 +334,11 @@ async function tomarPendiente(filtro: Record<string, unknown>) {
   for (const [k, v] of Object.entries(filtro)) q = v === null ? q.is(k, null) : q.eq(k, v as never)
   const { data } = await q.maybeSingle()
   if (data) await db.from('telegram_pendientes').delete().eq('id', data.id)
-  return data as null | { id: number; telegram_id: number; accion: string; args: Record<string, unknown>; mensaje_id: number | null; origen: { chat: number; id: number; texto: string } | null }
+  return data as null | { id: number; telegram_id: number; accion: string; args: Record<string, unknown>; mensaje_id: number | null; origen: { chat: number; id: number; texto: string; enlaces?: Teclado } | null }
 }
 
 /** Interpreta un comando de acción. Devuelve null si no es una acción. */
-async function accion(cmd: string, args: string[], de: Usuario): Promise<{ texto: string; teclado?: Teclado } | null> {
+async function accion(cmd: string, args: string[], de: Usuario): Promise<Respuesta | null> {
   if (cmd === '/vincular') {
     if (!args[0]) return { texto: 'Uso: /vincular CÓDIGO (el código se genera en la app: Administración → Herramientas → Consola).' }
     const { data, error } = await db.rpc('telegram_vincular', {
@@ -357,24 +405,28 @@ async function accion(cmd: string, args: string[], de: Usuario): Promise<{ texto
     const id = await pendiente(de, acc, a)
     return {
       texto: `⚠ ${confirmar}\n¿Confirma, ${nombreDe(de)}?`,
-      teclado: [[{ text: '✅ Confirmar', callback_data: `si:${id}` }, { text: 'Cancelar', callback_data: `no:${id}` }]]
+      teclado: [[{ text: '✓ Confirmar', callback_data: `si:${id}` }, { text: 'Cancelar', callback_data: `no:${id}` }]]
     }
   }
   return { texto: (await ejecutar(de, acc, a)).texto }
 }
 
 // ------------------------------------------------------------------ Botones
-const BOTONES: Record<string, { accion: string; motivo?: string; pedido?: string; minimo?: number; hecho: string }> = {
-  ap: { accion: 'aprobar', hecho: '✅ Aprobada' },
-  re: { accion: 'rechazar', motivo: 'rechazar la solicitud', hecho: '✖ Rechazada' },
-  ve: { accion: 'verificar', hecho: '✅ Verificado' },
-  nv: { accion: 'no_verificar', motivo: 'no verificar a esta persona como docente', hecho: '✖ No verificado' },
-  an: { accion: 'anular', hecho: '↩ Strike anulado' },
-  ma: { accion: 'mantener', motivo: 'mantener la inasistencia', hecho: '• Strike mantenido' },
-  sT: { accion: 'software_tramite', hecho: '🛠 Enviada a TI' },
-  sI: { accion: 'software_instalado', motivo: 'x', pedido: 'responda a este mensaje con los equipos donde quedó instalado (por ejemplo: 3 5 7, o «sala»).', minimo: 1, hecho: '✅ Instalado' },
-  sR: { accion: 'software_rechazar', motivo: 'no instalar este software', hecho: '✖ No instalado' }
+const BOTONES: Record<string, { accion: string; motivo?: string; pedido?: string; minimo?: number; icono: string; hecho: string }> = {
+  ap: { accion: 'aprobar', icono: '✓', hecho: 'Aprobada' },
+  re: { accion: 'rechazar', motivo: 'rechazar la solicitud', icono: '✕', hecho: 'Rechazada' },
+  ve: { accion: 'verificar', icono: '✓', hecho: 'Verificado' },
+  nv: { accion: 'no_verificar', motivo: 'no verificar a esta persona como docente', icono: '✕', hecho: 'No verificado' },
+  an: { accion: 'anular', icono: '↩', hecho: 'Inasistencia anulada' },
+  ma: { accion: 'mantener', motivo: 'mantener la inasistencia', icono: '•', hecho: 'Inasistencia mantenida' },
+  sT: { accion: 'software_tramite', icono: '→', hecho: 'Enviada a TI' },
+  sI: { accion: 'software_instalado', motivo: 'x', pedido: 'responda a este mensaje con los equipos donde quedó instalado (por ejemplo: 3 5 7, o «sala»).', minimo: 1, icono: '✓', hecho: 'Instalado' },
+  sR: { accion: 'software_rechazar', motivo: 'no instalar este software', icono: '✕', hecho: 'No se instalará' }
 }
+
+/** «✓ <b>Aprobada</b> por Ana. Detalle» */
+const anotacion = (b: { icono: string; hecho: string }, actor: string, detalle?: string) =>
+  `${b.icono} <b>${esc(b.hecho)}</b> por ${esc(actor)}${detalle ? `. ${esc(detalle)}` : '.'}`
 
 async function boton(cq: Callback) {
   const m = cq.message
@@ -386,11 +438,11 @@ async function boton(cq: Callback) {
     const p = await tomarPendiente({ id, telegram_id: cq.from.id })
     if (!p) return contestar(cq, 'Solo quien dio la orden puede confirmarla, y vence en 10 minutos.', true)
     if (tipo === 'no') {
-      await editar(m, `${m.text ?? ''}\n\nCancelado por ${nombreDe(cq.from)}.`)
+      await editar(m, `${esc(m.text)}\n\nCancelado por ${esc(nombreDe(cq.from))}.`)
       return contestar(cq, 'Cancelado.')
     }
     const r = await ejecutar(cq.from, p.accion, p.args)
-    await editar(m, `${m.text ?? ''}\n\n${r.ok ? '✅' : '⚠'} ${r.texto}${r.actor ? ` (${r.actor})` : ''}`)
+    await editar(m, `${esc(m.text)}\n\n${r.ok ? '✓' : '⚠'} ${esc(r.texto)}${r.actor ? ` (${esc(r.actor)})` : ''}`)
     return contestar(cq, r.ok ? 'Hecho.' : 'No se pudo.')
   }
 
@@ -399,7 +451,7 @@ async function boton(cq: Callback) {
   if (b.motivo) {
     // Pide el motivo como respuesta a un mensaje del bot; al llegar, ejecuta y actualiza el aviso.
     const pid = await pendiente(cq.from, `motivo:${b.accion}`, { id }, m)
-    const pedido = await enviar(`${nombreDe(cq.from)}, ${b.pedido ?? `responda a este mensaje con el motivo para ${b.motivo}.`}`, undefined, {
+    const pedido = await enviar(esc(`${nombreDe(cq.from)}, ${b.pedido ?? `responda a este mensaje con el motivo para ${b.motivo}.`}`), undefined, {
       reply_markup: { force_reply: true, input_field_placeholder: b.pedido ? 'Equipos…' : 'Motivo…' }
     })
     if (pedido && pid) await db.from('telegram_pendientes').update({ mensaje_id: pedido.message_id }).eq('id', pid)
@@ -407,7 +459,9 @@ async function boton(cq: Callback) {
   }
   const r = await ejecutar(cq.from, b.accion, { id })
   if (!r.ok) return contestar(cq, r.texto, true)
-  await editar(m, `${m.text ?? ''}\n\n${b.hecho} por ${r.actor ?? nombreDe(cq.from)}. ${r.texto}`)
+  // «Enviada a TI» no cierra la solicitud: quedan los botones de instalado y no instalar.
+  const quedan = botonesQueQuedan(m, (x) => tipo === 'sT' && /^s[IR]:/.test(x.callback_data ?? ''))
+  await editar(m, avisoCon(m.text ?? '', anotacion(b, r.actor ?? nombreDe(cq.from), r.texto)), quedan)
   return contestar(cq, b.hecho)
 }
 
@@ -424,17 +478,16 @@ async function motivo(m: Mensaje): Promise<boolean> {
     return true
   }
   const r = await ejecutar(m.from, acc, { ...p.args, motivo: texto })
-  const hecho = boton?.hecho ?? 'Hecho'
   if (r.ok && p.origen) {
-    await tg('editMessageText', {
-      chat_id: p.origen.chat,
-      message_id: p.origen.id,
-      text: `${p.origen.texto}\n\n${hecho} por ${r.actor ?? nombreDe(m.from)}: «${texto}»`.slice(0, 4000),
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [] }
-    })
+    const b = boton ?? { icono: '✓', hecho: 'Hecho' }
+    const motivoTxt = acc === 'software_instalado' ? '' : ` «${esc(texto)}»`
+    await editar(
+      { chat: { id: p.origen.chat }, message_id: p.origen.id },
+      avisoCon(p.origen.texto, `${anotacion(b, r.actor ?? nombreDe(m.from))}${motivoTxt}`),
+      p.origen.enlaces ?? []
+    )
   }
-  await enviar(r.texto, undefined, { reply_to_message_id: m.message_id })
+  await enviar(esc(r.texto), undefined, { reply_to_message_id: m.message_id })
   return true
 }
 
@@ -445,8 +498,9 @@ async function mensaje(m: Mensaje) {
       // Chat privado con el bot: respuesta cortés, sin datos del laboratorio.
       await tg('sendMessage', {
         chat_id: m.chat.id,
-        text: `Hola, soy el bot del personal de LADME y solo respondo en el grupo del personal.\nPara ver disponibilidad y reservar: ${PWA}`,
-        disable_web_page_preview: true
+        text: 'Hola, soy el asistente del personal de LADME y solo respondo en el grupo del personal.\n\nPara ver qué equipos están libres y reservar, use la app.',
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [[{ text: 'Abrir LADME ↗', url: PWA }]] }
       })
     } else {
       // Otro grupo: no responde. Queda en los registros de la función para comparar con TELEGRAM_CHAT_ID.
@@ -460,14 +514,14 @@ async function mensaje(m: Mensaje) {
   const partes = m.text.trim().split(/\s+/)
   const cmd = partes[0].toLowerCase().replace(/@.*$/, '')
   const args = partes.slice(1)
-  let r: { texto: string; teclado?: Teclado } | null
+  let r: Respuesta | null
   try {
     r = (await accion(cmd, args, m.from)) ?? (await consulta(cmd, args))
   } catch (e) {
     r = { texto: `No pude responder: ${String((e as Error).message ?? e).slice(0, 200)}` }
   }
   r ??= { texto: `No conozco ${cmd}. Escriba /ayuda para ver los comandos.` }
-  await enviar(r.texto, r.teclado, { reply_to_message_id: m.message_id })
+  await enviar(r.html ?? esc(r.texto), r.teclado, { reply_to_message_id: m.message_id })
 }
 
 Deno.serve(async (req) => {

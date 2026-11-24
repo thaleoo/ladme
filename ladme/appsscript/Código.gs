@@ -3386,11 +3386,12 @@ function chatConfigurado_() {
   return (prop_("TELEGRAM_BOT_TOKEN") && prop_("TELEGRAM_CHAT_ID")) || prop_("GCHAT_WEBHOOK_URL");
 }
 
-function enviarMensajeChat_(texto, teclado) {
+function enviarMensajeChat_(texto, teclado, html) {
   var token = prop_("TELEGRAM_BOT_TOKEN"), chat = prop_("TELEGRAM_CHAT_ID"), hook = prop_("GCHAT_WEBHOOK_URL");
   var r;
   if (token && chat) {
-    var cuerpo = { chat_id: chat, text: texto, disable_web_page_preview: true };
+    var cuerpo = { chat_id: chat, text: html ? html : texto, disable_web_page_preview: true };
+    if (html) cuerpo.parse_mode = "HTML";
     if (teclado && teclado.length) cuerpo.reply_markup = { inline_keyboard: teclado };
     r = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "post", contentType: "application/json", muteHttpExceptions: true,
@@ -3407,6 +3408,67 @@ function enviarMensajeChat_(texto, teclado) {
   if (r.getResponseCode() >= 300) throw new Error("El chat respondió " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
 }
 
+function escHtml_(t) {
+  return String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function mayuscula_(t) { t = String(t || ""); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+/**
+ * Forma de cada aviso del chat: un punto de color, un título corto en negrita (qué pasó y en
+ * qué equipo) y los detalles en líneas cortas. El texto viene armado de la base de datos; aquí
+ * solo se reacomoda. Si un texto no encaja con su patrón, se muestra completo bajo el título.
+ *   🟣 pide una decisión · 🔴 alerta: actuar ya · 🟠 revisar · ⚪ solo informa
+ */
+function formaAvisoChat_(tipo, texto) {
+  var t = String(texto || "").trim(), x;
+  var eq = (t.match(/UNAL-\d+/) || [""])[0];
+  var f = function (punto, titulo, lineas) { return { punto: punto, titulo: titulo, lineas: lineas || [] }; };
+  switch (tipo) {
+    case "reporte":
+      x = /^Nuevo reporte de falla en (\S+): (.*)$/.exec(t);
+      return x ? f("🟠", "Falla en " + x[1], [mayuscula_(x[2])]) : f("🟠", "Falla reportada", [t]);
+    case "solicitud":
+      x = /^Nueva solicitud de reserva larga para (\S+) \(([\d.,]+) días\)\.?$/.exec(t);
+      return x ? f("🟣", "Reserva larga por aprobar · " + x[1], ["Pide " + x[2].replace(".", ",") + " días."]) : f("🟣", "Reserva larga por aprobar", [t]);
+    case "clase_solicitud":
+      x = /^Nueva solicitud de sala para clase: (.+) \(grupo (\w+)\), (.+?) (\d\d:\d\d–\d\d:\d\d), del (\S+) al (\S+) \((.+)\)\.?$/.exec(t);
+      return x ? f("🟣", "Sala para clase por aprobar", [x[1] + " · grupo " + x[2], mayuscula_(x[3]) + ", " + x[4], "Del " + x[5] + " al " + x[6] + " · " + x[7]])
+               : f("🟣", "Sala para clase por aprobar", [t.replace(/^Nueva solicitud de sala para clase: /, "")]);
+    case "clase_cancelada":
+      return f("⚪", "Clase cancelada", [mayuscula_(t.replace(/^El docente canceló la clase /, ""))]);
+    case "verificacion_docente":
+      return f("🟣", "Docente por verificar", ["Alguien pidió que lo verifiquen como docente para pedir la sala para clases."]);
+    case "software_solicitud":
+      x = /^Solicitud de software #\d+: (.+?)(?: \((.+?)\))?( para el \S+)?( en \S+)?\. Uso: «([\s\S]*)»$/.exec(t);
+      if (!x) return f("🟣", "Software solicitado", [t]);
+      var donde = [x[3] ? mayuscula_(x[3].trim()) : "", x[4] ? x[4].trim().replace(/^en /, "") : ""].filter(String).join(" · ");
+      return f("🟣", "Software solicitado: " + x[1] + (x[2] ? " " + x[2] : ""), [donde, "«" + x[5] + "»"].filter(String));
+    case "inasistencia_apelacion":
+      x = /^Apelaron una inasistencia \((.+?)\): ([\s\S]*)$/.exec(t);
+      return x ? f("🟣", "Apelación de inasistencia" + (eq ? " · " + eq : ""), [mayuscula_(x[1].replace(/^UNAL-\d+,\s*/, "")), x[2]]) : f("🟣", "Apelación de inasistencia", [t]);
+    case "mantenimiento":
+      x = /^(\S+) entra en mantenimiento (\w+) del (.+) al (.+?)\.?$/.exec(t);
+      return x ? f("⚪", x[1] + " en mantenimiento", [mayuscula_(x[2]) + ", del " + x[3] + " al " + x[4] + "."]) : f("⚪", "Mantenimiento", [t]);
+    case "faro_sin_senal":
+      return f("🟠", (eq || "Un equipo") + " sin señal", [mayuscula_(t.replace(/^\S+ /, ""))]);
+    case "faro_disco":
+      x = /\((\d+) % libre\)/.exec(t);
+      return f("🟠", "Disco casi lleno en " + eq, [x ? "Queda " + x[1] + " % libre." : t]);
+    case "faro_disco_salud":
+      return /FALLA/.test(t) ? f("🔴", "Disco con fallas en " + eq, ["Conviene respaldar y revisarlo pronto."])
+                             : f("🟠", "Disco con advertencias en " + eq, ["Conviene respaldar y revisarlo pronto."]);
+    case "faro_emergencia":
+      return f("🔴", "Clave de emergencia usada en " + eq, ["El equipo quedó desbloqueado sin reserva."]);
+    case "faro_cierre":
+      return f("🔴", "Faro cerrado a la fuerza en " + eq, ["Se volvió a abrir solo."]);
+    case "red_caida":
+      return f("🔴", "Posible caída de la red", [mayuscula_(t.replace(/^Posible caída de la red del laboratorio: /, ""))]);
+    default:
+      return f("⚪", "Aviso de LADME", [t]);
+  }
+}
+
 function enviarChatPersonal_() {
   if (!chatConfigurado_() || !prop_("SUPABASE_URL") || !prop_("SUPABASE_SECRET_KEY")) return;
   try { supabaseRpc_("encolar_alertas_faro", {}); } catch (err) { Logger.log(err); }
@@ -3416,9 +3478,13 @@ function enviarChatPersonal_() {
   for (var i = 0; i < pendientes.length; i++) {
     var m = pendientes[i];
     var teclado = webhook ? botonesChat_(m) : [];
-    if (pwa && m.url && /^https:/.test(pwa)) teclado.push([{ text: "Abrir en LADME", url: pwa + m.url }]);
-    var texto = "LADME · " + m.texto + (pwa && m.url && !teclado.length ? "\n" + pwa + m.url : "");
-    enviarMensajeChat_(texto, teclado);
+    if (pwa && m.url && /^https:/.test(pwa)) teclado.push([{ text: "Abrir en LADME ↗", url: pwa + m.url }]);
+    var forma = formaAvisoChat_(m.tipo, m.texto);
+    var enlace = pwa && m.url && !teclado.length ? pwa + m.url : "";
+    var texto = forma.punto + " " + forma.titulo + "\n" + forma.lineas.join("\n") + (enlace ? "\n" + enlace : "");
+    var html = forma.punto + " <b>" + escHtml_(forma.titulo) + "</b>" +
+      (forma.lineas.length ? "\n" + forma.lineas.map(escHtml_).join("\n") : "") + (enlace ? "\n" + escHtml_(enlace) : "");
+    enviarMensajeChat_(texto, teclado, html);
     supabaseRpc_("marcar_chat_enviado", { p_ids: [m.id] });
   }
 }
@@ -3431,17 +3497,17 @@ function enviarChatPersonal_() {
 function botonesChat_(m) {
   var k = String(m.dedupe_key || ""), id;
   if (m.tipo === "clase_solicitud" && (id = /^clase:(\d+)$/.exec(k))) {
-    return [[{ text: "✅ Aprobar", callback_data: "ap:" + id[1] }, { text: "✖ Rechazar", callback_data: "re:" + id[1] }]];
+    return [[{ text: "✓ Aprobar", callback_data: "ap:" + id[1] }, { text: "✕ Rechazar", callback_data: "re:" + id[1] }]];
   }
   if (m.tipo === "verificacion_docente" && (id = /^verif:(\d+)$/.exec(k))) {
-    return [[{ text: "✅ Verificar docente", callback_data: "ve:" + id[1] }, { text: "✖ No", callback_data: "nv:" + id[1] }]];
+    return [[{ text: "✓ Verificar", callback_data: "ve:" + id[1] }, { text: "✕ No verificar", callback_data: "nv:" + id[1] }]];
   }
   if (m.tipo === "software_solicitud" && (id = /^soft:(\d+)$/.exec(k))) {
-    return [[{ text: "🛠 Enviada a TI", callback_data: "sT:" + id[1] }, { text: "✅ Instalado en…", callback_data: "sI:" + id[1] }],
-            [{ text: "✖ No instalar", callback_data: "sR:" + id[1] }]];
+    return [[{ text: "✓ Instalado en…", callback_data: "sI:" + id[1] }, { text: "Enviada a TI", callback_data: "sT:" + id[1] }],
+            [{ text: "✕ No se instalará", callback_data: "sR:" + id[1] }]];
   }
   if (m.tipo === "inasistencia_apelacion" && (id = /^apel:(\d+)$/.exec(k))) {
-    return [[{ text: "↩ Anular strike", callback_data: "an:" + id[1] }, { text: "Mantener", callback_data: "ma:" + id[1] }]];
+    return [[{ text: "↩ Anular inasistencia", callback_data: "an:" + id[1] }, { text: "Mantener", callback_data: "ma:" + id[1] }]];
   }
   return [];
 }
