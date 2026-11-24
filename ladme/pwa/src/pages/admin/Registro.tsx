@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { listarEquipos, registro, type FilaRegistro, type FuenteRegistro } from '../../lib/api'
-import { fecha, inicioDia, sumarDias } from '../../lib/format'
+import { hora, inicioDia, sumarDias } from '../../lib/format'
 import { descargarCSV } from '../../lib/csv'
 import { Cargando, Empty } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
@@ -52,6 +52,20 @@ function limites(rango: Rango, desde: string, hasta: string): { desde: string | 
         hasta: hasta ? sumarDias(new Date(`${hasta}T00:00`), 1).toISOString() : null
       }
   }
+}
+
+/** Agrupa las filas por día: «Hoy», «Ayer» o «lunes 23 de noviembre». */
+function porDia(filas: FilaRegistro[]): [string, FilaRegistro[]][] {
+  const hoy = inicioDia(new Date()).getTime()
+  const grupos = new Map<string, FilaRegistro[]>()
+  for (const f of filas) {
+    const d = inicioDia(new Date(f.en)).getTime()
+    const clave = d === hoy ? 'Hoy' : d === hoy - 86400000 ? 'Ayer'
+      : new Date(f.en).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Bogota' })
+    const nombre = clave.charAt(0).toUpperCase() + clave.slice(1)
+    grupos.set(nombre, [...(grupos.get(nombre) ?? []), f])
+  }
+  return [...grupos]
 }
 
 export default function Registro() {
@@ -143,85 +157,67 @@ export default function Registro() {
 
   return (
     <div className="stack">
-      <p className="small muted" style={{ margin: 0 }}>
-        Todo lo que pasa en el laboratorio queda aquí y no se borra. Filtre por tipo, equipo o fechas, o exporte lo filtrado a
-        CSV para abrirlo en Excel.
-      </p>
-
-      <section className="card tight registro-filtros">
-        <div className="chips" role="group" aria-label="Tipo de actividad">
-          <button className={`chip ${fuente === '' ? 'activo' : ''}`} aria-pressed={fuente === ''} onClick={() => setFuente('')}>
+      <section className="filtros-admin" aria-label="Filtros del registro">
+        <label className="disp-buscar">
+          <Icon nombre="buscar" width={20} height={20} />
+          <span className="solo-lector">Buscar en el registro</span>
+          <input type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre, código o palabra" />
+        </label>
+        <div className="chips-desliza" role="group" aria-label="Tipo de actividad">
+          <button type="button" className="chip" aria-pressed={fuente === ''} onClick={() => setFuente('')}>
             Todo
           </button>
           {FUENTES.map((f) => (
-            <button key={f.id} className={`chip ${fuente === f.id ? 'activo' : ''}`} aria-pressed={fuente === f.id} onClick={() => setFuente(f.id)}>
+            <button key={f.id} type="button" className="chip" aria-pressed={fuente === f.id} onClick={() => setFuente(f.id)}>
               {f.texto}
             </button>
           ))}
         </div>
-        <div className="registro-campos">
-          <div className="field">
-            <label className="field__label" htmlFor="reg-buscar">
-              Buscar
-            </label>
-            <input id="reg-buscar" type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre, código, palabra…" />
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor="reg-equipo">
-              Equipo
-            </label>
-            <select id="reg-equipo" value={equipo} onChange={(e) => setEquipo(e.target.value)}>
-              <option value="">Todos</option>
+        <div className="chips-desliza">
+          <label className={`chip chip--select ${equipo ? 'activo' : ''}`}>
+            <span className="solo-lector">Equipo</span>
+            <select value={equipo} onChange={(e) => setEquipo(e.target.value)}>
+              <option value="">Todos los equipos</option>
               {equipos.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor="reg-rango">
-              Periodo
-            </label>
-            <select id="reg-rango" value={rango} onChange={(e) => setRango(e.target.value as Rango)}>
+          </label>
+          <label className="chip chip--select">
+            <span className="solo-lector">Periodo</span>
+            <select value={rango} onChange={(e) => setRango(e.target.value as Rango)}>
               {RANGOS.map(([v, t]) => (
-                <option key={v} value={v}>
-                  {t}
-                </option>
+                <option key={v} value={v}>{t}</option>
               ))}
             </select>
-          </div>
-          {rango === 'otro' && (
-            <>
-              <div className="field">
-                <label className="field__label" htmlFor="reg-desde">
-                  Desde
-                </label>
-                <input id="reg-desde" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field__label" htmlFor="reg-hasta">
-                  Hasta
-                </label>
-                <input id="reg-hasta" type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
-              </div>
-            </>
-          )}
+          </label>
+          <button className="chip" type="button" onClick={() => void exportar()} disabled={!total || !!exportando}>
+            <Icon nombre="descargar" width={16} height={16} /> {exportando ?? 'CSV'}
+          </button>
         </div>
-      </section>
-
-      <div className="registro-barra">
-        <span className="small muted num" aria-live="polite">
+        {rango === 'otro' && (
+          <div className="filtros-admin__fechas">
+            <div className="field">
+              <label className="field__label" htmlFor="reg-desde">Desde</label>
+              <input id="reg-desde" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field__label" htmlFor="reg-hasta">Hasta</label>
+              <input id="reg-hasta" type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+            </div>
+          </div>
+        )}
+        <p className="filtros-admin__total num" aria-live="polite">
           {datos
             ? total === 0
               ? 'Sin resultados'
-              : `${(pagina * TAMANO + 1).toLocaleString('es-CO')}–${Math.min(total, (pagina + 1) * TAMANO).toLocaleString('es-CO')} de ${total.toLocaleString('es-CO')}`
+              : total <= TAMANO
+                ? `${total.toLocaleString('es-CO')} ${total === 1 ? 'movimiento' : 'movimientos'}`
+                : `${(pagina * TAMANO + 1).toLocaleString('es-CO')}–${Math.min(total, (pagina + 1) * TAMANO).toLocaleString('es-CO')} de ${total.toLocaleString('es-CO')}`
             : ''}
-        </span>
-        <button className="btn sm gray" type="button" onClick={() => void exportar()} disabled={!total || !!exportando}>
-          <Icon nombre="descargar" width={15} height={15} /> {exportando ?? 'Exportar CSV'}
-        </button>
-      </div>
+          {' · nada se borra'}
+        </p>
+      </section>
 
       {error && (
         <div className="alert danger">
@@ -233,37 +229,46 @@ export default function Registro() {
       {!datos && !error ? (
         <Cargando texto="Cargando registro…" />
       ) : datos && datos.filas.length === 0 ? (
-        <div className="card">
-          <Empty icono="buscar" titulo="Nada con esos filtros">
-            Pruebe con otro periodo o quite algún filtro.
-          </Empty>
-        </div>
+        <Empty icono="buscar" titulo="Nada con esos filtros">
+          Pruebe con otro periodo o quite algún filtro.
+        </Empty>
       ) : (
-        <ol className={`registro-lista ${cargando ? 'cargando' : ''}`}>
-          {datos?.filas.map((f, i) => (
-            <li key={`${f.en}-${i}`} className="registro-fila">
-              <span className="registro-cuando num">{fecha(f.en)}</span>
-              <span className="registro-que">
-                <span className="row tight" style={{ flexWrap: 'wrap' }}>
-                  <span className={`badge ${TEXTO_FUENTE[f.fuente]?.tono ?? 'gray'}`}>{TEXTO_FUENTE[f.fuente]?.texto ?? f.fuente}</span>
-                  {f.equipo && (
-                    <button className="link-btn small" type="button" onClick={() => setEquipo(f.equipo ?? '')} title="Filtrar por este equipo">
-                      <strong>{f.equipo}</strong>
-                    </button>
-                  )}
-                </span>
-                <span className="registro-texto">{f.texto}</span>
-                {(f.persona || f.actor) && (
-                  <span className="tiny muted">
-                    {f.persona && <>Persona: {f.persona}</>}
-                    {f.persona && f.actor && f.actor !== f.persona && ' · '}
-                    {f.actor && f.actor !== f.persona && <>Hecho por: {f.actor}</>}
-                  </span>
-                )}
-              </span>
-            </li>
+        <div className={`registro-dias ${cargando ? 'cargando' : ''}`}>
+          {porDia(datos?.filas ?? []).map(([dia, filas]) => (
+            <section key={dia} className="registro-dia">
+              <h3 className="registro-dia__titulo">{dia}</h3>
+              <ol className="registro-lista2">
+                {filas.map((f, i) => (
+                  <li key={`${f.en}-${i}`} className="registro-mov">
+                    <span className="registro-mov__hora num">{hora(f.en)}</span>
+                    <span className={`registro-mov__marca tono-${TEXTO_FUENTE[f.fuente]?.tono ?? 'gray'}`} aria-hidden="true" />
+                    <span className="registro-mov__cuerpo">
+                      <span className="registro-mov__fuente">
+                        {TEXTO_FUENTE[f.fuente]?.texto ?? f.fuente}
+                        {f.equipo && (
+                          <>
+                            {' · '}
+                            <button className="link-btn" type="button" onClick={() => setEquipo(f.equipo ?? '')} title="Ver solo este equipo">
+                              {f.equipo}
+                            </button>
+                          </>
+                        )}
+                      </span>
+                      <span className="registro-mov__texto">{f.texto}</span>
+                      {(f.persona || f.actor) && (
+                        <span className="registro-mov__quien">
+                          {f.persona && <>{f.persona}</>}
+                          {f.persona && f.actor && f.actor !== f.persona && ' · '}
+                          {f.actor && f.actor !== f.persona && <>lo hizo {f.actor}</>}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
           ))}
-        </ol>
+        </div>
       )}
 
       {total > TAMANO && (

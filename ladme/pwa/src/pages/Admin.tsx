@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom'
 import { esAdmin, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Pestanas from '../components/Pestanas'
-import Icon, { type NombreIcono } from '../components/Icon'
 import { inasistenciasApeladas, listarClases, listarReportes, listarSoftware, listarSolicitudes, verificacionesPendientes } from '../lib/api'
 import Errores from './admin/Errores'
 import Ronda from './admin/Ronda'
@@ -24,11 +23,10 @@ import Consola from './admin/Consola'
  * sigue teniendo su dirección (?tab=faro), así que los enlaces de avisos y del chat no cambian.
  */
 const GRUPOS = [
-  { id: 'hoy', texto: 'Hoy', icono: 'reloj', secciones: [{ id: 'ronda', texto: 'Ronda' }] },
+  { id: 'hoy', texto: 'Hoy', secciones: [{ id: 'ronda', texto: 'Ronda' }] },
   {
     id: 'reservas',
     texto: 'Reservas',
-    icono: 'ticket',
     secciones: [
       { id: 'reservas', texto: 'Reservas' },
       { id: 'solicitudes', texto: 'Solicitudes y clases' },
@@ -38,7 +36,6 @@ const GRUPOS = [
   {
     id: 'equipos',
     texto: 'Equipos',
-    icono: 'monitor',
     secciones: [
       { id: 'faro', texto: 'Faro' },
       { id: 'equipos', texto: 'Inventario' },
@@ -49,7 +46,6 @@ const GRUPOS = [
   {
     id: 'historial',
     texto: 'Historial',
-    icono: 'grafica',
     secciones: [
       { id: 'registro', texto: 'Registro' },
       { id: 'estadisticas', texto: 'Estadísticas' },
@@ -59,7 +55,6 @@ const GRUPOS = [
   {
     id: 'herramientas',
     texto: 'Herramientas',
-    icono: 'ajustes',
     secciones: [
       { id: 'consola', texto: 'Consola' },
       { id: 'politicas', texto: 'Políticas', soloAdmin: true }
@@ -91,36 +86,35 @@ function usePendientes(): Record<string, number> {
   return n
 }
 
-/** Grupos como un control segmentado con una «pastilla» que se desliza hasta el activo. */
+/** Grupos como una fila de chips: el texto siempre visible y el número de pendientes al lado. */
 function Grupos({ grupos, actual, pendientes, alCambiar }: {
-  grupos: Array<{ id: string; texto: string; icono: string; secciones: Seccion[] }>
+  grupos: Array<{ id: string; texto: string; secciones: Seccion[] }>
   actual: string
   pendientes: Record<string, number>
   alCambiar: (id: string) => void
 }) {
   const caja = useRef<HTMLDivElement>(null)
-  const [pastilla, setPastilla] = useState<{ x: number; w: number } | null>(null)
+  const firma = Object.values(pendientes).join()
+  // El grupo activo queda centrado en la fila (en el celular no caben todos).
   useLayoutEffect(() => {
-    const medir = () => {
-      const b = caja.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
-      if (!b) return
-      setPastilla({ x: b.offsetLeft, w: b.offsetWidth })
-      b.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+    const centrar = () => {
+      const c = caja.current
+      const b = c?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+      if (c && b) c.scrollTo({ left: b.offsetLeft - (c.clientWidth - b.offsetWidth) / 2, behavior: 'instant' })
     }
-    medir()
-    const ro = new ResizeObserver(medir)
-    if (caja.current) ro.observe(caja.current)
-    return () => ro.disconnect()
-  }, [actual, grupos.length])
+    centrar()
+    const r = requestAnimationFrame(centrar)
+    void document.fonts?.ready.then(centrar)
+    return () => cancelAnimationFrame(r)
+    // Los números de pendientes llegan después y ensanchan los chips: se vuelve a centrar.
+  }, [actual, firma])
   return (
     <div className="admin-grupos" role="tablist" aria-label="Grupos de administración" ref={caja}>
-      {pastilla && <span className="admin-grupos__pastilla" aria-hidden="true" style={{ transform: `translateX(${pastilla.x}px)`, width: pastilla.w }} />}
       {grupos.map((g) => {
         const n = g.secciones.reduce((t, x) => t + (pendientes[x.id] ?? 0), 0)
         return (
-          <button key={g.id} type="button" role="tab" aria-selected={actual === g.id} onClick={() => alCambiar(g.id)}>
-            <Icon nombre={g.icono as NombreIcono} width={16} height={16} />
-            <span>{g.texto}</span>
+          <button key={g.id} type="button" role="tab" className="chip" aria-selected={actual === g.id} onClick={() => alCambiar(g.id)}>
+            {g.texto}
             {n > 0 && <span className="admin-grupos__n" aria-label={`${n} pendientes`}>{n}</span>}
           </button>
         )
@@ -178,10 +172,7 @@ export default function Admin() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Gestión"
-        titulo="Administración"
-      />
+      <PageHeader titulo="Administración" />
 
       <div className="admin-nav" ref={nav}>
         <Grupos grupos={grupos} actual={grupo.id} pendientes={pendientes} alCambiar={irGrupo} />

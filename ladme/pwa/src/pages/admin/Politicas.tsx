@@ -40,6 +40,31 @@ const NOMBRES: Record<string, { titulo: string; unidad: string; min: number; max
 }
 
 /** Solo administradores. Los cambios aplican de inmediato a las reservas nuevas. */
+type Forma = { titulo: string; ayuda: string | null; tipo: 'numero' | 'interruptor' | 'opciones'; opciones: [string, string][] }
+
+/** Saca del título lo que va entre paréntesis: si es «1 = sí, 0 = no» la regla es un interruptor;
+ *  si enumera todos los valores («0 = … · 1 = …») es una lista; si no, queda como ayuda. */
+function forma(clave: string, regla?: { titulo: string; min: number; max: number }): Forma {
+  if (!regla) return { titulo: clave, ayuda: null, tipo: 'numero', opciones: [] }
+  const m = regla.titulo.match(/^(.*?)\s*\((.*)\)\.?\s*(.*)$/)
+  if (!m) return { titulo: regla.titulo, ayuda: null, tipo: 'numero', opciones: [] }
+  const [, titulo, dentro, despues] = m
+  if (regla.min === 0 && regla.max === 1 && /^1 = /.test(dentro)) return { titulo, ayuda: despues || null, tipo: 'interruptor', opciones: [] }
+  const partes = dentro.split(' · ').map((x) => x.match(/^(\d+) = (.+)$/))
+  if (partes.every(Boolean) && partes.length === regla.max - regla.min + 1) {
+    const opciones = partes.map((x) => [x![1], x![2].charAt(0).toUpperCase() + x![2].slice(1)] as [string, string])
+    return { titulo, ayuda: despues || null, tipo: 'opciones', opciones }
+  }
+  return { titulo, ayuda: [dentro.charAt(0).toUpperCase() + dentro.slice(1), despues].filter(Boolean).join('. '), tipo: 'numero', opciones: [] }
+}
+
+const GRUPOS: [string, (clave: string) => boolean][] = [
+  ['Reservas', (c) => !/^(faro_|sala_|inasistencia|tolerancia_llegada|llegada_modo|liberar_no_show)/.test(c)],
+  ['Llegada e inasistencias', (c) => /^(inasistencia|tolerancia_llegada|llegada_modo|liberar_no_show)/.test(c)],
+  ['Faro', (c) => c.startsWith('faro_')],
+  ['Horario automático de la sala', (c) => c.startsWith('sala_')]
+]
+
 export default function Politicas() {
   const toast = useToast()
   const lim = useLimites()
@@ -95,46 +120,67 @@ export default function Politicas() {
   if (cargando) return <Cargando texto="Cargando políticas…" />
 
   return (
-    <section className="card stack">
-      <p className="small muted" style={{ margin: 0 }}>
-        Estas reglas las hace cumplir la base de datos. Cambiarlas no modifica las reservas que ya existen.
+    <section className="stack">
+      <p className="admin-barra__texto">
+        La base de datos hace cumplir estas reglas. Cambiarlas no modifica las reservas que ya existen.
       </p>
-      <div className="grid cols-2 gap-sm">
-        {lista.map((p) => {
-          const regla = NOMBRES[p.clave]
-          return (
-            <div key={p.clave} className="field">
-              <label className="field__label" htmlFor={`pol-${p.clave}`}>
-                {regla?.titulo ?? p.clave}
-              </label>
-              <div className="row" style={{ flexWrap: 'nowrap', gap: 'var(--s2)', alignItems: 'center' }}>
-                <input
-                  id={`pol-${p.clave}`}
-                  type="number"
-                  inputMode="numeric"
-                  min={regla?.min}
-                  max={regla?.max}
-                  value={valores[p.clave] ?? ''}
-                  onChange={(e) => setValores({ ...valores, [p.clave]: e.target.value })}
-                  style={{ maxWidth: 130 }}
-                />
-                <span className="small muted">{regla?.unidad}</span>
-              </div>
+      {GRUPOS.map(([nombre, toca]) => {
+        const del = lista.filter((p) => toca(p.clave))
+        if (!del.length) return null
+        return (
+          <section key={nombre} className="ajustes-grupo">
+            <h2 className="ajustes-grupo__titulo">{nombre}</h2>
+            <div className="ajustes-lista">
+              {del.map((p) => {
+                const regla = NOMBRES[p.clave]
+                const f = forma(p.clave, regla)
+                const id = `pol-${p.clave}`
+                const cambiado = cambios.some((c) => c.clave === p.clave)
+                const valor = valores[p.clave] ?? ''
+                const poner = (v: string) => setValores({ ...valores, [p.clave]: v })
+                return (
+                  <div key={p.clave} className={`ajuste-fila ${f.tipo === 'opciones' ? 'ajuste-fila--apilada' : ''} ${cambiado ? 'cambiado' : ''}`}>
+                    <label className="ajuste-fila__texto" htmlFor={id}>
+                      {f.titulo}
+                      {f.ayuda && <span className="ajuste-fila__ayuda">{f.ayuda}</span>}
+                    </label>
+                    {f.tipo === 'interruptor' ? (
+                      <input id={id} type="checkbox" role="switch" className="interruptor" checked={valor === '1'} onChange={(e) => poner(e.target.checked ? '1' : '0')} />
+                    ) : f.tipo === 'opciones' ? (
+                      <select id={id} value={valor} onChange={(e) => poner(e.target.value)}>
+                        {f.opciones.map(([v, t]) => (
+                          <option key={v} value={v}>{t}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="ajuste-fila__valor">
+                        <input id={id} type="number" inputMode="numeric" min={regla?.min} max={regla?.max} value={valor} onChange={(e) => poner(e.target.value)} />
+                        {regla?.unidad && <span className="ajuste-fila__unidad">{regla.unidad}</span>}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
-      </div>
+          </section>
+        )
+      })}
       {error && (
         <div className="alert danger">
           <Icon nombre="alerta" />
           <div className="alert__body">{error}</div>
         </div>
       )}
-      <div className="row">
-        <button type="button" onClick={guardar} disabled={guardando || cambios.length === 0}>
-          <Icon nombre="check" /> {guardando ? 'Guardando…' : cambios.length ? `Guardar ${cambios.length} cambio(s)` : 'Sin cambios'}
-        </button>
-      </div>
+      {cambios.length > 0 && (
+        <div className="guardar-flotante">
+          <button type="button" className="btn ghost" onClick={() => setValores(Object.fromEntries(lista.map((p) => [p.clave, String(p.valor)])))} disabled={guardando}>
+            Deshacer
+          </button>
+          <button type="button" onClick={guardar} disabled={guardando}>
+            {guardando ? 'Guardando…' : cambios.length === 1 ? 'Guardar 1 cambio' : `Guardar ${cambios.length} cambios`}
+          </button>
+        </div>
+      )}
     </section>
   )
 }

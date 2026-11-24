@@ -5,6 +5,7 @@ import { aInputLocal, aIso, fecha } from '../../lib/format'
 import { Cargando, Empty } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
 import { useToast } from '../../components/Toast'
+import Modal from '../../components/Modal'
 
 /** Bloqueos de gestión: revisión, verificación o cualquier pausa que no sea un mantenimiento formal. */
 export default function Bloqueos() {
@@ -20,6 +21,7 @@ export default function Bloqueos() {
   const [motivo, setMotivo] = useState('')
   const [cancelar, setCancelar] = useState(false)
   const [ocupado, setOcupado] = useState(false)
+  const [abierto, setAbierto] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -61,6 +63,7 @@ export default function Bloqueos() {
       toast.mostrar(r.canceladas ? `Bloqueo creado. Se cancelaron ${r.canceladas} reserva(s) y se avisó a sus titulares.` : 'Bloqueo creado.')
       setMotivo('')
       setCancelar(false)
+      setAbierto(false)
       await cargar()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear el bloqueo.')
@@ -83,107 +86,128 @@ export default function Bloqueos() {
   }
 
   return (
-    <div className="dos-columnas">
-      <form className="card stack" onSubmit={crear} noValidate>
-        <h3 style={{ fontSize: 'var(--text-base)', margin: 0 }}>Nuevo bloqueo</h3>
-        <div className="field">
-          <label className="field__label" htmlFor="bl-equipo">
-            Equipo
-          </label>
-          <select id="bl-equipo" value={equipo} onChange={(e) => setEquipo(e.target.value)}>
-            {equipos.map((e) => (
-              <option key={e.id} value={e.codigo}>
-                {e.codigo} · {e.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid cols-2 gap-sm">
-          <div className="field">
-            <label className="field__label" htmlFor="bl-desde">
-              Desde
-            </label>
-            <input id="bl-desde" type="datetime-local" value={desde} onChange={(e) => setDesde(e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor="bl-hasta">
-              Hasta
-            </label>
-            <input id="bl-hasta" type="datetime-local" value={hasta} onChange={(e) => setHasta(e.target.value)} />
-          </div>
-        </div>
-        <div className="field">
-          <label className="field__label" htmlFor="bl-motivo">
-            Motivo (lo ven todos en la ficha del equipo)
-          </label>
-          <input id="bl-motivo" value={motivo} maxLength={200} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej. Revisión de disco" />
-        </div>
-        {afectadas.length > 0 && (
-          <div className="alert warn">
-            <Icon nombre="alerta" />
-            <div className="alert__body">
-              <strong>{afectadas.length} reserva(s) chocan con ese intervalo:</strong>
-              <ul className="tiny" style={{ margin: '4px 0', paddingLeft: '1rem' }}>
-                {afectadas.slice(0, 5).map((r) => (
-                  <li key={r.id}>
-                    {r.perfiles?.nombre} · {fecha(r.inicio)} → {fecha(r.fin)}
-                  </li>
-                ))}
-              </ul>
-              <label className="check-row" style={{ marginTop: 6 }}>
-                <input type="checkbox" checked={cancelar} onChange={(e) => setCancelar(e.target.checked)} />
-                <span>
-                  <strong>Cancelarlas y avisar a sus titulares</strong>
-                  El motivo del bloqueo se les envía.
-                </span>
-              </label>
-            </div>
-          </div>
-        )}
-        {error && (
-          <div className="alert danger">
-            <Icon nombre="alerta" />
-            <div className="alert__body">{error}</div>
-          </div>
-        )}
-        <div className="row">
-          <button type="submit" disabled={ocupado || !equipo}>
-            <Icon nombre="prohibido" /> Bloquear equipo
-          </button>
-        </div>
-        <p className="tiny muted" style={{ margin: 0 }}>
-          Para una intervención técnica con historial y validación, use «Mantenimiento»: crea su propio bloqueo.
+    <>
+      <div className="admin-barra">
+        <p className="admin-barra__texto">
+          Un bloqueo pausa las reservas de un equipo por un rato. Para una intervención técnica con historial, use Mantenimiento.
         </p>
-      </form>
+        <button type="button" onClick={() => { setError(null); setAbierto(true) }} disabled={!equipos.length}>
+          <Icon nombre="mas2" /> Nuevo bloqueo
+        </button>
+      </div>
 
-      <section className="stack">
+      <section className="stack" aria-label="Bloqueos vigentes y próximos">
         {cargando && <Cargando texto="Cargando bloqueos…" />}
         {!cargando && bloqueos.length === 0 && (
-          <div className="card">
-            <Empty icono="check-circulo" titulo="Sin bloqueos vigentes">
-              Todos los equipos activos se pueden reservar.
-            </Empty>
+          <Empty icono="check-circulo" titulo="Sin bloqueos vigentes">
+            Todos los equipos activos se pueden reservar.
+          </Empty>
+        )}
+        {bloqueos.length > 0 && (
+          <div className="lista-plana">
+            {bloqueos.map((b) => (
+              <article key={b.id} className="ronda-fila">
+                <span className={`punto-estado ${new Date(b.inicio) <= new Date() ? 'bloqueado' : 'inactivo'}`} aria-hidden="true" />
+                <div className="ronda-fila__texto">
+                  <p className="ronda-fila__titulo">
+                    <span className="ronda-fila__codigo">{b.equipos?.codigo}</span>
+                    <span>{b.motivo}</span>
+                  </p>
+                  <p className="ronda-fila__meta">
+                    {new Date(b.inicio) <= new Date() ? `Hasta ${fecha(b.fin)}` : `${fecha(b.inicio)} → ${fecha(b.fin)}`}
+                    {b.perfiles?.nombre ? ` · lo puso ${b.perfiles.nombre}` : ''}
+                  </p>
+                </div>
+                <div className="ronda-fila__acciones">
+                  <button className="btn gray sm" type="button" disabled={ocupado} onClick={() => quitar(b.id)}>
+                    Quitar
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
         )}
-        {bloqueos.map((b) => (
-          <article key={b.id} className="card tight">
-            <div className="row between" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
-              <div style={{ minWidth: 0 }}>
-                <strong>{b.equipos?.codigo}</strong>
-                <p className="small" style={{ margin: '2px 0' }}>
-                  {b.motivo}
-                </p>
-                <p className="tiny muted" style={{ margin: 0 }}>
-                  {fecha(b.inicio)} → {fecha(b.fin)} · {b.perfiles?.nombre}
-                </p>
-              </div>
-              <button className="btn gray sm" type="button" disabled={ocupado} onClick={() => quitar(b.id)}>
-                Quitar
-              </button>
-            </div>
-          </article>
-        ))}
       </section>
-    </div>
+
+      <Modal
+        abierto={abierto}
+        titulo="Nuevo bloqueo"
+        descripcion="El motivo se muestra en la ficha del equipo."
+        onCerrar={() => setAbierto(false)}
+        pie={
+          <>
+            <button className="btn ghost" type="button" onClick={() => setAbierto(false)}>
+              Cancelar
+            </button>
+            <button type="submit" form="bl-form" disabled={ocupado || !equipo}>
+              Bloquear equipo
+            </button>
+          </>
+        }
+      >
+        <form id="bl-form" className="stack" onSubmit={crear} noValidate>
+          <div className="field">
+            <label className="field__label" htmlFor="bl-equipo">
+              Equipo
+            </label>
+            <select id="bl-equipo" value={equipo} onChange={(e) => setEquipo(e.target.value)}>
+              {equipos.map((e) => (
+                <option key={e.id} value={e.codigo}>
+                  {e.codigo} · {e.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid cols-2 gap-sm">
+            <div className="field">
+              <label className="field__label" htmlFor="bl-desde">
+                Desde
+              </label>
+              <input id="bl-desde" type="datetime-local" value={desde} onChange={(e) => setDesde(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field__label" htmlFor="bl-hasta">
+                Hasta
+              </label>
+              <input id="bl-hasta" type="datetime-local" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+            </div>
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor="bl-motivo">
+              Motivo
+            </label>
+            <input id="bl-motivo" value={motivo} maxLength={200} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej. Revisión de disco" />
+          </div>
+          {afectadas.length > 0 && (
+            <div className="alert warn">
+              <Icon nombre="alerta" />
+              <div className="alert__body">
+                <strong>{afectadas.length} reserva(s) chocan con ese intervalo:</strong>
+                <ul className="tiny" style={{ margin: '4px 0', paddingLeft: '1rem' }}>
+                  {afectadas.slice(0, 5).map((r) => (
+                    <li key={r.id}>
+                      {r.perfiles?.nombre} · {fecha(r.inicio)} → {fecha(r.fin)}
+                    </li>
+                  ))}
+                </ul>
+                <label className="check-row" style={{ marginTop: 6 }}>
+                  <input type="checkbox" checked={cancelar} onChange={(e) => setCancelar(e.target.checked)} />
+                  <span>
+                    <strong>Cancelarlas y avisar a sus titulares</strong>
+                    El motivo del bloqueo se les envía.
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+          {error && (
+            <div className="alert danger">
+              <Icon nombre="alerta" />
+              <div className="alert__body">{error}</div>
+            </div>
+          )}
+        </form>
+      </Modal>
+    </>
   )
 }

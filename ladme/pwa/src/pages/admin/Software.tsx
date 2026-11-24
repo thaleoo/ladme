@@ -46,7 +46,7 @@ export default function Software() {
   const fecha = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })
 
   return (
-    <section className="card tight stack">
+    <section className="stack">
       <div className="section-title" style={{ marginTop: 0 }}>
         <h2>Solicitudes de software</h2>
         <button className="link-btn small" type="button" onClick={() => setTodas((v) => !v)}>{todas ? 'Ver solo abiertas' : 'Ver todas'}</button>
@@ -56,44 +56,41 @@ export default function Software() {
       ) : lista.length === 0 ? (
         <p className="small muted" style={{ margin: 0 }}>{todas ? 'Aún no hay solicitudes.' : 'No hay solicitudes abiertas.'}</p>
       ) : (
-        <ul className="verificaciones" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul className="tarjetas-admin">
           {lista.map((s) => {
             const abierta = s.estado === 'pendiente' || s.estado === 'en_tramite'
             return (
-              <li key={s.id} className="verificacion software-item">
-                <span className="verificacion__d">
-                  <strong>
-                    {s.software}{s.version ? ` ${s.version}` : ''} <span className={`badge ${ESTADO_SOFTWARE[s.estado].tono}`}>{ESTADO_SOFTWARE[s.estado].texto}</span>
-                  </strong>
-                  <span className="small muted">
-                    {s.perfiles?.nombre ?? 'Persona'} · {s.para_fecha ? `para el ${fecha(s.para_fecha)}` : 'sin fecha'}
-                    {s.equipos?.codigo ? ` · ${s.equipos.codigo}` : ''}{s.reserva_id ? ' · con reserva' : ''} · {hace(s.creado_en)}
-                  </span>
-                </span>
-                {abierta ? (
-                  <span className="row tight">
-                    {s.estado === 'pendiente' && (
-                      <button type="button" className="btn sm ghost" disabled={ocupado}
-                              onClick={() => void hacer(() => actualizarSoftware(s.id, 'en_tramite'), 'Marcada como enviada a TI.')}>
-                        Enviada a TI
-                      </button>
-                    )}
+              <li key={s.id} className="tarjeta-admin">
+                <div className="tarjeta-admin__cabeza">
+                  <strong className="tarjeta-admin__titulo">{s.software}{s.version ? ` ${s.version}` : ''}</strong>
+                  <span className={`badge ${ESTADO_SOFTWARE[s.estado].tono}`}>{ESTADO_SOFTWARE[s.estado].texto}</span>
+                </div>
+                <p className="tarjeta-admin__meta">
+                  {s.perfiles?.nombre ?? 'Persona'} · {s.para_fecha ? `para el ${fecha(s.para_fecha)}` : 'sin fecha'}
+                  {s.equipos?.codigo ? ` · ${s.equipos.codigo}` : ''}{s.reserva_id ? ' · con reserva' : ''} · {hace(s.creado_en)}
+                </p>
+                <p className="tarjeta-admin__cita">
+                  {s.uso}
+                  {s.enlace && <> · <a href={s.enlace} target="_blank" rel="noreferrer noopener">enlace</a></>}
+                </p>
+                {s.estado === 'instalado' && s.equipos_instalados.length > 0 && <p className="tarjeta-admin__meta">Instalado en {s.equipos_instalados.join(', ')}</p>}
+                {s.respuesta && <p className="tarjeta-admin__meta">Respuesta: {s.respuesta}</p>}
+                {abierta && (
+                  <div className="tarjeta-admin__acciones">
                     <button type="button" className="btn sm" disabled={ocupado}
                             onClick={() => setInstalar({ s, elegidos: s.equipos?.codigo ? [s.equipos.codigo] : [] })}>
                       <Icon nombre="check" width={14} height={14} /> Instalado
                     </button>
-                  </span>
-                ) : <span />}
-                <p className="verificacion__m">
-                  «{s.uso}»
-                  {s.enlace && <> · <a href={s.enlace} target="_blank" rel="noreferrer noopener">enlace</a></>}
-                  {s.estado === 'instalado' && s.equipos_instalados.length > 0 && <> · instalado en {s.equipos_instalados.join(', ')}</>}
-                  {s.respuesta && <> · {s.respuesta}</>}
-                </p>
-                {abierta && (
-                  <button type="button" className="link-btn tiny software-item__no" onClick={() => setRechazar({ s, motivo: '' })}>
-                    No se instalará…
-                  </button>
+                    {s.estado === 'pendiente' && (
+                      <button type="button" className="btn sm gray" disabled={ocupado}
+                              onClick={() => void hacer(() => actualizarSoftware(s.id, 'en_tramite'), 'Marcada como enviada a TI.')}>
+                        Enviada a TI
+                      </button>
+                    )}
+                    <button type="button" className="btn sm ghost" onClick={() => setRechazar({ s, motivo: '' })}>
+                      No se instalará
+                    </button>
+                  </div>
                 )}
               </li>
             )

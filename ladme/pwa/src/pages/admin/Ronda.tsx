@@ -57,10 +57,69 @@ export default function Ronda() {
     })
   }, [equipos, reservas, lim.toleranciaMin])
 
-  const enUso = filas.filter((f) => f.actual?.tipo === 'reserva').length
-  const ausentes = filas.filter((f) => f.sinLlegada).length
+  const grupos = useMemo(() => {
+    const atencion = filas.filter((f) => f.sinLlegada)
+    const enUso = filas.filter((f) => f.actual?.tipo === 'reserva' && !f.sinLlegada)
+    const fuera = filas.filter((f) => f.e.estado !== 'activo' || f.actual?.tipo === 'bloqueo')
+    const libres = filas.filter((f) => !f.actual && f.e.estado === 'activo')
+    return { atencion, enUso, fuera, libres }
+  }, [filas])
 
   if (cargando) return <Cargando texto="Cargando ronda…" />
+
+  const resumen: [number, string, string][] = [
+    [grupos.libres.length, grupos.libres.length === 1 ? 'libre' : 'libres', 'libre'],
+    [grupos.enUso.length + grupos.atencion.length, 'en uso', 'ocupado'],
+    [grupos.atencion.length, 'sin llegada', 'alerta'],
+    [grupos.fuera.length, 'fuera de servicio', 'inactivo']
+  ]
+
+  function Fila({ e, actual, proxima, sinLlegada }: (typeof filas)[number]) {
+    const tono = e.estado !== 'activo' ? 'inactivo' : actual?.tipo === 'bloqueo' ? 'bloqueado' : sinLlegada ? 'alerta' : 'ocupado'
+    const reserva = actual?.tipo === 'reserva' ? actual : null
+    return (
+      <article className={`ronda-fila ${reserva ? 'abrible' : ''}`}>
+        <span className={`punto-estado ${tono}`} aria-hidden="true" />
+        <div className="ronda-fila__texto">
+          <p className="ronda-fila__titulo">
+            <Link to={`/equipo/${e.codigo}`} className="ronda-fila__codigo">{e.codigo}</Link>
+            {reserva && (
+              <Link className="ronda-fila__abrir" to={`/admin/reservas/${reserva.id}`}>
+                {reserva.perfiles?.nombre ?? 'Sin titular'}
+                <span className="solo-lector"> · ver detalle de la reserva</span>
+              </Link>
+            )}
+          </p>
+          {reserva && (
+            <p className="ronda-fila__meta">
+              {sinLlegada ? 'No ha registrado llegada' : reserva.llegada_en ? `Llegó ${hace(reserva.llegada_en)}` : 'Aún en tolerancia'}
+              {' · hasta '}{fecha(reserva.fin)}
+              {reserva.actividad ? ` · ${reserva.actividad}` : ''}
+            </p>
+          )}
+          {reserva?.desatendido && <p className="ronda-fila__nota">Desatendido{reserva.mensaje_llegada ? `: «${reserva.mensaje_llegada}»` : ''}</p>}
+          {actual?.tipo === 'bloqueo' && <p className="ronda-fila__meta">{actual.motivo} · hasta {fecha(actual.fin)}</p>}
+          {e.estado !== 'activo' && !actual && <p className="ronda-fila__meta">{e.estado === 'mantenimiento' ? 'En mantenimiento' : e.estado.replace(/_/g, ' ')}</p>}
+          {proxima && <p className="ronda-fila__meta">Después: {fecha(proxima.inicio)}</p>}
+        </div>
+        {reserva && (
+          <div className="ronda-fila__acciones">
+            {!reserva.llegada_en && (
+              <button className="btn sm" type="button" onClick={() => setAccion({ tipo: 'llegada', reserva })}>
+                Llegó
+              </button>
+            )}
+            <button className="btn gray sm" type="button" onClick={() => setAccion({ tipo: 'liberar', reserva })}>
+              Liberar
+            </button>
+            <button className="btn gray sm" type="button" onClick={() => setAccion({ tipo: 'cancelar', reserva })}>
+              Cancelar
+            </button>
+          </div>
+        )}
+      </article>
+    )
+  }
 
   return (
     <>
@@ -71,93 +130,48 @@ export default function Ronda() {
         </div>
       )}
 
-      <div className="stats">
-        <div className="stat ok">
-          <div className="stat__label">Libres ahora</div>
-          <div className="stat__value">{filas.filter((f) => !f.actual && f.e.estado === 'activo').length}</div>
-        </div>
-        <div className="stat brand">
-          <div className="stat__label">En uso</div>
-          <div className="stat__value">{enUso}</div>
-        </div>
-        <div className={`stat ${ausentes ? 'warn' : ''}`}>
-          <div className="stat__label">Sin llegada</div>
-          <div className="stat__value">{ausentes}</div>
-        </div>
-        <div className="stat">
-          <div className="stat__label">Bloqueados o fuera de servicio</div>
-          <div className="stat__value">{filas.filter((f) => f.actual?.tipo === 'bloqueo' || f.e.estado !== 'activo').length}</div>
-        </div>
-      </div>
-
-      <div className="grid" style={{ gap: 'var(--s2)' }}>
-        {filas.map(({ e, actual, proxima, sinLlegada }) => (
-          <article key={e.id} className="ronda">
-            <div className="ronda__equipo">
-              <Link to={`/equipo/${e.codigo}`}>{e.codigo}</Link>
-              <span className="tiny muted">{e.nombre}</span>
-            </div>
-            <div className="ronda__estado">
-              {e.estado !== 'activo' ? (
-                <span className="badge gray">{e.estado.replace(/_/g, ' ')}</span>
-              ) : !actual ? (
-                <span className="badge ok">
-                  <span className="punto" /> Libre
-                </span>
-              ) : actual.tipo === 'bloqueo' ? (
-                <span className="badge gray">Bloqueado</span>
-              ) : sinLlegada ? (
-                <span className="badge warn">Sin llegada</span>
-              ) : (
-                <span className="badge info">En uso</span>
-              )}
-            </div>
-            <div className="ronda__detalle">
-              {actual?.tipo === 'reserva' && (
-                <>
-                  <strong>{actual.perfiles?.nombre}</strong>
-                  <span className="tiny muted" style={{ wordBreak: 'break-all' }}>
-                    {actual.perfiles?.correo} · {actual.actividad ?? 'Sin actividad'}
-                  </span>
-                  <span className="tiny">
-                    Hasta {fecha(actual.fin)}
-                    {actual.llegada_en ? ` · llegó ${hace(actual.llegada_en)}` : ''}
-                  </span>
-                  {actual.desatendido && (
-                    <span className="tiny">
-                      <span className="badge warn">Desatendido</span> {actual.mensaje_llegada}
-                    </span>
-                  )}
-                </>
-              )}
-              {actual?.tipo === 'bloqueo' && (
-                <span className="tiny">
-                  {actual.motivo} · hasta {fecha(actual.fin)}
-                </span>
-              )}
-              {!actual && <span className="tiny muted">{proxima ? `Próxima: ${fecha(proxima.inicio)}` : 'Sin reservas próximas'}</span>}
-              {actual && proxima && <span className="tiny muted">Luego: {fecha(proxima.inicio)}</span>}
-            </div>
-            <div className="ronda__acciones">
-              {actual?.tipo === 'reserva' && (
-                <>
-                  {!actual.llegada_en && (
-                    <button className="btn ok sm" type="button" onClick={() => setAccion({ tipo: 'llegada', reserva: actual })}>
-                      Llegó
-                    </button>
-                  )}
-                  <button className="btn gray sm" type="button" onClick={() => setAccion({ tipo: 'liberar', reserva: actual })}>
-                    Liberar
-                  </button>
-                  <button className="btn danger sm" type="button" onClick={() => setAccion({ tipo: 'cancelar', reserva: actual })}>
-                    Cancelar
-                  </button>
-                </>
-              )}
-            </div>
-          </article>
+      <div className="ronda-resumen" role="list" aria-label="Resumen de la sala">
+        {resumen.map(([n, texto, tono]) => (
+          <div key={texto} role="listitem" className={`ronda-resumen__dato ${tono === 'alerta' && n === 0 ? 'cero' : ''}`}>
+            <span className="ronda-resumen__n">{n}</span>
+            <span className="ronda-resumen__t"><span className={`punto-estado ${tono}`} aria-hidden="true" />{texto}</span>
+          </div>
         ))}
       </div>
+
+      {grupos.atencion.length > 0 && (
+        <section className="ronda-grupo">
+          <h2 className="ronda-grupo__titulo">Sin registrar llegada</h2>
+          <p className="ronda-grupo__sub">Pasó la tolerancia de {lim.toleranciaMin} min. Confirme si la persona está o libere el equipo.</p>
+          {grupos.atencion.map((f) => <Fila key={f.e.id} {...f} />)}
+        </section>
+      )}
+
+      <section className="ronda-grupo">
+        <h2 className="ronda-grupo__titulo">En uso</h2>
+        {grupos.enUso.length === 0 ? <p className="ronda-grupo__sub">Nadie está usando un equipo en este momento.</p> : grupos.enUso.map((f) => <Fila key={f.e.id} {...f} />)}
+      </section>
+
+      {grupos.fuera.length > 0 && (
+        <section className="ronda-grupo">
+          <h2 className="ronda-grupo__titulo">Bloqueados o fuera de servicio</h2>
+          {grupos.fuera.map((f) => <Fila key={f.e.id} {...f} />)}
+        </section>
+      )}
+
+      {grupos.libres.length > 0 && (
+        <section className="ronda-grupo">
+          <h2 className="ronda-grupo__titulo">Libres</h2>
+          <div className="ronda-libres">
+            {grupos.libres.map(({ e, proxima }) => (
+              <Link key={e.id} to={`/equipo/${e.codigo}`} className="ronda-libre">
+                <strong>{e.codigo}</strong>
+                <span>{proxima ? `Reservado ${fecha(proxima.inicio)}` : 'Sin reservas próximas'}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <AccionesReserva accion={accion} admin={esAdmin(perfil)} alCerrar={() => setAccion(null)} alTerminar={cargar} />
     </>

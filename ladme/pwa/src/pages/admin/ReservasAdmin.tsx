@@ -10,6 +10,12 @@ import { Cargando, Empty } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
 import AccionesReserva, { type Accion } from './AccionesReserva'
 
+/** «2026-11-17» → «17 nov». */
+function diaCorto(iso: string): string {
+  if (!iso) return '…'
+  return new Date(`${iso}T12:00`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }).replace('.', '')
+}
+
 const ESTADOS = ['Todas', 'Vigentes', 'En curso', 'Programada', 'Sin registrar llegada', 'Finalizada', 'Cancelada']
 const CLAVE_FILTROS = 'ladme-panel-reservas'
 
@@ -57,6 +63,7 @@ export default function ReservasAdmin() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [accion, setAccion] = useState<Accion>(null)
+  const [fechasAbiertas, setFechasAbiertas] = useState(false)
   const cambiar = (x: Partial<Filtros>) => setF((y) => ({ ...y, ...x }))
 
   useEffect(() => {
@@ -118,58 +125,50 @@ export default function ReservasAdmin() {
 
   return (
     <>
-      <section className="card">
-        <div className="row" style={{ gap: 'var(--s3)', alignItems: 'flex-end' }}>
-          <div className="field" style={{ flex: '2 1 220px' }}>
-            <label className="field__label" htmlFor="ra-buscar">
-              Buscar
-            </label>
-            <input
-              id="ra-buscar"
-              type="search"
-              value={f.texto}
-              onChange={(e) => cambiar({ texto: e.target.value })}
-              placeholder="Nombre, correo, equipo, código, docente…"
-            />
-          </div>
-          <div className="field" style={{ flex: '1 1 140px' }}>
-            <label className="field__label" htmlFor="ra-estado">
-              Estado
-            </label>
-            <select id="ra-estado" value={f.estado} onChange={(e) => cambiar({ estado: e.target.value })}>
+      <section className="filtros-admin" aria-label="Filtros">
+        <label className="disp-buscar">
+          <Icon nombre="buscar" width={20} height={20} />
+          <span className="solo-lector">Buscar reservas</span>
+          <input type="search" value={f.texto} onChange={(e) => cambiar({ texto: e.target.value })} placeholder="Nombre, correo, equipo, código o docente" />
+        </label>
+        <div className="chips-desliza">
+          <label className={`chip chip--select ${f.estado !== 'Todas' ? 'activo' : ''}`}>
+            <span className="solo-lector">Estado</span>
+            <select value={f.estado} onChange={(e) => cambiar({ estado: e.target.value })}>
               {ESTADOS.map((x) => (
-                <option key={x}>{x}</option>
+                <option key={x} value={x}>{x === 'Todas' ? 'Todos los estados' : x}</option>
               ))}
             </select>
-          </div>
-          <div className="field" style={{ flex: '1 1 140px' }}>
-            <label className="field__label" htmlFor="ra-actividad">
-              Actividad
-            </label>
-            <select id="ra-actividad" value={f.actividad} onChange={(e) => cambiar({ actividad: e.target.value })}>
+          </label>
+          <label className={`chip chip--select ${f.actividad !== 'Todas' ? 'activo' : ''}`}>
+            <span className="solo-lector">Actividad</span>
+            <select value={f.actividad} onChange={(e) => cambiar({ actividad: e.target.value })}>
               {['Todas', ...ACTIVIDADES].map((x) => (
-                <option key={x}>{x}</option>
+                <option key={x} value={x}>{x === 'Todas' ? 'Todas las actividades' : x}</option>
               ))}
             </select>
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor="ra-desde">
-              Desde
-            </label>
-            <input id="ra-desde" type="date" value={f.desde} onChange={(e) => cambiar({ desde: e.target.value })} />
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor="ra-hasta">
-              Hasta
-            </label>
-            <input id="ra-hasta" type="date" value={f.hasta} onChange={(e) => cambiar({ hasta: e.target.value })} />
-          </div>
-          <button className="btn ghost" type="button" onClick={exportar} disabled={!filtradas.length}>
-            <Icon nombre="descargar" /> CSV
+          </label>
+          <button type="button" className="chip" aria-expanded={fechasAbiertas} onClick={() => setFechasAbiertas((v) => !v)}>
+            <Icon nombre="calendario" width={16} height={16} /> {diaCorto(f.desde)} – {diaCorto(f.hasta)}
+          </button>
+          <button type="button" className="chip" onClick={exportar} disabled={!filtradas.length}>
+            <Icon nombre="descargar" width={16} height={16} /> CSV
           </button>
         </div>
-        <p className="help" style={{ marginBottom: 0 }}>
-          {filtradas.length} de {reservas.length} reservas en el rango. Toque una para ver todo su detalle.
+        {fechasAbiertas && (
+          <div className="filtros-admin__fechas">
+            <div className="field">
+              <label className="field__label" htmlFor="ra-desde">Desde</label>
+              <input id="ra-desde" type="date" value={f.desde} onChange={(e) => cambiar({ desde: e.target.value })} />
+            </div>
+            <div className="field">
+              <label className="field__label" htmlFor="ra-hasta">Hasta</label>
+              <input id="ra-hasta" type="date" value={f.hasta} onChange={(e) => cambiar({ hasta: e.target.value })} />
+            </div>
+          </div>
+        )}
+        <p className="filtros-admin__total">
+          {filtradas.length === reservas.length ? `${reservas.length} reservas` : `${filtradas.length} de ${reservas.length} reservas`}
         </p>
       </section>
 
@@ -182,15 +181,13 @@ export default function ReservasAdmin() {
       {cargando && <Cargando texto="Cargando reservas…" />}
 
       {!cargando && filtradas.length === 0 && (
-        <div className="card">
-          <Empty icono="ticket" titulo="No hay reservas con ese filtro">
-            Amplíe el rango de fechas o cambie el estado.
-          </Empty>
-        </div>
+        <Empty icono="ticket" titulo="No hay reservas con ese filtro">
+          Amplíe las fechas o cambie el estado.
+        </Empty>
       )}
 
       {!cargando && filtradas.length > 0 && (
-        <div className="grid" style={{ gap: 'var(--s2)' }}>
+        <div className="lista-plana">
           {filtradas.map(({ r, est, t }) => {
             const vigente = !t.sinReclamar && est !== 'Finalizada' && est !== 'Cancelada'
             const enCurso = est === 'En curso' || est === 'Sin registrar llegada'
@@ -242,7 +239,7 @@ export default function ReservasAdmin() {
                   {vigente && (
                     <>
                       {enCurso && !r.llegada_en && (
-                        <button className="btn ok sm" type="button" onClick={() => setAccion({ tipo: 'llegada', reserva: r })}>
+                        <button className="btn sm" type="button" onClick={() => setAccion({ tipo: 'llegada', reserva: r })}>
                           Llegó
                         </button>
                       )}
@@ -254,7 +251,7 @@ export default function ReservasAdmin() {
                           Liberar
                         </button>
                       )}
-                      <button className="btn danger sm" type="button" onClick={() => setAccion({ tipo: 'cancelar', reserva: r })}>
+                      <button className="btn gray sm" type="button" onClick={() => setAccion({ tipo: 'cancelar', reserva: r })}>
                         Cancelar
                       </button>
                     </>

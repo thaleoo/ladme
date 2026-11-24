@@ -152,12 +152,11 @@ export default function Faro() {
 
   return (
     <>
-      <p className="small muted" style={{ margin: 0 }}>
-        Faro corre en cada PC de la sala: muestra la reserva vigente en una isla arriba de la pantalla y, según el modo,
-        avisa o bloquea el equipo cuando no hay reserva. Se recomienda empezar en «Observar» y subir de fase con los datos.
+      <p className="admin-barra__texto">
+        Faro muestra la reserva vigente en cada PC y, según el modo, avisa o bloquea el equipo si no hay reserva. Conviene empezar en «Observar».
       </p>
 
-      <section className="card tight faro-sala">
+      <section className="faro-sala">
         <div className="row between" style={{ flexWrap: 'wrap', gap: 'var(--s2)' }}>
           <div style={{ minWidth: 0 }}>
             <strong>Toda la sala</strong>
@@ -175,19 +174,17 @@ export default function Faro() {
             ))}
           </div>
         </div>
-        <div className="sala-grupos">
-          <div className="sala-grupo">
-            <span className="sala-grupo__t">Avisos</span>
-            <div className="sala-grupo__b">
-              <button className="btn sm" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>Anuncio</button>
-              <a className="btn ghost sm" href="/sala?kiosco=1" target="_blank" rel="noreferrer">Pantalla de la sala</a>
-            </div>
-          </div>
-          <div className="sala-grupo">
-            <span className="sala-grupo__t">Clase</span>
-            <div className="sala-grupo__b">
-              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>Empezar clase</button>
-              <button className="btn ghost sm" type="button" disabled={ocupado}
+        <div className="acciones-rapidas">
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>
+            <Icon nombre="campana" /> <span>Anuncio</span>
+          </button>
+          <a className="accion-rapida" href="/sala?kiosco=1" target="_blank" rel="noreferrer">
+            <Icon nombre="monitor" /> <span>Pantalla de la sala</span>
+          </a>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setClase({ motivo: '', minutos: 120 })}>
+            <Icon nombre="usuarios" /> <span>Empezar clase</span>
+          </button>
+          <button className="accion-rapida" type="button" disabled={ocupado}
                   onClick={() => setConfirmar({
                     titulo: 'Terminar la clase en toda la sala',
                     texto: 'Los equipos de la clase vuelven a necesitar reserva: quien esté trabajando sin reserva puede quedar bloqueado según el modo de Faro. Úselo solo cuando la clase haya terminado.',
@@ -198,23 +195,19 @@ export default function Faro() {
                       toast.mostrar(n ? `Clase terminada en ${n} ${n === 1 ? 'equipo' : 'equipos'}.` : 'No hay clases en curso.')
                     })
                   })}>
-            Terminar clase
+            <Icon nombre="x" /> <span>Terminar clase</span>
           </button>
-            </div>
-          </div>
-          <div className="sala-grupo">
-            <span className="sala-grupo__t">Energía</span>
-            <div className="sala-grupo__b">
-              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>Encender</button>
-              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>Apagar</button>
-            </div>
-          </div>
-          <div className="sala-grupo">
-            <span className="sala-grupo__t">Faro</span>
-            <div className="sala-grupo__b">
-              <button className="btn ghost sm" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>Actualizar Faro</button>
-              {admin && (
-            <button className="btn ghost sm" type="button" disabled={ocupado}
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'encender')}>
+            <Icon nombre="chispa" /> <span>Encender</span>
+          </button>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>
+            <Icon nombre="salir" /> <span>Apagar</span>
+          </button>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>
+            <Icon nombre="actualizar" /> <span>Actualizar Faro</span>
+          </button>
+          {admin && (
+            <button className="accion-rapida" type="button" disabled={ocupado}
                     title={panel.clave_creada_en ? `Clave creada ${hace(panel.clave_creada_en)}` : 'Aún no se ha creado'}
                     onClick={() => setConfirmar({
                       titulo: panel.clave_creada_en ? 'Cambiar la clave de emergencia' : 'Crear la clave de emergencia',
@@ -224,11 +217,9 @@ export default function Faro() {
                         ' Desbloquea cualquier equipo por 2 horas aunque no haya internet, y cada uso avisa al personal.',
                       accion: () => hacer(async () => setClave(await generarClaveFaro()))
                     })}>
-              <Icon nombre="clave" width={14} height={14} /> {panel.clave_creada_en ? 'Clave' : 'Crear clave'}
+              <Icon nombre="clave" /> <span>{panel.clave_creada_en ? 'Clave' : 'Crear clave'}</span>
             </button>
           )}
-            </div>
-          </div>
         </div>
         {panel.anuncios.length > 0 && (
           <ul className="small" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
@@ -242,7 +233,7 @@ export default function Faro() {
         )}
       </section>
 
-      <div className="chips" role="group" aria-label="Filtrar equipos">
+      <div className="chips-desliza" role="group" aria-label="Filtrar equipos">
         {([
           ['todos', 'Todos'], ['linea', 'En línea'], ['sin_senal', 'Sin señal'],
           ['sin_vincular', 'Sin vincular'], ['sin_reserva', 'Uso sin reserva']
