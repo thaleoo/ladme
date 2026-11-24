@@ -13,9 +13,12 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
-const TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
-const CHAT = String(Deno.env.get('TELEGRAM_CHAT_ID') ?? '')
-const SECRETO = Deno.env.get('TELEGRAM_WEBHOOK_SECRET') ?? ''
+// Se limpian espacios y comillas por si el secreto se pegó con ellos.
+const limpio = (v: string | undefined) => String(v ?? '').trim().replace(/^["']|["']$/g, '').trim()
+const TOKEN = limpio(Deno.env.get('TELEGRAM_BOT_TOKEN'))
+const CHAT = limpio(Deno.env.get('TELEGRAM_CHAT_ID'))
+const SECRETO = limpio(Deno.env.get('TELEGRAM_WEBHOOK_SECRET'))
+const PWA = 'https://ladme.pages.dev'
 const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', {
   auth: { persistSession: false }
 })
@@ -26,7 +29,7 @@ type Teclado = Boton[][]
 interface Usuario { id: number; first_name?: string; username?: string }
 interface Mensaje {
   message_id: number
-  chat: { id: number }
+  chat: { id: number; type?: string }
   from?: Usuario
   text?: string
   reply_to_message?: { message_id: number }
@@ -437,7 +440,21 @@ async function motivo(m: Mensaje): Promise<boolean> {
 
 // ------------------------------------------------------------------ Entrada
 async function mensaje(m: Mensaje) {
-  if (String(m.chat.id) !== CHAT || !m.text || !m.from) return
+  if (String(m.chat.id) !== CHAT) {
+    if (m.chat.type === 'private' && m.text) {
+      // Chat privado con el bot: respuesta cortés, sin datos del laboratorio.
+      await tg('sendMessage', {
+        chat_id: m.chat.id,
+        text: `Hola, soy el bot del personal de LADME y solo respondo en el grupo del personal.\nPara ver disponibilidad y reservar: ${PWA}`,
+        disable_web_page_preview: true
+      })
+    } else {
+      // Otro grupo: no responde. Queda en los registros de la función para comparar con TELEGRAM_CHAT_ID.
+      console.warn(`Mensaje ignorado del chat ${m.chat.id} (${m.chat.type ?? '?'}); TELEGRAM_CHAT_ID es ${CHAT ? CHAT.replace(/\d(?=\d{3})/g, '•') : '(vacío)'}`)
+    }
+    return
+  }
+  if (!m.text || !m.from) return
   if (await motivo(m)) return
   if (!m.text.startsWith('/')) return
   const partes = m.text.trim().split(/\s+/)
@@ -449,12 +466,14 @@ async function mensaje(m: Mensaje) {
   } catch (e) {
     r = { texto: `No pude responder: ${String((e as Error).message ?? e).slice(0, 200)}` }
   }
-  if (r) await enviar(r.texto, r.teclado, { reply_to_message_id: m.message_id })
+  r ??= { texto: `No conozco ${cmd}. Escriba /ayuda para ver los comandos.` }
+  await enviar(r.texto, r.teclado, { reply_to_message_id: m.message_id })
 }
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('LADME', { status: 405 })
   if (!SECRETO || req.headers.get('x-telegram-bot-api-secret-token') !== SECRETO) return new Response('no autorizado', { status: 401 })
+  if (!TOKEN || !CHAT) console.error('Faltan los secretos TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID en la función.')
   const u = await req.json().catch(() => null)
   try {
     if (u?.callback_query) await boton(u.callback_query as Callback)

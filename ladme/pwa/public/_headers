@@ -3,3 +3,6 @@
 
 /manifest.webmanifest
   Content-Type: application/manifest+json
+
+/anuncio.mp4
+  Cache-Control: public, max-age=604800

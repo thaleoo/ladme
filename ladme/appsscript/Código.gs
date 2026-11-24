@@ -2935,16 +2935,30 @@ function escH_(t) {
 /** Página de traslado. Un script web no puede redirigir solo: se ofrece un botón (y se intenta abrir). */
 function paginaTraslado_(pwa, e) {
   var activo = (e && e.parameter && e.parameter.asset) ? String(e.parameter.asset).trim() : "";
-  var destino = /^[A-Za-z0-9-]{3,20}$/.test(activo) ? pwa + "/equipo/" + encodeURIComponent(activo.toUpperCase())
-              : (e && e.parameter && e.parameter.action) ? pwa + "/mis-reservas" : pwa + "/";
-  var html = '<!doctype html><html lang="es"><head><base target="_top"><meta charset="utf-8">'
-    + '<style>body{font-family:system-ui,sans-serif;background:#f7f6fb;color:#221e35;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px}'
-    + '.c{max-width:420px;background:#fff;border-radius:20px;padding:28px;text-align:center;box-shadow:0 10px 30px -15px #4c1d95}'
-    + 'a{display:inline-block;margin-top:16px;background:#6d28d9;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px}'
-    + 'p{color:#5b5478}</style></head><body><div class="c"><h2>LADME se mudó</h2>'
-    + '<p>Las reservas del laboratorio ahora se hacen en la nueva aplicación. Ingrese con su cuenta @unal.edu.co.</p>'
-    + '<a href="' + escH_(destino) + '">Abrir LADME</a></div>'
-    + '<script>try{window.top.location.href=' + JSON.stringify(destino) + '}catch(e){}</script></body></html>';
+  var deEquipo = /^[A-Za-z0-9-]{3,20}$/.test(activo);
+  var deCorreo = !!(e && e.parameter && e.parameter.action);
+  var destino = deEquipo ? pwa + "/equipo/" + encodeURIComponent(activo.toUpperCase())
+              : deCorreo ? pwa + "/mis-reservas" : pwa + "/";
+  var estilo = '<style>body{font-family:system-ui,sans-serif;background:#f7f6fb;color:#221e35;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;box-sizing:border-box}'
+    + '.c{max-width:420px;width:100%;background:#fff;border-radius:20px;padding:28px;text-align:center;box-shadow:0 10px 30px -15px #4c1d95;box-sizing:border-box}'
+    + 'h2{margin:0 0 8px}p{color:#5b5478;margin:0 0 16px}'
+    + 'video{display:block;width:100%;max-height:70vh;aspect-ratio:9/16;object-fit:contain;background:#0b0a10;border-radius:14px;margin:0 0 18px}'
+    + 'a{display:inline-block;background:#6d28d9;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px}</style>';
+  var html;
+  if (deEquipo || deCorreo) {
+    // Etiquetas NFC/QR y enlaces de correos viejos: directo a la PWA, sin hacer esperar.
+    html = '<!doctype html><html lang="es"><head><base target="_top"><meta charset="utf-8">' + estilo + '</head><body><div class="c"><h2>LADME se mudó</h2>'
+      + '<p>Las reservas del laboratorio ahora se hacen en la nueva aplicación. Ingrese con su cuenta @unal.edu.co.</p>'
+      + '<a href="' + escH_(destino) + '">Abrir LADME</a></div>'
+      + '<script>try{window.top.location.href=' + JSON.stringify(destino) + '}catch(e){}</script></body></html>';
+  } else {
+    // Visita directa a la página antigua: se queda para mostrar el video de la mudanza.
+    html = '<!doctype html><html lang="es"><head><base target="_top"><meta charset="utf-8">' + estilo + '</head><body><div class="c"><h2>LADME se mudó</h2>'
+      + '<p>Las reservas del laboratorio ahora se hacen en la nueva aplicación. Ingrese con su cuenta @unal.edu.co.</p>'
+      + '<video controls playsinline preload="metadata" poster="' + escH_(pwa + "/anuncio.jpg") + '" src="' + escH_(pwa + "/anuncio.mp4") + '">'
+      + 'Su navegador no puede reproducir el video.</video>'
+      + '<a href="' + escH_(destino) + '">Abrir LADME</a></div></body></html>';
+  }
   return HtmlService.createHtmlOutput(html)
       .setTitle("LADME")
       .addMetaTag("viewport", "width=device-width, initial-scale=1")
