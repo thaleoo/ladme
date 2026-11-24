@@ -221,7 +221,7 @@ export default function Shell() {
 
       <div className="columna">
         <header className="appbar">
-          <Link to="/" className="icon-btn" aria-label="Inicio" style={{ display: 'grid', placeItems: 'center' }}>
+          <Link to="/" className="icon-btn appbar__marca" aria-label="Inicio">
             <Logo size={32} />
           </Link>
           <div className="appbar__titles">

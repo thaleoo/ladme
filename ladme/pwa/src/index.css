@@ -4899,3 +4899,12 @@ a.ronda-fila__codigo:hover { text-decoration: underline; text-underline-offset: 
 .disp-programas__t { font-size: var(--text-sm); font-weight: 600; }
 .disp-programas__res { color: var(--ink-500); font-size: var(--text-sm); }
 .disp-programas__res .link-btn { font-size: inherit; }
+
+/* Marca «Matriz»: cuadrado negro; en tema oscuro, un borde fino para que no se pierda en el fondo */
+.marca__logo { box-shadow: none; border-radius: 11px; }
+@media (prefers-color-scheme: dark) {
+  .marca__logo { box-shadow: 0 0 0 1px var(--line-strong); }
+}
+.appbar__marca.appbar__marca { display: grid; place-items: center; width: 40px; min-height: 40px; border: 0; background: transparent; box-shadow: none; border-radius: 12px; }
+.appbar__marca.appbar__marca svg.marca__logo { width: 32px; height: 32px; border-radius: 9px; }
+.sidebar__brand strong { color: var(--ink-900); font-weight: 600; }
