@@ -948,3 +948,35 @@ declare v perfiles; n int; begin
   update perfiles set perfil_cambios = 0, perfil_cambios_desde = null where id = auth.uid();
   update perfiles set tipo_usuario = 'Estudiante', nombre = v.nombre where id = auth.uid();
 end $$;
+
+-- 0020: orden de inventario y programas marcados a mano que Faro no reconoce.
+do $$
+declare t text; j jsonb; begin
+  perform pg_temp.como('lab@unal.edu.co');
+  t := faro_vincular(faro_codigo_vinculo('UNAL-12') ->> 'codigo', 'PC-12', 'Windows', '0.5.4') ->> 'token';
+  j := faro_orden(array['UNAL-12'], 'inventario');
+  perform faro_orden(array['UNAL-12'], 'inventario');
+  perform pg_temp.ok(j -> 'enviados' ? 'UNAL-12' and (select count(*) from agente_comandos c join equipos e on e.id = c.equipo_id
+                       where e.codigo = 'UNAL-12' and c.tipo = 'inventario' and c.entregado_en is null) = 1,
+                     'el personal pide el inventario y queda una sola orden pendiente');
+  perform pg_temp.falla($q$select faro_orden(array['UNAL-12'], 'formatear')$q$, 'no válida');
+
+  -- Faro latido sin sesión de usuario, como en producción.
+  perform set_config('request.jwt.claim.sub', '', false);
+  j := faro_estado(t, '{"inactivo_seg": 5}');
+  perform pg_temp.ok(exists (select 1 from jsonb_array_elements(j -> 'comandos') c where c ->> 'tipo' = 'inventario'), 'Faro recibe la orden de inventario');
+  perform faro_estado(t, '{"inventario": {"software": ["R", "Python"]}}');
+  perform pg_temp.ok((select software from equipos where codigo = 'UNAL-12') = array['Python', 'R'], 'el primer inventario llena los programas');
+  -- El personal marca un programa que Faro no conoce (como al resolver una solicitud de software).
+  update equipos set software = software || array['GeoDa'] where codigo = 'UNAL-12';
+  perform faro_estado(t, '{"inventario": {"software": ["R", "Python", "QGIS"]}}');
+  perform pg_temp.ok((select software from equipos where codigo = 'UNAL-12') = array['GeoDa', 'Python', 'QGIS', 'R'],
+                     'un inventario nuevo agrega lo instalado y conserva lo marcado a mano');
+  perform faro_estado(t, '{"inventario": {"software": ["R", "QGIS"]}}');
+  perform pg_temp.ok((select software from equipos where codigo = 'UNAL-12') = array['GeoDa', 'QGIS', 'R'],
+                     'lo que Faro deja de ver se quita (se desinstaló) y lo marcado a mano sigue');
+  -- Con sesión del personal, la edición manual se respeta tal cual.
+  perform pg_temp.como('lab@unal.edu.co');
+  update equipos set software = array['QGIS', 'R'] where codigo = 'UNAL-12';
+  perform pg_temp.ok((select software from equipos where codigo = 'UNAL-12') = array['QGIS', 'R'], 'el personal puede quitar a mano un programa');
+end $$;

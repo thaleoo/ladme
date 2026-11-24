@@ -692,6 +692,8 @@ export interface InventarioFaro {
   so_version?: string
   arranque_h?: number
   software?: string[]
+  /** Estado de salud del disco que da el sistema (Faro 0.5 o superior). */
+  disco_salud?: 'ok' | 'advertencia' | 'falla' | null
 }
 
 export interface EventoFaro {
@@ -784,7 +786,7 @@ export async function registrarLlegadaPc(equipo: string, codigo: string): Promis
   if (error) fail('No se pudo registrar la llegada', error)
 }
 
-export type OrdenFaro = 'reiniciar' | 'actualizar' | 'apagar' | 'encender' | 'desinstalar'
+export type OrdenFaro = 'reiniciar' | 'actualizar' | 'apagar' | 'encender' | 'desinstalar' | 'inventario'
 
 export type MotivoOmision = 'sin_faro' | 'ya_encendido' | 'sin_mac' | 'apagado' | 'compartido' | 'clase' | 'bloqueo' | 'reserva' | 'en_espera'
 export interface ResultadoOrden {
@@ -818,7 +820,8 @@ const VERBO: Record<OrdenFaro, string> = {
   apagar: 'Apagado ordenado',
   reiniciar: 'Reinicio de Faro ordenado',
   actualizar: 'Actualización de Faro ordenada',
-  desinstalar: 'Desinstalación de Faro ordenada'
+  desinstalar: 'Desinstalación de Faro ordenada',
+  inventario: 'Lectura de datos pedida'
 }
 
 /**

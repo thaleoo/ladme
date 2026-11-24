@@ -38,6 +38,8 @@ const VINCULAR: &str = "vincular";
 const PREFIJO_BLOQUEO: &str = "bloqueo-";
 /// Cuánto dura un desbloqueo con la clave de emergencia.
 const EMERGENCIA_HORAS: i64 = 2;
+/// Cada cuánto se vuelve a medir el equipo y a leer los programas instalados.
+const INVENTARIO_CADA_SEG: u64 = 3600;
 
 struct Nucleo {
     carpeta: PathBuf,
@@ -53,6 +55,8 @@ struct Nucleo {
     aviso_local: Option<(String, Instant)>,
     /// Inventario recolectado que falta enviar en el próximo latido.
     inventario_pendiente: Option<Value>,
+    /// El panel pidió «Actualizar datos»: el inventario se recolecta en la próxima vuelta.
+    inventario_ya: bool,
 }
 
 /// Despierta al ciclo de actualizaciones cuando el panel ordena «Actualizar ahora».
@@ -309,6 +313,12 @@ async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg
             ordenes::despertar(&macs).map(|n| format!("paquete enviado a {n} equipos"))
         }
         "desinstalar" => ordenes::se_puede_retirar().map(|_| "retirándose".into()),
+        "inventario" => {
+            let mut n = compartido.lock().unwrap();
+            n.inventario_ya = true;
+            n.forzar = true;
+            Ok("leyendo el equipo y sus programas".into())
+        }
         otro => Err(format!("orden desconocida: {otro}")),
     };
     let (ok, texto) = match &resultado {
@@ -335,7 +345,8 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
     let api = Api::new();
     let mut medidor = inventario::Medidor::new();
     let mut lector = inventario::Programas::new();
-    // El inventario se recolecta al minuto de arrancar y luego cada 6 horas.
+    // El inventario (salud del disco, memoria, programas instalados) se recolecta al minuto de
+    // arrancar, luego cada hora y cuando el panel pide «Actualizar datos».
     let mut proximo_inventario = Instant::now() + Duration::from_secs(60);
     let mut ultimo_latido: Option<Instant> = None;
     let mut ultimo_intento_vinculo: Option<Instant> = None;
@@ -362,8 +373,9 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
             n.forzar = false;
             (n.config.token.is_some(), toca)
         };
-        if vinculado && Instant::now() >= proximo_inventario {
-            proximo_inventario = Instant::now() + Duration::from_secs(6 * 3600);
+        let pedido = std::mem::take(&mut compartido.lock().unwrap().inventario_ya);
+        if vinculado && (pedido || Instant::now() >= proximo_inventario) {
+            proximo_inventario = Instant::now() + Duration::from_secs(INVENTARIO_CADA_SEG);
             let c = compartido.clone();
             tauri::async_runtime::spawn_blocking(move || {
                 let inv = inventario::recolectar();
@@ -664,6 +676,7 @@ pub fn run() {
                 espera_hasta: None,
                 aviso_local: None,
                 inventario_pendiente: None,
+                inventario_ya: false,
             }));
             app.manage(ActualizarYa(Arc::new(tokio::sync::Notify::new())));
             app.manage(compartido.clone());

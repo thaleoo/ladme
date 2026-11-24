@@ -275,3 +275,13 @@ importar la hoja (`docs/MUDANZA.md`).
 - Guardar el perfil sin cambios no escribe nada (disparador `perfiles_a_limite`, que corre antes que `perfiles_docente`).
 - Una persona puede cambiar sus datos hasta 6 veces por hora (`perfiles.perfil_cambios`, `perfil_cambios_desde`).
 - Volver a elegir Docente/Investigador dentro de 24 h reabre la misma verificación sin avisar otra vez al personal.
+
+## Migración 0020 — Datos de los equipos cada hora (Faro 0.5.4)
+
+`migrations/0020_faro_inventario.sql`, después de 0019.
+
+- Nueva orden de Faro `inventario` («Actualizar datos» en Administración → Equipos → Faro, para toda la sala o un equipo). Si ya hay una sin entregar, no se repite.
+- Faro 0.5.4 lee el equipo al arrancar y luego cada hora: salud del disco, memoria, espacio libre y programas instalados de la lista conocida.
+- Los programas de cada equipo (`equipos.software`) siguen lo que Faro encuentra: lo que se desinstala sale de la lista y lo nuevo entra.
+- Lo que el personal marcó a mano y Faro no sabe reconocer (por ejemplo, GeoDa) se conserva: `agentes.software_previo` guarda la lectura anterior para distinguir «Faro lo dejó de ver» de «Faro nunca lo vio».
+- Si el personal edita la lista de un equipo, esa edición manda (el disparador solo actúa en las escrituras de Faro).

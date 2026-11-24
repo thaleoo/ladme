@@ -108,14 +108,15 @@ export default function Faro() {
   }
 
   const NOMBRE_ORDEN: Record<OrdenFaro, string> = {
-    reiniciar: 'Reiniciar Faro', actualizar: 'Actualizar ahora', apagar: 'Apagar el PC', encender: 'Encender el PC', desinstalar: 'Desinstalar Faro'
+    reiniciar: 'Reiniciar Faro', actualizar: 'Actualizar Faro', apagar: 'Apagar el PC', encender: 'Encender el PC', desinstalar: 'Desinstalar Faro', inventario: 'Actualizar datos'
   }
   const AYUDA_ORDEN: Record<OrdenFaro, string> = {
     reiniciar: 'Faro se cierra y se vuelve a abrir en ese PC.',
     actualizar: 'Faro busca ya una versión nueva y la instala si no hay una reserva en curso.',
     apagar: 'El PC se apaga en un minuto (con aviso en pantalla). Los equipos con una reserva en curso se omiten.',
     encender: 'Un Faro encendido de la sala despierta al PC por la red (Wake-on-LAN). El PC debe tenerlo activado en la BIOS.',
-    desinstalar: 'Faro se quita del PC: programa, arranque automático y configuración. El equipo queda desvinculado.'
+    desinstalar: 'Faro se quita del PC: programa, arranque automático y configuración. El equipo queda desvinculado.',
+    inventario: 'Faro vuelve a medir el equipo (salud del disco, memoria, espacio libre) y a leer los programas instalados. Lo hace solo cada hora; esto es para no esperar. Los equipos apagados lo hacen al encenderse.'
   }
   function orden(equipos: string[] | null, o: OrdenFaro) {
     const donde = equipos ? equipos.join(', ') : 'toda la sala'
@@ -202,6 +203,9 @@ export default function Faro() {
           </button>
           <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'apagar')}>
             <Icon nombre="salir" /> <span>Apagar</span>
+          </button>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'inventario')}>
+            <Icon nombre="info" /> <span>Actualizar datos</span>
           </button>
           <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>
             <Icon nombre="actualizar" /> <span>Actualizar Faro</span>
@@ -518,11 +522,17 @@ function DetalleEquipo({ e, admin, ocupado, orden, canal }: {
           {e.cpu_pct !== null && <><dt>Uso del procesador</dt><dd>{e.cpu_pct} %</dd></>}
           {inv.arranque_h !== undefined && <><dt>Encendido hace</dt><dd>{inv.arranque_h < 48 ? `${inv.arranque_h} h` : `${Math.round(inv.arranque_h / 24)} días`}</dd></>}
           {inv.mac && <><dt>MAC</dt><dd className="num">{inv.mac}</dd></>}
+          {inv.disco_salud && (
+            <><dt>Salud del disco</dt><dd className={inv.disco_salud !== 'ok' ? 'faro-detalle__alerta' : undefined}>
+              {inv.disco_salud === 'ok' ? 'Sin problemas' : inv.disco_salud === 'falla' ? 'Falla: conviene respaldar y revisarlo' : 'Con advertencias'}
+            </dd></>
+          )}
           <dt>Software</dt>
           <dd>{(inv.software ?? []).length ? (inv.software ?? []).join(' · ') : 'Ninguno de la lista conocida'}</dd>
+          {e.inventario_en && <><dt>Datos leídos</dt><dd>{hace(e.inventario_en)} · se actualizan cada hora</dd></>}
         </dl>
       ) : (
-        <p className="small muted" style={{ margin: 0 }}>Faro 0.4 o superior informa el inventario del equipo unas horas después de vincularse.</p>
+        <p className="small muted" style={{ margin: 0 }}>Faro informa los datos del equipo al minuto de arrancar y luego cada hora (Faro 0.5.4). Con «Actualizar datos» se piden ya.</p>
       )}
       <div className="row tight" style={{ flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
         <span className="small muted">Canal:</span>
@@ -533,9 +543,9 @@ function DetalleEquipo({ e, admin, ocupado, orden, canal }: {
         ))}
       </div>
       <div className="row tight" style={{ flexWrap: 'wrap', marginTop: 'var(--s2)' }}>
-        {(['reiniciar', 'actualizar', 'apagar', 'encender'] as OrdenFaro[]).map((o) => (
+        {(['inventario', 'reiniciar', 'actualizar', 'apagar', 'encender'] as OrdenFaro[]).map((o) => (
           <button key={o} type="button" className="btn ghost sm" disabled={ocupado} onClick={() => orden([e.codigo], o)}>
-            {o === 'reiniciar' ? 'Reiniciar Faro' : o === 'actualizar' ? 'Actualizar' : o === 'apagar' ? 'Apagar' : 'Encender'}
+            {o === 'inventario' ? 'Actualizar datos' : o === 'reiniciar' ? 'Reiniciar Faro' : o === 'actualizar' ? 'Actualizar Faro' : o === 'apagar' ? 'Apagar' : 'Encender'}
           </button>
         ))}
         {admin && (
