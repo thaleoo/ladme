@@ -244,31 +244,18 @@ export default function MantenimientoPage() {
         }
       />
 
-      <div className="stats">
-        <div className="stat warn">
-          <div className="stat__label">
-            <Icon nombre="escudo" width={14} height={14} /> Por validar
+      <div className="ronda-resumen" role="list" aria-label="Resumen de mantenimiento">
+        {([
+          [resumen.porValidar, 'por validar', resumen.porValidar ? 'alerta' : ''],
+          [resumen.vencidos, resumen.vencidos === 1 ? 'vencido' : 'vencidos', resumen.vencidos ? 'ocupado' : ''],
+          [resumen.proximos, 'en 7 días', ''],
+          [items.length, 'en total', '']
+        ] as [number, string, string][]).map(([n, t, tono]) => (
+          <div key={t} role="listitem" className={`ronda-resumen__dato ${n === 0 ? 'cero' : ''}`}>
+            <span className="ronda-resumen__n">{n}</span>
+            <span className="ronda-resumen__t">{tono && <span className={`punto-estado ${tono}`} aria-hidden="true" />}{t}</span>
           </div>
-          <div className="stat__value">{resumen.porValidar}</div>
-        </div>
-        <div className="stat danger">
-          <div className="stat__label">
-            <Icon nombre="alerta" width={14} height={14} /> Vencidos
-          </div>
-          <div className="stat__value">{resumen.vencidos}</div>
-        </div>
-        <div className="stat brand">
-          <div className="stat__label">
-            <Icon nombre="calendario" width={14} height={14} /> Próximos 7 días
-          </div>
-          <div className="stat__value">{resumen.proximos}</div>
-        </div>
-        <div className="stat">
-          <div className="stat__label">
-            <Icon nombre="llave" width={14} height={14} /> Total
-          </div>
-          <div className="stat__value">{items.length}</div>
-        </div>
+        ))}
       </div>
 
       {error && (
@@ -288,49 +275,31 @@ export default function MantenimientoPage() {
         </div>
       )}
 
-      <section className="card">
-        <div className="row between" style={{ gap: 'var(--s3)' }}>
-          <div className="chips">
-            {(['TODOS', 'programado', 'en_curso', 'completado', 'validado', 'cancelado'] as const).map((e) => (
-              <button
-                key={e}
-                className="chip"
-                aria-pressed={filtroEstado === e}
-                onClick={() => setFiltroEstado(e)}
-                type="button"
-              >
-                {e === 'TODOS' ? 'Todos' : ESTADO_TEXTO[e]}
-              </button>
-            ))}
-          </div>
-          <div className="field" style={{ minWidth: 170 }}>
-            <label className="solo-lector" htmlFor="filtro-equipo-mnt">
-              Filtrar por equipo
-            </label>
-            <select
-              id="filtro-equipo-mnt"
-              value={filtroEquipo}
-              onChange={(e) => setFiltroEquipo(e.target.value)}
-            >
+      <section className="filtros-admin" aria-label="Filtros">
+        <div className="chips-desliza">
+          {(['TODOS', 'programado', 'en_curso', 'completado', 'validado', 'cancelado'] as const).map((e) => (
+            <button key={e} className="chip" aria-pressed={filtroEstado === e} onClick={() => setFiltroEstado(e)} type="button">
+              {e === 'TODOS' ? 'Todos' : ESTADO_TEXTO[e]}
+            </button>
+          ))}
+          <label className={`chip chip--select ${filtroEquipo !== 'TODOS' ? 'activo' : ''}`}>
+            <span className="solo-lector">Filtrar por equipo</span>
+            <select id="filtro-equipo-mnt" value={filtroEquipo} onChange={(e) => setFiltroEquipo(e.target.value)}>
               <option value="TODOS">Todos los equipos</option>
               {equipos.map((eq) => (
-                <option key={eq.id} value={eq.codigo}>
-                  {eq.codigo}
-                </option>
+                <option key={eq.id} value={eq.codigo}>{eq.codigo}</option>
               ))}
             </select>
-          </div>
+          </label>
         </div>
       </section>
 
       {cargando && <Cargando texto="Cargando intervenciones…" />}
 
       {!cargando && filtrados.length === 0 && (
-        <div className="card">
-          <Empty icono="llave" titulo="No hay intervenciones con ese filtro">
-            Registre una nueva intervención o cambie los filtros para ver el historial completo.
-          </Empty>
-        </div>
+        <Empty icono="llave" titulo="No hay intervenciones con ese filtro">
+          Registre una nueva intervención o cambie los filtros para ver el historial completo.
+        </Empty>
       )}
 
       {!cargando && filtrados.length > 0 && (

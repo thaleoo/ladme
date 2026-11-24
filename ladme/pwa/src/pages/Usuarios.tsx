@@ -137,29 +137,13 @@ export default function Usuarios() {
         sub="Toque a una persona para cambiar su rol o inhabilitar su cuenta."
       />
 
-      <section className="card stack">
-        <div className="field" style={{ margin: 0 }}>
-          <label className="solo-lector" htmlFor="buscar">
-            Buscar
-          </label>
-          <div style={{ position: 'relative' }}>
-            <Icon
-              nombre="buscar"
-              width={16}
-              height={16}
-              style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-400)', pointerEvents: 'none' }}
-            />
-            <input
-              id="buscar"
-              type="search"
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              placeholder="Nombre, correo o programa"
-              style={{ paddingLeft: 34 }}
-            />
-          </div>
-        </div>
-        <div className="chips" role="group" aria-label="Filtrar">
+      <section className="filtros-admin" aria-label="Filtros">
+        <label className="disp-buscar">
+          <Icon nombre="buscar" width={20} height={20} />
+          <span className="solo-lector">Buscar</span>
+          <input id="buscar" type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre, correo o programa" />
+        </label>
+        <div className="chips-desliza" role="group" aria-label="Filtrar">
           {FILTROS.map((f) => (
             <button key={f.id} type="button" className="chip" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
               {f.texto}
@@ -179,11 +163,9 @@ export default function Usuarios() {
       {cargando && <Cargando texto="Buscando…" />}
 
       {!cargando && lista.length === 0 && (
-        <div className="card">
-          <Empty icono="usuarios" titulo="Nadie coincide">
-            Cambie la búsqueda o el filtro.
-          </Empty>
-        </div>
+        <Empty icono="usuarios" titulo="Nadie coincide">
+          Cambie la búsqueda o el filtro.
+        </Empty>
       )}
 
       {!cargando && lista.length > 0 && (
@@ -193,18 +175,21 @@ export default function Usuarios() {
               <span className="avatar">{inicialesDe(p.nombre || p.correo)}</span>
               <span className="lista-usuarios__texto">
                 <strong>
-                  {p.nombre || 'Sin nombre'} {p.id === yo?.id && <span className="badge gray">usted</span>}
+                  {p.nombre || 'Sin nombre'}
+                  {p.id === yo?.id && <span className="lista-usuarios__yo"> · usted</span>}
                 </strong>
                 <span>
                   {p.correo}
                   {p.programa ? ` · ${p.programa}` : ''}
                 </span>
+                {(p.rol !== 'usuario' || p.permisos.includes(PERMISO_VALIDAR) || !p.activo) && (
+                  <span className="lista-usuarios__rol">
+                    {[p.rol !== 'usuario' ? ETIQUETA_ROL[p.rol] : null, p.permisos.includes(PERMISO_VALIDAR) ? 'Técnico' : null].filter(Boolean).join(' · ')}
+                    {!p.activo && <em>{p.rol !== 'usuario' || p.permisos.includes(PERMISO_VALIDAR) ? ' · ' : ''}Inhabilitado</em>}
+                  </span>
+                )}
               </span>
-              <span className="lista-usuarios__marcas">
-                {p.rol !== 'usuario' && <span className={`badge ${p.rol === 'administrador' ? 'ok' : 'info'}`}>{ETIQUETA_ROL[p.rol]}</span>}
-                {p.permisos.includes(PERMISO_VALIDAR) && <span className="badge outline">Técnico</span>}
-                {!p.activo && <span className="badge danger">Inhabilitado</span>}
-              </span>
+              <Icon nombre="flecha-der" width={18} height={18} />
             </button>
           ))}
           <div className="lista-usuarios__pie">

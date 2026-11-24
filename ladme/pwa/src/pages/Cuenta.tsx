@@ -54,36 +54,21 @@ export default function Cuenta() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Cuenta institucional"
-        titulo="Mi cuenta"
-      />
+      <PageHeader titulo="Mi cuenta" />
 
-      <section className="card">
-        <div className="row" style={{ alignItems: 'center', gap: 'var(--s4)' }}>
-          <span className="avatar lg">{iniciales}</span>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <h2 style={{ fontSize: 'var(--text-xl)', marginBottom: 2 }}>{perfil.nombre || 'Sin nombre registrado'}</h2>
-            <p className="small muted" style={{ margin: 0, wordBreak: 'break-all' }}>
-              {perfil.correo}
-            </p>
-            <div className="row tight" style={{ marginTop: 'var(--s2)' }}>
-              <span className={`badge ${rol.clase}`}>{rol.etiqueta}</span>
-              <span className={`badge ${perfil.activo ? 'ok' : 'danger'}`}>
-                {perfil.activo ? 'Habilitada' : 'Inhabilitada'}
-              </span>
-              {perfil.permisos?.includes('validar_mantenimiento') && (
-                <span className="badge gray">
-                  <Icon nombre="escudo" /> Valida mantenimiento
-                </span>
-              )}
-            </div>
-          </div>
+      <section className="perfil-cabeza">
+        <span className="avatar perfil-cabeza__avatar" aria-hidden="true">{iniciales}</span>
+        <div className="perfil-cabeza__texto">
+          <h2>{perfil.nombre || 'Sin nombre registrado'}</h2>
+          <p>{perfil.correo}</p>
+          <p className="perfil-cabeza__rol">
+            {rol.etiqueta}
+            {!perfil.activo && <span className="perfil-cabeza__alerta"> · Cuenta inhabilitada</span>}
+            {perfil.permisos?.includes('validar_mantenimiento') && ' · Valida mantenimiento'}
+          </p>
         </div>
-        <p className="small muted" style={{ marginTop: 'var(--s4)', marginBottom: 0 }}>
-          {rol.descripcion}
-        </p>
       </section>
+      <p className="perfil-cabeza__desc">{rol.descripcion}</p>
 
       <section className={`card ${perfilCompleto(perfil) ? '' : 'warn'}`} id="perfil">
         <h3>Datos académicos</h3>
@@ -96,75 +81,55 @@ export default function Cuenta() {
       </section>
 
       <section>
-        <div className="section-title">
-          <h2>Accesos rápidos</h2>
-        </div>
-        <div className="grid cols-2">
-          <Link to="/mi-uso" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-            <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
-              <Icon nombre="grafica" />
+        <h2 className="seccion-sola">Accesos rápidos</h2>
+        <nav className="lista-enlaces" aria-label="Accesos rápidos">
+          <Link to={'/mi-uso'} className="lista-enlaces__fila">
+            <span className="lista-enlaces__icono"><Icon nombre="grafica" /></span>
+            <span className="lista-enlaces__texto">
+              <strong>Mi uso</strong>
+              <span>{'Horas y equipos usados, para sus informes.'}</span>
             </span>
-            <span>
-              <strong style={{ display: 'block' }}>Mi uso</strong>
-              <span className="tiny muted">Horas y equipos usados, para sus informes.</span>
-            </span>
+            <Icon nombre="flecha-der" width={18} height={18} />
           </Link>
           {esStaff(perfil) && (
-            <Link to="/admin" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-              <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
-                <Icon nombre="ajustes" />
-              </span>
-              <span>
-                <strong style={{ display: 'block' }}>Administración</strong>
-                <span className="tiny muted">Ronda, reservas, bloqueos, equipos y estadísticas.</span>
-              </span>
-            </Link>
+            <Link to={'/admin'} className="lista-enlaces__fila">
+            <span className="lista-enlaces__icono"><Icon nombre="ajustes" /></span>
+            <span className="lista-enlaces__texto">
+              <strong>Administración</strong>
+              <span>{'Ronda, reservas, bloqueos, equipos y estadísticas.'}</span>
+            </span>
+            <Icon nombre="flecha-der" width={18} height={18} />
+          </Link>
           )}
           {esStaff(perfil) && (
-            <Link to="/mantenimiento" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-              <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
-                <Icon nombre="llave" />
-              </span>
-              <span>
-                <strong style={{ display: 'block' }}>Mantenimiento</strong>
-                <span className="tiny muted">
-                  {puedeValidarMantenimiento(perfil)
-                    ? 'Registrar, completar y validar intervenciones.'
-                    : 'Registrar y completar intervenciones.'}
-                </span>
-              </span>
-            </Link>
+            <Link to={'/mantenimiento'} className="lista-enlaces__fila">
+            <span className="lista-enlaces__icono"><Icon nombre="llave" /></span>
+            <span className="lista-enlaces__texto">
+              <strong>Mantenimiento</strong>
+              <span>{puedeValidarMantenimiento(perfil) ? 'Registrar, completar y validar intervenciones.' : 'Registrar y completar intervenciones.'}</span>
+            </span>
+            <Icon nombre="flecha-der" width={18} height={18} />
+          </Link>
           )}
           {esAdmin(perfil) && (
-            <Link to="/usuarios" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-              <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
-                <Icon nombre="usuarios" />
-              </span>
-              <span>
-                <strong style={{ display: 'block' }}>Usuarios y roles</strong>
-                <span className="tiny muted">Habilitar cuentas, asignar roles y permisos.</span>
-              </span>
-            </Link>
+            <Link to={'/usuarios'} className="lista-enlaces__fila">
+            <span className="lista-enlaces__icono"><Icon nombre="usuarios" /></span>
+            <span className="lista-enlaces__texto">
+              <strong>Usuarios y roles</strong>
+              <span>{'Habilitar cuentas, asignar roles y permisos.'}</span>
+            </span>
+            <Icon nombre="flecha-der" width={18} height={18} />
+          </Link>
           )}
-          <Link to="/reservar" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-            <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
-              <Icon nombre="reservar" />
+          <Link to={'/mis-reservas'} className="lista-enlaces__fila">
+            <span className="lista-enlaces__icono"><Icon nombre="ticket" /></span>
+            <span className="lista-enlaces__texto">
+              <strong>Mis reservas</strong>
+              <span>{'Credenciales, extensiones y cancelaciones.'}</span>
             </span>
-            <span>
-              <strong style={{ display: 'block' }}>Reservar equipo</strong>
-              <span className="tiny muted">Ver equipos libres y agendar una franja.</span>
-            </span>
+            <Icon nombre="flecha-der" width={18} height={18} />
           </Link>
-          <Link to="/mis-reservas" className="card" style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
-            <span className="empty__icon" style={{ width: 40, height: 40, marginBottom: 0 }}>
-              <Icon nombre="ticket" />
-            </span>
-            <span>
-              <strong style={{ display: 'block' }}>Mis reservas</strong>
-              <span className="tiny muted">Credenciales, extensiones y cancelaciones.</span>
-            </span>
-          </Link>
-        </div>
+        </nav>
       </section>
 
       <section className="card">
@@ -236,7 +201,7 @@ export default function Cuenta() {
         )}
       </section>
 
-      <button className="btn danger block" onClick={cerrar} type="button">
+      <button className="btn gray block cerrar-sesion" onClick={cerrar} type="button">
         <Icon nombre="salir" /> Cerrar sesión en este dispositivo
       </button>
     </>

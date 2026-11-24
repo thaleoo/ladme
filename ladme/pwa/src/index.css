@@ -4970,3 +4970,38 @@ a.ronda-fila__codigo:hover { text-decoration: underline; text-underline-offset: 
   .ingreso__ahora strong { font-size: 48px; }
   .ingreso__panel { padding-top: 24px; }
 }
+
+/* ==========================================================================
+   Rediseño · Cuenta y pantallas de gestión
+   ========================================================================== */
+.perfil-cabeza { display: flex; align-items: center; gap: var(--s4); }
+.perfil-cabeza__avatar.perfil-cabeza__avatar { width: 72px; height: 72px; font-size: 26px; flex: none; }
+.perfil-cabeza__texto { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.perfil-cabeza__texto h2 { margin: 0; font-size: var(--text-2xl); letter-spacing: -0.02em; }
+.perfil-cabeza__texto p { margin: 0; color: var(--ink-500); overflow-wrap: anywhere; }
+.perfil-cabeza__rol { font-size: var(--text-sm); color: var(--ink-900) !important; font-weight: 500; }
+.perfil-cabeza__alerta { color: var(--danger); }
+.perfil-cabeza__desc { margin: calc(var(--s2) * -1) 0 0; color: var(--ink-500); font-size: var(--text-sm); max-width: 60ch; }
+.seccion-sola { margin: 0 0 var(--s2); font-size: var(--text-lg); }
+.lista-enlaces { display: flex; flex-direction: column; border-radius: var(--r-lg); background: var(--surface); padding: 0 var(--s4); }
+.lista-enlaces__fila {
+  display: flex; align-items: center; gap: var(--s3); min-height: 64px; padding: 10px 0;
+  border-bottom: 1px solid var(--line); color: var(--ink-900); text-decoration: none;
+}
+.lista-enlaces__fila:last-child { border-bottom: 0; }
+.lista-enlaces__fila:hover { color: var(--ink-900); text-decoration: none; }
+.lista-enlaces__fila:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.lista-enlaces__fila > svg:last-child { color: var(--ink-400); flex: none; }
+.lista-enlaces__icono { width: 40px; height: 40px; border-radius: 12px; background: var(--raised); display: grid; place-items: center; flex: none; }
+.lista-enlaces__icono svg { width: 20px; height: 20px; }
+.lista-enlaces__texto { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lista-enlaces__texto strong { font-weight: 600; }
+.lista-enlaces__texto span { color: var(--ink-500); font-size: var(--text-sm); line-height: 1.35; }
+.cerrar-sesion.cerrar-sesion { color: var(--danger); }
+.perfil-cabeza__desc { margin: 0; }
+.lista-usuarios__fila > svg:last-child { color: var(--ink-400); flex: none; margin-left: auto; }
+.lista-usuarios__yo { color: var(--ink-500); font-weight: 400; }
+.lista-usuarios__rol { color: var(--ink-900) !important; font-size: var(--text-xs) !important; font-weight: 550; }
+.lista-usuarios__rol em { font-style: normal; color: var(--danger); }
+.lista-usuarios { border: 0; background: var(--surface); }
+.perfil-cabeza + .perfil-cabeza__desc { margin-top: 12px; }
