@@ -5,13 +5,13 @@ export const EXTENSIONES_MAX = 1
 
 const fmt = new Intl.DateTimeFormat('es-CO', {
   weekday: 'short',
-  day: '2-digit',
+  day: 'numeric',
   month: 'short',
-  hour: '2-digit',
+  hour: 'numeric',
   minute: '2-digit'
 })
 
-const fmtDia = new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: '2-digit', month: 'short' })
+const fmtDia = new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })
 
 /** "jue 12 nov": forma compacta para columnas estrechas. */
 export function diaCorto(valor: string | Date): string {
@@ -115,7 +115,7 @@ export function aInputFecha(d: Date): string {
 }
 
 export function hora(iso: string): string {
-  return new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
+  return new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' }).format(new Date(iso))
 }
 
 export function fechaLarga(d: Date): string {

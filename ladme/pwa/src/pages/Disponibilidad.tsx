@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listarEquipos, listarOcupacion, miEspera, salirEspera, unirseEspera, type Espera } from '../lib/api'
 import { etiquetaSO, textoSO, type Equipo, type Ocupacion } from '../lib/types'
-import { dia as textoDia, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
+import { diaCorto, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
 import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
 import Icon from '../components/Icon'
@@ -40,6 +40,11 @@ const TEXTO: Record<Situacion, string> = {
   ocupado: 'Ocupado',
   bloqueado: 'Bloqueado',
   inactivo: 'No disponible'
+}
+
+function diaCapital(iso: string): string {
+  const t = diaCorto(iso)
+  return t.charAt(0).toUpperCase() + t.slice(1)
 }
 
 /** Texto de estado de una fila: dice qué pasa y hasta cuándo, en una frase. */
@@ -229,7 +234,6 @@ export default function Disponibilidad() {
 
   const sel = celdas.find((c) => c.equipo.codigo === abierto)
   const agendaSel = sel ? (porEquipo.get(sel.equipo.codigo) ?? []).filter((o) => new Date(o.fin).getTime() > Date.now()).slice(0, 5) : []
-  const specs = sel ? Object.entries(sel.equipo.especificaciones ?? {}).slice(0, 4) : []
 
   const fotoDe = (e: Equipo) => (e as Equipo & { foto_url?: string | null }).foto_url ?? null
   const libresVisibles = visibles.filter((c) => c.situacion === 'libre')
@@ -438,7 +442,7 @@ export default function Disponibilidad() {
       <Modal
         abierto={!!sel}
         titulo={sel ? sel.equipo.codigo : ''}
-        descripcion={sel ? [textoSO(sel.equipo), sel.equipo.nombre, sel.equipo.marca, sel.equipo.ubicacion].filter(Boolean).join(' · ') : undefined}
+        descripcion={sel ? [[sel.equipo.marca, sel.equipo.modelo].filter(Boolean).join(' ') || sel.equipo.nombre, textoSO(sel.equipo), sel.equipo.ubicacion].filter(Boolean).join(', ') : undefined}
         onCerrar={() => setAbierto(null)}
         pie={
           sel && (
@@ -448,7 +452,7 @@ export default function Disponibilidad() {
               </Link>
               {sel.equipo.estado === 'activo' && (
                 <Link className="btn" to={`/reservar?equipo=${sel.equipo.codigo}`}>
-                  <Icon nombre="reservar" /> Reservar
+                  Reservar
                 </Link>
               )}
             </>
@@ -456,50 +460,70 @@ export default function Disponibilidad() {
         }
       >
         {sel && (
-          <div className="stack">
-            <div className="row tight">
-              <span className={`badge ${sel.situacion === 'libre' ? 'ok' : sel.situacion === 'ocupado' ? 'warn' : 'gray'}`}>
-                {TEXTO[sel.situacion]}
-              </span>
-              <span className="small">
-                {sel.situacion === 'libre'
-                  ? sel.proxima
-                    ? `Libre hasta ${fecha(sel.proxima.inicio)}`
-                    : 'Sin reservas próximas'
-                  : sel.actual
-                    ? `Hasta ${fecha(sel.actual.fin)}`
-                    : sel.detalle}
+          <div className="equipo-hoja">
+            {fotoDe(sel.equipo) && <img className="equipo-hoja__foto" src={fotoDe(sel.equipo) ?? undefined} alt={`Foto de ${sel.equipo.codigo}`} />}
+
+            <div className="equipo-hoja__estado">
+              <span className={`punto-estado ${sel.situacion}`} aria-hidden="true" />
+              <span>
+                <strong>
+                  {sel.situacion === 'libre'
+                    ? sel.proxima
+                      ? `Libre hasta ${cuando(sel.proxima.inicio)}`
+                      : 'Libre, sin reservas próximas'
+                    : sel.situacion === 'inactivo'
+                      ? sel.detalle
+                      : `${TEXTO[sel.situacion]} hasta ${sel.actual ? cuando(sel.actual.fin) : ''}`}
+                </strong>
+                {sel.actual?.tipo === 'bloqueo' && sel.actual.motivo && <span className="muted">{sel.actual.motivo}</span>}
               </span>
             </div>
-            {sel.actual?.tipo === 'bloqueo' && sel.actual.motivo && <p className="small" style={{ margin: 0 }}>{sel.actual.motivo}</p>}
+
             {sel.actual?.desatendido && (
-              <p className="small" style={{ margin: 0 }}>
-                <span className="badge warn">Proceso desatendido</span> {sel.actual.mensaje_llegada || 'No apagar ni cerrar sesión.'}
-              </p>
+              <div className="equipo-hoja__nota">
+                <Icon nombre="info" width={18} height={18} />
+                <span>
+                  <strong>Hay un proceso corriendo.</strong> {sel.actual.mensaje_llegada || 'No apague el equipo ni cierre la sesión.'}
+                </span>
+              </div>
             )}
-            {specs.length > 0 && (
-              <p className="tiny muted" style={{ margin: 0 }}>
-                {specs.map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}
-              </p>
+
+            {(sel.equipo.software ?? []).length > 0 && (
+              <div className="equipo-hoja__bloque">
+                <h3>Programas</h3>
+                <div className="equipo-hoja__programas">
+                  {(sel.equipo.software ?? []).slice(0, 10).map((x) => (
+                    <span key={x} className="programa">
+                      <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
+                      {x}
+                    </span>
+                  ))}
+                  {(sel.equipo.software ?? []).length > 10 && <span className="programa programa--mas">y {(sel.equipo.software ?? []).length - 10} más</span>}
+                </div>
+              </div>
             )}
-            <div>
-              <span className="field__label">Próximas ocupaciones</span>
+
+            <div className="equipo-hoja__bloque">
+              <h3>Próximas ocupaciones</h3>
               {agendaSel.length === 0 ? (
                 <p className="small muted" style={{ margin: 0 }}>
                   Ninguna en los próximos días.
                 </p>
               ) : (
-                <ul className="small" style={{ margin: 0, paddingLeft: '1.05rem' }}>
+                <ul className="agenda-corta">
                   {agendaSel.map((o, i) => (
                     <li key={i}>
-                      {textoDia(o.inicio)}, {hora(o.inicio)} → {fecha(o.fin)}
-                      {o.tipo === 'bloqueo' ? ' · bloqueo' : ''}
+                      <span className="agenda-corta__dia">{diaCapital(o.inicio)}</span>
+                      <span className="agenda-corta__horas">
+                        {hora(o.inicio)} a {new Date(o.fin).toDateString() === new Date(o.inicio).toDateString() ? hora(o.fin) : `${diaCorto(o.fin)}, ${hora(o.fin)}`}
+                        {o.tipo === 'bloqueo' && <span className="muted">, bloqueo</span>}
+                      </span>
                     </li>
                   ))}
                 </ul>
               )}
               <Link className="small" to={`/equipo/${encodeURIComponent(sel.equipo.codigo)}#agenda`}>
-                Ver la agenda del día y la semana
+                Ver la agenda completa
               </Link>
             </div>
           </div>

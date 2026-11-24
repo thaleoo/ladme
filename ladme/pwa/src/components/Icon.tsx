@@ -77,6 +77,8 @@ const trazos: Record<string, ReactNode> = {
     </>
   ),
   mas2: <path d="M12 5v14M5 12h14" />,
+  menos: <path d="M5 12h14" />,
+  lapiz: <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4zM13.5 6.5l4 4" />,
   check: <path d="M20 6 9 17l-5-5" />,
   'check-circulo': (
     <>

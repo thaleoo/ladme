@@ -153,7 +153,7 @@ export default function Shell() {
       ]
 
   return (
-    <div className="app">
+    <div className={`app${location.pathname.startsWith('/reservar') ? ' app--tarea' : ''}`}>
       <a className="salto-al-contenido" href="#contenido">
         Saltar al contenido
       </a>

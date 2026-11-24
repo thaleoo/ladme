@@ -5,13 +5,14 @@ import { CamposSoftware, SOFTWARE_VACIO, alcanzaParaSoftware, type DatosSoftware
 import CampoDocente, { docenteRecordado, recordarDocente, validarDocente } from '../components/CampoDocente'
 import { solicitarSoftware, crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
 import { ACTIVIDADES, perfilCompleto, pideDocente, textoSO, type Equipo, type Ocupacion } from '../lib/types'
-import { aIso, aInputLocal, conPunto, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
+import { aIso, aInputLocal, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { useTopeReservas } from '../lib/reservaVigente'
 import { esAdmin, esStaff, useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import PerfilForm from '../components/PerfilForm'
 import Icon from '../components/Icon'
+import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 
 function redondear(d: Date, minutos: number): Date {
@@ -57,6 +58,8 @@ export default function Reservar() {
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [disponibles, setDisponibles] = useState<string[] | null>(null)
+  const [eligiendo, setEligiendo] = useState(false)
+  const [finManual, setFinManual] = useState(false)
 
   // Ocupación del equipo elegido: para avisar si el horario cae en un uso compartido.
   useEffect(() => {
@@ -130,19 +133,20 @@ export default function Reservar() {
     setFin(aInputLocal(new Date(sumarHoras(aIso(inicio), horas))))
   }
 
-  async function consultarDisponibilidad() {
-    setError(null)
-    setAviso(null)
-    try {
-      const lista = await equiposDisponibles(aIso(inicio), aIso(fin))
-      const codigos = lista.map((x) => x.codigo)
-      setDisponibles(codigos)
-      if (equipo && codigos.includes(equipo)) setAviso(`${equipo} está disponible en ese intervalo.`)
-      else if (equipo) setError(`${equipo} no está disponible en ese intervalo. Pruebe otro horario o equipo.`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo consultar la disponibilidad.')
+  // Disponibilidad del horario elegido: se consulta sola al cambiar el horario (con una pausa breve).
+  useEffect(() => {
+    if (problema) return setDisponibles(null)
+    let vivo = true
+    const t = window.setTimeout(() => {
+      equiposDisponibles(aIso(inicio), aIso(fin))
+        .then((lista) => vivo && setDisponibles(lista.map((x) => x.codigo)))
+        .catch(() => vivo && setDisponibles(null))
+    }, 350)
+    return () => {
+      vivo = false
+      window.clearTimeout(t)
     }
-  }
+  }, [inicio, fin, problema])
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
@@ -242,423 +246,479 @@ export default function Reservar() {
     }
   })()
   const categorias = [...new Set(equipos.map((e) => e.categoria))].sort()
-  const porcentaje = Number.isFinite(duracion) && duracion > 0 ? Math.min(100, (duracion / lim.maxTotal) * 100) : 0
+  const fotoDe = (e?: Equipo) => (e as (Equipo & { foto_url?: string | null }) | undefined)?.foto_url ?? null
+  const diaActual = inicio.slice(0, 10)
+  const horaActual = inicio.slice(11, 16)
+  const hoyLocal = aInputLocal(new Date()).slice(0, 10)
+  const dias = Array.from({ length: Math.max(1, Math.min(7, admin ? 7 : lim.anticipacionDias + 1)) }, (_, i) => {
+    const d = new Date()
+    d.setHours(12, 0, 0, 0)
+    d.setDate(d.getDate() + i)
+    const valor = aInputLocal(d).slice(0, 10)
+    const texto = i === 0 ? 'Hoy' : i === 1 ? 'Mañana' : new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: 'numeric' }).format(d).replace('.', '')
+    return { valor, texto: texto.charAt(0).toUpperCase() + texto.slice(1) }
+  })
+  const otroDia = !dias.some((d) => d.valor === diaActual)
+  const durValida = Number.isFinite(duracion) && duracion > 0
+
+  // Mover el día o la hora conserva la duración elegida.
+  function moverInicio(nuevo: string) {
+    setInicio(nuevo)
+    if (durValida) setFin(aInputLocal(new Date(sumarHoras(aIso(nuevo), duracion))))
+  }
+  function pasoDuracion(signo: 1 | -1) {
+    const actual = durValida ? duracion : 2
+    const paso = actual < 12 || (signo < 0 && actual <= 12) ? 1 : actual < 48 || (signo < 0 && actual <= 48) ? 6 : 24
+    aplicarDuracion(Math.max(0.5, actual + signo * paso))
+  }
+  const textoFin = fin && durValida ? cuandoLargo(aIso(fin), aIso(inicio)) : '—'
+  const libreEnHorario = disponibles && equipo ? disponibles.includes(equipo) : null
+  const otrosLibres = (disponibles ?? []).filter((c) => c !== equipo)
+  const proximasEquipo = ocupEquipo.filter((o) => new Date(o.fin).getTime() > Date.now()).sort((x, y) => x.inicio.localeCompare(y.inicio)).slice(0, 6)
 
   return (
     <>
-      <PageHeader
-        eyebrow="Operación"
-        titulo="Nueva reserva"
-        sub={
-          <>
-            Hasta {lim.maxHoras} h por reserva. Para más tiempo, envíe una solicitud.
-          </>
-        }
-        volver={{ a: '/', texto: 'Volver a disponibilidad' }}
-      />
+      <PageHeader titulo="Nueva reserva" volver={{ a: '/', texto: 'Disponibilidad' }} />
 
-      <div className="dos-columnas">
-        <p className="small muted nota-clase">
-          <Icon nombre="calendario" width={14} height={14} /> ¿Es docente y necesita varios equipos para una clase?{' '}
-          <Link to="/clases">Solicite la sala para su clase</Link>.
-        </p>
-        <form onSubmit={enviar} className="card stack" noValidate>
-          {lim.reservasPausadas && !esStaff(perfil) && (
-            <div className="alert warn">
-              <Icon nombre="reloj" />
-              <div className="alert__body">
-                <strong>Las reservas están pausadas unos minutos</strong> mientras el laboratorio actualiza el sistema. Intente de nuevo
-                en un rato.
-              </div>
-            </div>
-          )}
-          {sancion.hasta && <AvisoSancion hasta={sancion.hasta} />}
-          {tope.alcanzado && (
-            <div className="alert warn" role="status">
-              <Icon nombre="reloj" />
-              <div className="alert__body">
-                <strong>
-                  {tope.vigentes.length === 1 ? 'Ya tiene una reserva.' : `Ya tiene ${tope.vigentes.length} reservas.`}
-                </strong>{' '}
-                {lim.reservasALaVez === 1 ? 'Solo se permite una a la vez' : `El máximo es ${lim.reservasALaVez} a la vez`}: cuando termine, la
-                libere o la cancele, podrá hacer otra.
-                <ul className="tope-lista">
-                  {tope.vigentes.map((r) => (
-                    <li key={r.id}>
-                      <Link to={`/equipo/${encodeURIComponent(r.equipos?.codigo ?? '')}`}>
-                        <strong>{r.equipos?.codigo}</strong>
-                      </Link>{' '}
-                      · {fecha(r.inicio)} – {fecha(r.fin)}
-                    </li>
-                  ))}
-                </ul>
-                <Link to="/mis-reservas">Ir a mis reservas</Link>
-              </div>
-            </div>
-          )}
-          <div className="grid cols-2 gap-sm">
-            <div className="field">
-              <label className="field__label" htmlFor="equipo">
-                Equipo
-              </label>
-              <select id="equipo" value={equipo} onChange={(e) => setEquipo(e.target.value)} disabled={cargando}>
-                {categorias.length > 1
-                  ? categorias.map((c) => (
-                      <optgroup key={c} label={c}>
-                        {equipos.filter((e) => e.categoria === c).map((e) => (
-                          <option key={e.id} value={e.codigo}>
-                            {e.codigo} · {textoSO(e) ?? e.nombre}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))
-                  : equipos.map((e) => (
-                      <option key={e.id} value={e.codigo}>
-                        {e.codigo} · {textoSO(e) ?? e.nombre}
-                      </option>
-                    ))}
-              </select>
-              {equipoActual && (
-                <p className="help">
-                  {[equipoActual.marca, equipoActual.modelo].filter(Boolean).join(' ')} ·{' '}
-                  {equipoActual.ubicacion || 'LADME'}
-                  {textoSO(equipoActual) ? ` · ${textoSO(equipoActual)}` : ''}
-                </p>
-              )}
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="actividad">
-                Tipo de actividad
-              </label>
-              <select
-                id="actividad"
-                value={actividad}
-                onChange={(e) => {
-                  setActividad(e.target.value)
-                  if (pideDocente(e.target.value) && !docente.trim()) setDocente(docenteRecordado(e.target.value))
-                }}
-              >
-                <option value="" disabled>
-                  Seleccione
-                </option>
-                {ACTIVIDADES.map((a) => (
-                  <option key={a}>{a}</option>
-                ))}
-              </select>
-            </div>
-
-            {pideDocente(actividad) && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <CampoDocente id="docente" actividad={actividad} valor={docente} onCambio={setDocente} />
-              </div>
-            )}
-
-            <div className="field">
-              <label className="field__label" htmlFor="inicio">
-                Inicio
-              </label>
-              <input id="inicio" type="datetime-local" value={inicio} onChange={(e) => setInicio(e.target.value)} required />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="fin">
-                Fin
-              </label>
-              <input id="fin" type="datetime-local" value={fin} onChange={(e) => setFin(e.target.value)} required />
+      <div className="reservar-layout">
+      <form onSubmit={enviar} className="reservar" noValidate>
+        {lim.reservasPausadas && !esStaff(perfil) && (
+          <div className="alert warn">
+            <Icon nombre="reloj" />
+            <div className="alert__body">
+              <strong>Las reservas están pausadas unos minutos</strong> mientras el laboratorio actualiza el sistema. Intente de nuevo en un rato.
             </div>
           </div>
-
-          <div>
-            <div className="tiny muted" style={{ marginBottom: 6 }}>
-              Duración rápida desde el inicio
+        )}
+        {sancion.hasta && <AvisoSancion hasta={sancion.hasta} />}
+        {tope.alcanzado && (
+          <div className="alert warn" role="status">
+            <Icon nombre="reloj" />
+            <div className="alert__body">
+              <strong>{tope.vigentes.length === 1 ? 'Ya tiene una reserva.' : `Ya tiene ${tope.vigentes.length} reservas.`}</strong>{' '}
+              {lim.reservasALaVez === 1 ? 'Solo se permite una a la vez' : `El máximo es ${lim.reservasALaVez} a la vez`}: cuando termine, la libere o la
+              cancele, podrá hacer otra.
+              <ul className="tope-lista">
+                {tope.vigentes.map((r) => (
+                  <li key={r.id}>
+                    <strong>{r.equipos?.codigo}</strong>, {fecha(r.inicio)} a {fecha(r.fin)}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/mis-reservas">Ir a mis reservas</Link>
             </div>
-            <div className="chips">
-              {presets.map((p) => (
-                <button
-                  key={p.horas}
-                  type="button"
-                  className="chip"
-                  onClick={() => aplicarDuracion(p.horas)}
-                  aria-pressed={Number.isFinite(duracion) && Math.abs(duracion - p.horas) < 0.01}
-                >
-                  {p.etiqueta}
+          </div>
+        )}
+
+        {/* Equipo */}
+        <section className="reservar-equipo">
+          {fotoDe(equipoActual) ? (
+            <img className="reservar-equipo__foto" src={fotoDe(equipoActual) ?? undefined} alt="" />
+          ) : (
+            <span className="reservar-equipo__foto reservar-equipo__foto--vacia" aria-hidden="true">
+              <Icon nombre="monitor" width={30} height={30} />
+            </span>
+          )}
+          <div className="reservar-equipo__texto">
+            <strong>{equipoActual?.codigo ?? (cargando ? 'Cargando…' : 'Sin equipos disponibles')}</strong>
+            {equipoActual && (
+              <span className="muted small">
+                {[[equipoActual.marca, equipoActual.modelo].filter(Boolean).join(' '), textoSO(equipoActual)].filter(Boolean).join(', ')}
+              </span>
+            )}
+            {libreEnHorario !== null && !problema && (
+              <span className="reservar-equipo__estado">
+                <span className={`punto-estado ${libreEnHorario ? 'libre' : 'ocupado'}`} aria-hidden="true" />
+                {libreEnHorario ? 'Libre en ese horario' : 'Ocupado en ese horario'}
+              </span>
+            )}
+          </div>
+          <button type="button" className="btn ghost sm" onClick={() => setEligiendo(true)} disabled={cargando || equipos.length < 2}>
+            Cambiar
+          </button>
+        </section>
+        {libreEnHorario === false && !problema && otrosLibres.length > 0 && (
+          <div className="reservar-alternativas">
+            <span className="small muted">Libres en ese horario:</span>
+            <div className="chips-desliza">
+              {otrosLibres.slice(0, 8).map((c) => (
+                <button key={c} type="button" className="chip" onClick={() => setEquipo(c)}>
+                  {c}
                 </button>
               ))}
             </div>
           </div>
+        )}
 
-          <div>
-            <div className="row between" style={{ marginBottom: 6 }}>
-              <span className={`badge ${esLarga || adminExcede ? 'warn' : 'ok'}`}>
-                <Icon nombre="reloj" /> {Number.isFinite(duracion) ? `${duracion.toFixed(1)} h` : '—'}
-              </span>
-              <span className="tiny muted">
-                {lim.maxHoras} h base + {lim.maxExtension} h extensión
-              </span>
+        {/* Cuándo */}
+        <section className="ajustes" aria-label="Horario">
+          <div className="ajustes__fila ajustes__fila--bloque">
+            <span className="ajustes__etiqueta">Día</span>
+            <div className="chips-desliza" role="group" aria-label="Día">
+              {dias.map((d) => (
+                <button key={d.valor} type="button" className="chip" aria-pressed={diaActual === d.valor}
+                        onClick={() => moverInicio(`${d.valor}T${horaActual}`)}>
+                  {d.texto}
+                </button>
+              ))}
+              <label className={`chip chip--fecha${otroDia ? ' activo' : ''}`} aria-pressed={otroDia}>
+                <Icon nombre="calendario" width={16} height={16} />
+                {otroDia ? diaLegible(diaActual) : 'Otro día'}
+                <input type="date" value={diaActual} min={hoyLocal} aria-label="Elegir otro día"
+                       onChange={(e) => e.target.value && moverInicio(`${e.target.value}T${horaActual}`)} />
+              </label>
             </div>
-            <div
-              className="medidor"
-              role="img"
-              aria-label={`Duración ${Number.isFinite(duracion) ? duracion.toFixed(1) : 0} de ${lim.maxTotal} horas`}
-            >
-              <div className={`medidor__relleno${esLarga ? ' alerta' : ''}`} style={{ width: `${Math.max(2, porcentaje)}%` }} />
-            </div>
-            {fin && !Number.isNaN(duracion) && duracion > 0 && (
-              <p className="help" style={{ marginBottom: 0 }}>
-                {conPunto(`Termina el ${fecha(aIso(fin))}`)}
-              </p>
+          </div>
+          <label className="ajustes__fila">
+            <span className="ajustes__etiqueta">Desde</span>
+            <input className="ajustes__hora" type="time" step={900} value={horaActual} required
+                   onChange={(e) => e.target.value && moverInicio(`${diaActual}T${e.target.value}`)} />
+          </label>
+          <div className="ajustes__fila">
+            <span className="ajustes__etiqueta">Duración</span>
+            <span className="paso">
+              <button type="button" className="paso__btn" aria-label="Menos tiempo" onClick={() => pasoDuracion(-1)} disabled={!durValida || duracion <= 0.5}>
+                <Icon nombre="menos" width={18} height={18} />
+              </button>
+              <span className="paso__valor">{durValida ? textoDuracion(duracion) : '—'}</span>
+              <button type="button" className="paso__btn" aria-label="Más tiempo" onClick={() => pasoDuracion(1)}>
+                <Icon nombre="mas2" width={18} height={18} />
+              </button>
+            </span>
+          </div>
+          <div className="ajustes__rapidas chips-desliza" role="group" aria-label="Duraciones frecuentes">
+            {presets.map((p) => (
+              <button key={p.horas} type="button" className="chip chip--sm" onClick={() => aplicarDuracion(p.horas)}
+                      aria-pressed={durValida && Math.abs(duracion - p.horas) < 0.01}>
+                {p.etiqueta}
+              </button>
+            ))}
+          </div>
+          <div className="ajustes__fila">
+            <span className="ajustes__etiqueta">Termina</span>
+            {finManual ? (
+              <input className="ajustes__hora" type="datetime-local" value={fin} onChange={(e) => setFin(e.target.value)} aria-label="Fin de la reserva" />
+            ) : (
+              <button type="button" className="ajustes__valor-btn" onClick={() => setFinManual(true)}>
+                {textoFin}
+                <Icon nombre="lapiz" width={15} height={15} />
+              </button>
             )}
           </div>
+        </section>
+        <p className="tiny muted reservar-limite">
+          Hasta {lim.maxHoras} h por reserva{admin ? '' : '; para más tiempo se envía una solicitud'}.
+        </p>
 
-          {problema && (
-            <div className="alert warn">
-              <Icon nombre="alerta" />
-              <div className="alert__body">{problema}</div>
-            </div>
-          )}
-
-          {adminExcede && !problema && (
-            <div className="alert warn">
-              <Icon nombre="alerta" />
-              <div className="alert__body">
-                <strong>Supera el límite de {lim.maxHoras} h.</strong> Como administrador puede reservar hasta{' '}
-                {Math.round(lim.maxAbsolutoHoras / 24)} días, pero revise que las fechas sean las correctas: el equipo
-                quedará ocupado para todos durante {Math.round(duracion / 24)} días.
-                <label className="check-row" style={{ marginTop: 'var(--s3)' }}>
-                  <input type="checkbox" checked={confirmaExceso} onChange={(e) => setConfirmaExceso(e.target.checked)} />
-                  <span>
-                    <strong>Confirmo que supero el límite como administrador</strong>
-                    Termina el {fecha(aIso(fin))}
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
-
-          {esLarga && !problema && (
-            <div className="alert info">
-              <Icon nombre="info" />
-              <div className="alert__body">
-                <strong>Esto supera las {lim.maxHoras} h.</strong> No se reserva de inmediato: se envía una
-                solicitud y un administrador la aprueba o la rechaza. El equipo no queda apartado mientras tanto.
-                <div className="field" style={{ marginTop: 'var(--s3)' }}>
-                  <label className="field__label" htmlFor="justificacion">
-                    ¿Por qué necesita más tiempo?
-                  </label>
-                  <textarea
-                    id="justificacion"
-                    rows={3}
-                    maxLength={800}
-                    value={justificacion}
-                    onChange={(e) => setJustificacion(e.target.value)}
-                    placeholder="Ej. Entrenamiento de un modelo para el trabajo de grado que tarda 12 días continuos."
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="field">
-            <label className="field__label" htmlFor="detalle">
-              Detalle, tutor o descripción <span className="muted" style={{ fontWeight: 500 }}>(opcional)</span>
-            </label>
-            <textarea
-              id="detalle"
-              rows={3}
-              maxLength={800}
-              value={detalle}
-              onChange={(e) => setDetalle(e.target.value)}
-              placeholder="Nombre del proyecto, tutor, software que va a usar."
-            />
+        {problema && (
+          <div className="alert warn">
+            <Icon nombre="alerta" />
+            <div className="alert__body">{problema}</div>
           </div>
+        )}
 
-          {!esLarga && (() => {
-            const alcanza = alcanzaParaSoftware(aIso(inicio), lim.softwareAnticipacion)
-            return (
-              <div className="stack software-reserva">
-                <label className="check-row">
-                  <input type="checkbox" checked={pideSoftware && alcanza} disabled={!alcanza}
-                         onChange={(e) => setPideSoftware(e.target.checked)} />
-                  <span>
-                    <strong>Necesito un software que no está instalado</strong>
-                    {alcanza
-                      ? 'El laboratorio lo gestiona con TI. Su reserva queda igual aunque no alcancen a instalarlo.'
-                      : `Para pedir software se necesitan ${lim.softwareAnticipacion} días hábiles: esta reserva empieza antes. Puede pedirlo para otra fecha desde Disponibilidad.`}
-                  </span>
-                </label>
-                {pideSoftware && alcanza && <CamposSoftware valor={software} cambiar={setSoftware} equipos={equipos} />}
-              </div>
-            )
-          })()}
-
-          {!esLarga && (
-            <label className="check-row">
-              <input type="checkbox" checked={desatendido} onChange={(e) => setDesatendido(e.target.checked)} />
-              <span>
-                <strong>Proceso desatendido</strong>
-                Dejará algo ejecutándose sin estar presente. Quien pase por el equipo verá su mensaje.
-              </span>
-            </label>
-          )}
-
-          {desatendido && !esLarga && (
-            <div className="field">
-              <label className="field__label" htmlFor="mensaje">
-                Mensaje para quien llegue al equipo
-              </label>
-              <input
-                id="mensaje"
-                value={mensaje}
-                onChange={(e) => setMensaje(e.target.value)}
-                maxLength={140}
-                placeholder="Ej. No apagar: entrenamiento en curso."
-              />
-            </div>
-          )}
-
-          {desatendido && !esLarga && lim.usoCompartido && (
-            <div className="compartir-caja">
-              <label className="check-row" style={{ margin: 0 }}>
-                <input type="checkbox" checked={compartida} onChange={(e) => setCompartida(e.target.checked)} />
+        {adminExcede && !problema && (
+          <div className="alert warn">
+            <Icon nombre="alerta" />
+            <div className="alert__body">
+              <strong>Supera el límite de {lim.maxHoras} h.</strong> Como administrador puede reservar hasta {Math.round(lim.maxAbsolutoHoras / 24)} días;
+              el equipo quedará ocupado para todos durante {Math.round(duracion / 24)} días.
+              <label className="check-row" style={{ marginTop: 'var(--s3)' }}>
+                <input type="checkbox" checked={confirmaExceso} onChange={(e) => setConfirmaExceso(e.target.checked)} />
                 <span>
-                  <strong>Uso compartido</strong>
-                  Mientras su proceso corre, otras personas pueden usar este equipo y reservarlo en su horario, sin cerrar los
-                  programas que usted proteja. Faro les muestra el aviso y no deja apagar ni reiniciar el equipo de forma remota.
+                  <strong>Confirmo que supero el límite como administrador</strong>
+                  Termina el {fecha(aIso(fin))}
                 </span>
               </label>
-              {compartida && (
-                <>
-                  <span className="field__label">Programas que nadie debe cerrar</span>
-                  {(equipoActual?.software ?? []).length > 0 && (
-                    <div className="chips" role="group" aria-label="Programas protegidos">
-                      {(equipoActual?.software ?? []).map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          className={`chip ${protegidos.includes(p) ? 'activo' : ''}`}
-                          aria-pressed={protegidos.includes(p)}
-                          onClick={() => setProtegidos((x) => (x.includes(p) ? x.filter((y) => y !== p) : [...x, p]))}
-                        >
-                          {p}
-                        </button>
-                      ))}
+            </div>
+          </div>
+        )}
+
+        {esLarga && !problema && (
+          <div className="alert info">
+            <Icon nombre="info" />
+            <div className="alert__body">
+              <strong>Esto supera las {lim.maxHoras} h.</strong> Se envía como solicitud: un administrador la aprueba o la rechaza, y el equipo no queda
+              apartado mientras tanto.
+              <div className="field" style={{ marginTop: 'var(--s3)' }}>
+                <label className="field__label" htmlFor="justificacion">
+                  ¿Por qué necesita más tiempo?
+                </label>
+                <textarea id="justificacion" rows={3} maxLength={800} value={justificacion} onChange={(e) => setJustificacion(e.target.value)}
+                          placeholder="Ej. El entrenamiento del modelo tarda 12 días continuos." />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Para qué */}
+        <section className="reservar-bloque">
+          <h2 className="reservar-bloque__t">Actividad</h2>
+          <div className="actividades" role="radiogroup" aria-label="Tipo de actividad">
+            {ACTIVIDADES.map((x) => (
+              <button key={x} type="button" role="radio" aria-checked={actividad === x} className="chip actividad"
+                      onClick={() => {
+                        setActividad(x)
+                        if (pideDocente(x) && !docente.trim()) setDocente(docenteRecordado(x))
+                      }}>
+                <span className="actividad__punto" style={{ background: COLOR_ACTIVIDAD[x] }} aria-hidden="true" />
+                {x === 'Semilleros' ? 'Semillero' : x}
+              </button>
+            ))}
+          </div>
+          {pideDocente(actividad) && <CampoDocente id="docente" actividad={actividad} valor={docente} onCambio={setDocente} />}
+          <div className="field">
+            <label className="field__label" htmlFor="detalle">
+              Detalle (opcional)
+            </label>
+            <textarea id="detalle" rows={2} maxLength={800} value={detalle} onChange={(e) => setDetalle(e.target.value)}
+                      placeholder="Proyecto, asignatura o lo que va a hacer" />
+          </div>
+        </section>
+
+        {/* Opciones */}
+        {!esLarga && (
+          <section className="reservar-bloque">
+            <h2 className="reservar-bloque__t">Opciones</h2>
+            {(() => {
+              const alcanza = alcanzaParaSoftware(aIso(inicio), lim.softwareAnticipacion)
+              return (
+                <div className="opcion">
+                  <label className="opcion__fila">
+                    <span className="opcion__texto">
+                      <strong>Necesito un programa que no está instalado</strong>
+                      <span>
+                        {alcanza
+                          ? 'El laboratorio lo gestiona con TI; su reserva no depende de eso.'
+                          : `Se pide con ${lim.softwareAnticipacion} días hábiles de anticipación. Para esta fecha ya no alcanza.`}
+                      </span>
+                    </span>
+                    <input type="checkbox" role="switch" className="interruptor" checked={pideSoftware && alcanza} disabled={!alcanza}
+                           onChange={(e) => setPideSoftware(e.target.checked)} />
+                  </label>
+                  {pideSoftware && alcanza && <CamposSoftware valor={software} cambiar={setSoftware} equipos={equipos} />}
+                </div>
+              )
+            })()}
+            <div className="opcion">
+              <label className="opcion__fila">
+                <span className="opcion__texto">
+                  <strong>Dejaré un proceso corriendo</strong>
+                  <span>Quien pase por el equipo verá su mensaje y no lo apagará.</span>
+                </span>
+                <input type="checkbox" role="switch" className="interruptor" checked={desatendido} onChange={(e) => setDesatendido(e.target.checked)} />
+              </label>
+              {desatendido && (
+                <div className="stack">
+                  <div className="field">
+                    <label className="field__label" htmlFor="mensaje">
+                      Mensaje para quien llegue
+                    </label>
+                    <input id="mensaje" value={mensaje} onChange={(e) => setMensaje(e.target.value)} maxLength={140}
+                           placeholder="Ej. No apagar: entrenamiento en curso" />
+                  </div>
+                  {lim.usoCompartido && (
+                    <label className="opcion__fila opcion__fila--sub">
+                      <span className="opcion__texto">
+                        <strong>Permitir que otros usen el equipo</strong>
+                        <span>Pueden reservarlo mientras su proceso corre, sin cerrar los programas que usted proteja.</span>
+                      </span>
+                      <input type="checkbox" role="switch" className="interruptor" checked={compartida} onChange={(e) => setCompartida(e.target.checked)} />
+                    </label>
+                  )}
+                  {compartida && lim.usoCompartido && (
+                    <div className="stack">
+                      <span className="field__label">Programas que nadie debe cerrar</span>
+                      {(equipoActual?.software ?? []).length > 0 && (
+                        <div className="chips" role="group" aria-label="Programas protegidos">
+                          {(equipoActual?.software ?? []).map((x) => (
+                            <button key={x} type="button" className="chip" aria-pressed={protegidos.includes(x)}
+                                    onClick={() => setProtegidos((l) => (l.includes(x) ? l.filter((y) => y !== x) : [...l, x]))}>
+                              {x}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <input aria-label="Otros programas protegidos" value={otrosProtegidos} onChange={(e) => setOtrosProtegidos(e.target.value)}
+                             maxLength={200} placeholder="Otros, separados por coma" />
+                      <p className="tiny muted" style={{ margin: 0 }}>
+                        Guarde sus resultados en su carpeta o en la nube: quien use el equipo trabaja en la misma sesión.
+                      </p>
                     </div>
                   )}
-                  <input
-                    aria-label="Otros programas protegidos"
-                    value={otrosProtegidos}
-                    onChange={(e) => setOtrosProtegidos(e.target.value)}
-                    maxLength={200}
-                    placeholder="Otros, separados por coma (p. ej. script de Python en la terminal)"
-                  />
-                  <p className="tiny muted" style={{ margin: 0 }}>
-                    Guarde sus resultados en su carpeta o en la nube: quien use el equipo trabaja en la misma sesión del computador.
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="row" style={{ gap: 'var(--s2)' }}>
-            <button type="submit" disabled={enviando || cargando || tope.alcanzado || !!problema || (adminExcede && !confirmaExceso)}>
-              {enviando ? (
-                <>
-                  <span className="spinner" aria-hidden="true" /> Enviando…
-                </>
-              ) : esLarga ? (
-                <>
-                  <Icon nombre="flecha" /> Enviar solicitud
-                </>
-              ) : (
-                <>
-                  <Icon nombre="check" /> Reservar
-                </>
-              )}
-            </button>
-            <button type="button" className="btn ghost" onClick={consultarDisponibilidad} disabled={!!problema}>
-              <Icon nombre="buscar" /> Comprobar disponibilidad
-            </button>
-            <Link className="btn gray" to="/">
-              Cancelar
-            </Link>
-          </div>
-
-          {disponibles && (
-            <div className="alert info">
-              <Icon nombre="info" />
-              <div className="alert__body">
-                Equipos libres en ese intervalo:{' '}
-                <strong>{disponibles.length ? disponibles.join(', ') : 'ninguno'}</strong>.
-              </div>
-            </div>
-          )}
-          {aviso && (
-            <div className="alert ok">
-              <Icon nombre="check-circulo" />
-              <div className="alert__body">{aviso}</div>
-            </div>
-          )}
-          {anfitrion && (
-            <div className="alert warn" role="status">
-              <Icon nombre="compartir" />
-              <div className="alert__body">
-                <strong>Este horario es de uso compartido.</strong> Otra persona dejó un proceso corriendo en {equipo}. Puede usar el
-                equipo, pero <strong>no cierre</strong> {anfitrion.protegidos?.length ? anfitrion.protegidos.join(', ') : 'los programas abiertos'}, ni
-                cierre la sesión, reinicie o apague el computador.
-                {anfitrion.mensaje_llegada && <> Nota: «{anfitrion.mensaje_llegada}».</>}
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="alert danger">
-              <Icon nombre="alerta" />
-              <div className="alert__body">{error}</div>
-            </div>
-          )}
-        </form>
-
-        <aside className="stack">
-          <section className="card">
-            <h3 style={{ fontSize: 'var(--text-base)' }}>Antes de reservar</h3>
-            <ul className="small muted" style={{ paddingLeft: '1.05rem', margin: 0 }}>
-              <li>La reserva queda a su nombre y genera una credencial con QR.</li>
-              <li>Registre su llegada al comenzar; si no va a usar el equipo, cancele para liberarlo.</li>
-              <li>Al terminar, use «Liberar equipo» para que otra persona pueda reservar antes.</li>
-              <li>Las cancelaciones conservan el historial: no se borran.</li>
-            </ul>
-          </section>
-
-          <section className="card accent">
-            <h3 style={{ fontSize: 'var(--text-base)' }}>Límites vigentes</h3>
-            <div className="stack" style={{ marginTop: 'var(--s3)' }}>
-              <div className="row between small">
-                <span className="muted">Reserva base</span>
-                <strong className="num">{lim.maxHoras} h</strong>
-              </div>
-              <div className="row between small">
-                <span className="muted">Extensión</span>
-                <strong className="num">+{lim.maxExtension} h</strong>
-              </div>
-              <div className="row between small">
-                <span className="muted">Tope sin solicitud</span>
-                <strong className="num">{lim.maxTotal} h</strong>
-              </div>
-              {admin && (
-                <div className="row between small">
-                  <span className="muted">Tope para administradores</span>
-                  <strong className="num">{Math.round(lim.maxAbsolutoHoras / 24)} días</strong>
                 </div>
               )}
-              <div className="row between small">
-                <span className="muted">Con solicitud aprobada</span>
-                <strong className="num">hasta {Math.round(lim.excepcionMaxHoras / 24)} días</strong>
-              </div>
             </div>
           </section>
-        </aside>
+        )}
+
+        {anfitrion && (
+          <div className="alert warn" role="status">
+            <Icon nombre="compartir" />
+            <div className="alert__body">
+              <strong>Este horario es de uso compartido.</strong> Otra persona dejó un proceso corriendo en {equipo}. Puede usar el equipo, pero{' '}
+              <strong>no cierre</strong> {anfitrion.protegidos?.length ? anfitrion.protegidos.join(', ') : 'los programas abiertos'} ni reinicie o apague el
+              computador.
+              {anfitrion.mensaje_llegada && <> Nota: «{anfitrion.mensaje_llegada}».</>}
+            </div>
+          </div>
+        )}
+        {aviso && (
+          <div className="alert ok">
+            <Icon nombre="check-circulo" />
+            <div className="alert__body">{aviso}</div>
+          </div>
+        )}
+        {error && (
+          <div className="alert danger">
+            <Icon nombre="alerta" />
+            <div className="alert__body">{error}</div>
+          </div>
+        )}
+
+        <p className="small muted reservar-clase">
+          ¿Necesita varios equipos para una clase? <Link to="/clases">Solicite la sala</Link>
+        </p>
+
+        <div className="reservar-pie">
+          <span className="reservar-pie__resumen">
+            {equipoActual?.codigo ?? 'Equipo'}
+            <span>{durValida ? resumenHorario(aIso(inicio), aIso(fin)) : 'Elija el horario'}</span>
+          </span>
+          <button type="submit" className="btn lg" disabled={enviando || cargando || tope.alcanzado || !!problema || (adminExcede && !confirmaExceso)}>
+            {enviando ? (
+              <>
+                <span className="spinner" aria-hidden="true" /> Enviando…
+              </>
+            ) : esLarga ? (
+              'Enviar solicitud'
+            ) : (
+              'Reservar'
+            )}
+          </button>
+        </div>
+      </form>
+
+      <aside className="reservar-lado" aria-label={`Agenda de ${equipoActual?.codigo ?? 'el equipo'}`}>
+        <h2 className="reservar-bloque__t">Agenda de {equipoActual?.codigo ?? 'el equipo'}</h2>
+        {proximasEquipo.length === 0 ? (
+          <p className="small muted" style={{ margin: 0 }}>Sin reservas en los próximos días.</p>
+        ) : (
+          <ul className="agenda-corta">
+            {proximasEquipo.map((o, i) => (
+              <li key={i}>
+                <span className="agenda-corta__dia">{diaLegible(aInputLocal(new Date(o.inicio)).slice(0, 10))}</span>
+                <span className="agenda-corta__horas">
+                  {fmtHora.format(new Date(o.inicio))} a {new Date(o.fin).toDateString() === new Date(o.inicio).toDateString() ? fmtHora.format(new Date(o.fin)) : `${diaLegible(aInputLocal(new Date(o.fin)).slice(0, 10))}, ${fmtHora.format(new Date(o.fin))}`}
+                  {o.tipo === 'bloqueo' && <span className="muted">, bloqueo</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="tiny muted" style={{ margin: 0 }}>
+          Al reservar recibe una credencial con QR. Registre su llegada al comenzar y libere el equipo al terminar.
+        </p>
+      </aside>
       </div>
+
+      <Modal abierto={eligiendo} titulo="Elegir equipo" descripcion={durValida ? resumenHorario(aIso(inicio), aIso(fin)) : undefined} onCerrar={() => setEligiendo(false)}>
+        <div className="elegir-equipo">
+          {categorias.map((cat) => (
+            <div key={cat}>
+              {categorias.length > 1 && <h3 className="disp-grupo__titulo">{cat}</h3>}
+              <div className="sala-lista">
+                {equipos.filter((e) => e.categoria === cat).map((e) => {
+                  const libre = disponibles ? disponibles.includes(e.codigo) : null
+                  return (
+                    <button key={e.id} type="button" className="sala-fila" aria-current={e.codigo === equipo}
+                            onClick={() => { setEquipo(e.codigo); setEligiendo(false) }}>
+                      {fotoDe(e) ? (
+                        <img className="sala-fila__foto" src={fotoDe(e) ?? undefined} alt="" loading="lazy" />
+                      ) : (
+                        <span className="sala-fila__foto sala-fila__foto--vacia" aria-hidden="true">
+                          <Icon nombre="monitor" width={24} height={24} />
+                        </span>
+                      )}
+                      <span className="sala-fila__texto">
+                        <span className="sala-fila__titulo">
+                          {e.codigo}
+                          {textoSO(e) && <span className="sala-fila__so">{textoSO(e)}</span>}
+                        </span>
+                        {libre !== null && (
+                          <span className="sala-fila__estado">
+                            <span className={`punto-estado ${libre ? 'libre' : 'ocupado'}`} aria-hidden="true" />
+                            {libre ? 'Libre en ese horario' : 'Ocupado en ese horario'}
+                          </span>
+                        )}
+                      </span>
+                      {e.codigo === equipo && <Icon nombre="check" width={20} height={20} className="sala-fila__flecha" />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </>
   )
+}
+
+const COLOR_ACTIVIDAD: Record<string, string> = {
+  Docencia: '#5B9BFF',
+  Investigación: '#3FBF84',
+  PAE: '#E5B53A',
+  Semilleros: '#F39A3B',
+  'Trabajo de grado': '#F06FA9',
+  Otro: '#9C9C9C'
+}
+
+/** «3 h», «2 h 30 min», «1 día y 4 h», «7 días». */
+function textoDuracion(h: number): string {
+  const min = Math.round(h * 60)
+  const dias = Math.floor(min / 1440)
+  const horas = Math.floor((min % 1440) / 60)
+  const mins = min % 60
+  if (dias === 0) return mins ? (horas ? `${horas} h ${mins} min` : `${mins} min`) : `${horas} h`
+  const d = `${dias} ${dias === 1 ? 'día' : 'días'}`
+  return horas ? `${d} y ${horas} h` : d
+}
+
+const fmtHora = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' })
+const fmtDiaLargo = new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })
+
+function nombreDia(iso: string): string {
+  const d = new Date(iso)
+  const hoy = new Date()
+  const man = new Date()
+  man.setDate(hoy.getDate() + 1)
+  if (d.toDateString() === hoy.toDateString()) return 'hoy'
+  if (d.toDateString() === man.toDateString()) return 'mañana'
+  return fmtDiaLargo.format(d).replace(/\./g, '').replace(/,/g, '').replace(/ de /g, ' ')
+}
+
+/** «hoy de 11:00 a. m. a 2:00 p. m.» o «hoy 11:00 a. m. a mié 25 nov 2:00 p. m.». */
+function resumenHorario(ini: string, fin: string): string {
+  const a = new Date(ini)
+  const b = new Date(fin)
+  const dia = nombreDia(ini)
+  const texto = a.toDateString() === b.toDateString()
+    ? `${dia} de ${fmtHora.format(a)} a ${fmtHora.format(b)}`
+    : `${dia} ${fmtHora.format(a)} a ${nombreDia(fin)} ${fmtHora.format(b)}`
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
+/** Fin de la reserva: solo la hora si termina el mismo día; si no, el día y la hora. */
+function cuandoLargo(fin: string, ini: string): string {
+  const a = new Date(ini)
+  const b = new Date(fin)
+  if (a.toDateString() === b.toDateString()) return fmtHora.format(b)
+  const t = `${nombreDia(fin)}, ${fmtHora.format(b)}`
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+function diaLegible(valor: string): string {
+  const [y, m, d] = valor.split('-').map(Number)
+  return fmtDiaLargo.format(new Date(y, m - 1, d, 12)).replace(/\./g, '').replace(/,/g, '').replace(/ de /g, ' ')
 }
