@@ -328,3 +328,7 @@ export interface SolicitudSoftware {
   perfiles?: { nombre: string; correo: string } | null
   equipos?: { codigo: string } | null
 }
+
+/** Foto del equipo, o la ilustración genérica de LADME si aún no tiene una. */
+export const FOTO_GENERICA = '/equipo.webp'
+export const fotoEquipo = (url?: string | null) => url || FOTO_GENERICA

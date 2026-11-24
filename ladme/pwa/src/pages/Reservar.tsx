@@ -4,7 +4,7 @@ import { AvisoSancion, useSancion } from '../components/Inasistencias'
 import { CamposSoftware, SOFTWARE_VACIO, alcanzaParaSoftware, type DatosSoftware } from '../components/Software'
 import CampoDocente, { docenteRecordado, recordarDocente, validarDocente } from '../components/CampoDocente'
 import { solicitarSoftware, crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
-import { ACTIVIDADES, perfilCompleto, pideDocente, textoSO, type Equipo, type Ocupacion } from '../lib/types'
+import { ACTIVIDADES, fotoEquipo, perfilCompleto, pideDocente, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { aIso, aInputLocal, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
 import { useTopeReservas } from '../lib/reservaVigente'
@@ -246,7 +246,7 @@ export default function Reservar() {
     }
   })()
   const categorias = [...new Set(equipos.map((e) => e.categoria))].sort()
-  const fotoDe = (e?: Equipo) => (e as (Equipo & { foto_url?: string | null }) | undefined)?.foto_url ?? null
+  const fotoDe = (e?: Equipo) => fotoEquipo((e as (Equipo & { foto_url?: string | null }) | undefined)?.foto_url)
   const diaActual = inicio.slice(0, 10)
   const horaActual = inicio.slice(11, 16)
   const hoyLocal = aInputLocal(new Date()).slice(0, 10)
@@ -312,13 +312,7 @@ export default function Reservar() {
 
         {/* Equipo */}
         <section className="reservar-equipo">
-          {fotoDe(equipoActual) ? (
-            <img className="reservar-equipo__foto" src={fotoDe(equipoActual) ?? undefined} alt="" />
-          ) : (
-            <span className="reservar-equipo__foto reservar-equipo__foto--vacia" aria-hidden="true">
-              <Icon nombre="monitor" width={30} height={30} />
-            </span>
-          )}
+          <img className="reservar-equipo__foto" src={fotoDe(equipoActual)} alt="" />
           <div className="reservar-equipo__texto">
             <strong>{equipoActual?.codigo ?? (cargando ? 'Cargando…' : 'Sin equipos disponibles')}</strong>
             {equipoActual && (
@@ -633,13 +627,7 @@ export default function Reservar() {
                   return (
                     <button key={e.id} type="button" className="sala-fila" aria-current={e.codigo === equipo}
                             onClick={() => { setEquipo(e.codigo); setEligiendo(false) }}>
-                      {fotoDe(e) ? (
-                        <img className="sala-fila__foto" src={fotoDe(e) ?? undefined} alt="" loading="lazy" />
-                      ) : (
-                        <span className="sala-fila__foto sala-fila__foto--vacia" aria-hidden="true">
-                          <Icon nombre="monitor" width={24} height={24} />
-                        </span>
-                      )}
+                      <img className="sala-fila__foto" src={fotoDe(e)} alt="" loading="lazy" />
                       <span className="sala-fila__texto">
                         <span className="sala-fila__titulo">
                           {e.codigo}

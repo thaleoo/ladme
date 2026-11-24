@@ -5,7 +5,7 @@ import {
   type EstadoMantenimientoEquipo
 } from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { ACTIVIDADES, pideDocente, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
+import { ACTIVIDADES, fotoEquipo, pideDocente, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
 import ReporteFalla from '../components/ReporteFalla'
 import MiReserva from '../components/MiReserva'
 import AgendaEquipo from '../components/AgendaEquipo'
@@ -211,11 +211,9 @@ export default function FichaEquipo() {
 
   return (
     <>
-      {equipo.foto_url && (
-        <figure className="equipo-foto equipo-foto--portada">
-          <img src={equipo.foto_url} alt={`Foto del ${equipo.codigo}`} />
-        </figure>
-      )}
+      <figure className="equipo-foto equipo-foto--portada">
+        <img src={fotoEquipo(equipo.foto_url)} alt={equipo.foto_url ? `Foto del ${equipo.codigo}` : ''} />
+      </figure>
 
       <PageHeader
         titulo={equipo.codigo}

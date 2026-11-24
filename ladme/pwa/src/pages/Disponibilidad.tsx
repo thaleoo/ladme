@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listarEquipos, listarOcupacion, miEspera, salirEspera, unirseEspera, type Espera } from '../lib/api'
-import { etiquetaSO, textoSO, type Equipo, type Ocupacion } from '../lib/types'
+import { etiquetaSO, fotoEquipo, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { diaCorto, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
 import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
@@ -235,7 +235,7 @@ export default function Disponibilidad() {
   const sel = celdas.find((c) => c.equipo.codigo === abierto)
   const agendaSel = sel ? (porEquipo.get(sel.equipo.codigo) ?? []).filter((o) => new Date(o.fin).getTime() > Date.now()).slice(0, 5) : []
 
-  const fotoDe = (e: Equipo) => (e as Equipo & { foto_url?: string | null }).foto_url ?? null
+  const fotoDe = (e: Equipo) => fotoEquipo((e as Equipo & { foto_url?: string | null }).foto_url)
   const libresVisibles = visibles.filter((c) => c.situacion === 'libre')
   // Programas más comunes primero; el resto queda en «Más programas».
   const programasOrdenados = [...programas].sort(
@@ -347,15 +347,9 @@ export default function Disponibilidad() {
           </div>
           <div className="libres-carrusel">
             {libresVisibles.map((c) => (
-              <button key={c.equipo.id} type="button" className={`libre-card${fotoDe(c.equipo) ? '' : ' libre-card--vacia'}`} onClick={() => setAbierto(c.equipo.codigo)}
+              <button key={c.equipo.id} type="button" className="libre-card" onClick={() => setAbierto(c.equipo.codigo)}
                       aria-label={`${c.equipo.codigo}, libre ${c.proxima ? `hasta ${cuando(c.proxima.inicio)}` : 'sin reservas próximas'}`}>
-                {fotoDe(c.equipo) ? (
-                  <img className="libre-card__foto" src={fotoDe(c.equipo) ?? undefined} alt="" loading="lazy" />
-                ) : (
-                  <span className="libre-card__foto libre-card__foto--vacia" aria-hidden="true">
-                    <Icon nombre="monitor" width={40} height={40} />
-                  </span>
-                )}
+                <img className="libre-card__foto" src={fotoDe(c.equipo)} alt="" loading="lazy" />
                 <span className="libre-card__hasta">{c.proxima ? `Hasta ${cuando(c.proxima.inicio)}` : 'Todo el día'}</span>
                 <span className="libre-card__codigo">{c.equipo.codigo}</span>
               </button>
@@ -401,13 +395,7 @@ export default function Disponibilidad() {
             <div className="sala-lista">
               {g.lista.map((c) => (
                 <button key={c.equipo.id} type="button" className="sala-fila" onClick={() => setAbierto(c.equipo.codigo)}>
-                  {fotoDe(c.equipo) ? (
-                    <img className="sala-fila__foto" src={fotoDe(c.equipo) ?? undefined} alt="" loading="lazy" />
-                  ) : (
-                    <span className="sala-fila__foto sala-fila__foto--vacia" aria-hidden="true">
-                      <Icon nombre="monitor" width={26} height={26} />
-                    </span>
-                  )}
+                  <img className="sala-fila__foto" src={fotoDe(c.equipo)} alt="" loading="lazy" />
                   <span className="sala-fila__texto">
                     <span className="sala-fila__titulo">
                       {c.equipo.codigo}
@@ -461,7 +449,7 @@ export default function Disponibilidad() {
       >
         {sel && (
           <div className="equipo-hoja">
-            {fotoDe(sel.equipo) && <img className="equipo-hoja__foto" src={fotoDe(sel.equipo) ?? undefined} alt={`Foto de ${sel.equipo.codigo}`} />}
+            <img className="equipo-hoja__foto" src={fotoDe(sel.equipo)} alt={`Foto de ${sel.equipo.codigo}`} />
 
             <div className="equipo-hoja__estado">
               <span className={`punto-estado ${sel.situacion}`} aria-hidden="true" />

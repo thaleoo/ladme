@@ -4,7 +4,7 @@ import {
   cancelarReserva, extenderReserva, liberarReserva, misReservas, misSolicitudes, registrarLlegada, retirarSolicitud,
   valorarReserva
 } from '../lib/api'
-import type { Reserva, Solicitud } from '../lib/types'
+import { fotoEquipo, type Reserva, type Solicitud } from '../lib/types'
 import { useLimites } from '../lib/politicas'
 import ReporteFalla from '../components/ReporteFalla'
 import Deslizar from '../components/Deslizar'
@@ -286,13 +286,7 @@ export default function MisReservas() {
     return (
       <article key={r.id} className={`reserva-card ${vigente ? '' : 'pasada'}`}>
         <header className="reserva-card__cab">
-          {r.equipos?.foto_url ? (
-            <img className="reserva-card__foto" src={r.equipos.foto_url} alt="" loading="lazy" />
-          ) : (
-            <span className="reserva-card__foto reserva-card__foto--vacia" aria-hidden="true">
-              <Icon nombre="monitor" width={24} height={24} />
-            </span>
-          )}
+          <img className="reserva-card__foto" src={fotoEquipo(r.equipos?.foto_url)} alt="" loading="lazy" />
           <div className="reserva-card__titulo">
             <Link className="reserva-card__codigo" to={r.equipos?.codigo ? `/equipo/${r.equipos.codigo}` : '#'}>
               {r.equipos?.codigo ?? 'Equipo'}

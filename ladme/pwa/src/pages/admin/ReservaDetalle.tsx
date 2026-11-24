@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { reservaDetalle, type CambioHistorial, type DetalleReserva } from '../../lib/api'
-import type { Reserva } from '../../lib/types'
+import { fotoEquipo, type Reserva } from '../../lib/types'
 import { duracion, estadoReserva, fecha, hace, hora, rango, tonoEstado } from '../../lib/format'
 import { useLimites } from '../../lib/politicas'
 import { esAdmin, useAuth } from '../../context/AuthContext'
@@ -443,9 +443,7 @@ export default function ReservaDetalle() {
           {d.equipo && (
             <section className="card">
               <h2 className="detalle-t">Equipo</h2>
-              {d.equipo.foto_url && (
-                <img className="detalle-foto" src={d.equipo.foto_url} alt={`Foto de ${d.equipo.codigo}`} loading="lazy" />
-              )}
+              <img className="detalle-foto" src={fotoEquipo(d.equipo.foto_url)} alt={d.equipo.foto_url ? `Foto de ${d.equipo.codigo}` : ''} loading="lazy" />
               <dl className="detalle-datos">
                 <Dato t="Código">
                   <Link to={`/equipo/${d.equipo.codigo}`}>{d.equipo.codigo}</Link>
