@@ -210,6 +210,8 @@ export default function Disponibilidad() {
   const sistemas = useMemo(() => [...new Set(equipos.map((e) => e.sistema_operativo).filter(Boolean) as string[])].sort(), [equipos])
   // Programas que Faro detectó en los equipos (R, Python, SPSS…), para filtrar.
   const [pedirSoftware, setPedirSoftware] = useState(false)
+  const [pedidoInicial, setPedidoInicial] = useState('')
+  const abrirPedido = (nombre: string) => { setPedidoInicial(nombre); setPedirSoftware(true) }
   const [masProgramas, setMasProgramas] = useState(false)
   const programas = useMemo(() => [...new Set(equipos.flatMap((e) => e.software ?? []))].sort((a, b) => a.localeCompare(b, 'es')), [equipos])
   const cuenta = (s: Situacion) => celdas.filter((c) => c.situacion === s).length
@@ -241,8 +243,14 @@ export default function Disponibilidad() {
   const MAX_FILA = 10
   const programasChips = programasOrdenados.length <= MAX_FILA + 2 ? programasOrdenados
     : [...programasOrdenados.slice(0, MAX_FILA), ...elegidos.filter((x) => !programasOrdenados.slice(0, MAX_FILA).includes(x))]
+  // Lo que se buscó parece un programa que nadie tiene: se ofrece pedirlo.
+  const qBusca = texto.trim()
+  const programaBuscado = qBusca.length >= 3 && !/^\d+$/.test(qBusca) && visibles.length === 0
+    && !celdas.some((c) => [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo].some((v) => v?.toLowerCase().includes(qBusca.toLowerCase())))
+    ? qBusca : ''
   const conTodos = equipos.filter((e) => elegidos.every((x) => (e.software ?? []).includes(x))).length
   const listaElegidos = elegidos.length > 1 ? `${elegidos.slice(0, -1).join(', ')} y ${elegidos[elegidos.length - 1]}` : (elegidos[0] ?? '')
+  const faltanJuntos = elegidos.length > 1 && conTodos === 0
 
   return (
     <>
@@ -282,41 +290,44 @@ export default function Disponibilidad() {
           ))}
       </div>
 
-      {(programas.length > 0 || !staff) && (
-        <div className="disp-programas">
-          <div className="disp-programas__cabeza">
-            <span className="disp-programas__t" id="disp-programas-t">Programas</span>
-            {elegidos.length > 0 ? (
-              <span className="disp-programas__res" aria-live="polite">
-                {conTodos === 0 ? 'Ningún equipo los tiene todos' : `${conTodos} ${conTodos === 1 ? 'equipo tiene' : 'equipos tienen'} ${elegidos.length === 1 ? listaElegidos : 'todos'}`}
-                {' · '}
-                <button type="button" className="link-btn" onClick={() => setElegidos([])}>Quitar</button>
-              </span>
-            ) : (
-              <span className="disp-programas__res">Elija los que necesita</span>
-            )}
-          </div>
-          <div className="chips-desliza" role="group" aria-labelledby="disp-programas-t">
-            {programasChips.map((x) => (
-              <button key={x} type="button" className="chip" aria-pressed={elegidos.includes(x)} onClick={() => alternar(x)}>
-                <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
-                {x}
-              </button>
-            ))}
-            {programas.length > programasChips.length && (
-              <button type="button" className="chip" onClick={() => setMasProgramas(true)}>
-                Todos ({programas.length})
-              </button>
-            )}
-            {!staff && (
-              <button type="button" className="chip chip--suave" onClick={() => setPedirSoftware(true)}>
-                <Icon nombre="mas2" width={16} height={16} /> Pedir un programa
-              </button>
-            )}
-          </div>
+      <div className="disp-programas">
+        <div className="disp-programas__cabeza">
+          <span className="disp-programas__t" id="disp-programas-t">Programas</span>
+          {elegidos.length > 0 ? (
+            <span className="disp-programas__res" aria-live="polite">
+              {conTodos === 0 ? 'Ningún equipo los tiene todos' : `${conTodos} ${conTodos === 1 ? 'equipo tiene' : 'equipos tienen'} ${elegidos.length === 1 ? listaElegidos : 'todos'}`}
+              {' · '}
+              <button type="button" className="link-btn" onClick={() => setElegidos([])}>Quitar</button>
+            </span>
+          ) : (
+            <span className="disp-programas__res">Elija los que necesita</span>
+          )}
         </div>
-      )}
-      <PedirSoftware abierto={pedirSoftware} cerrar={() => setPedirSoftware(false)} equipos={equipos} />
+        <div className="chips-desliza" role="group" aria-labelledby="disp-programas-t">
+          {programasChips.map((x) => (
+            <button key={x} type="button" className="chip" aria-pressed={elegidos.includes(x)} onClick={() => alternar(x)}>
+              <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
+              {x}
+            </button>
+          ))}
+          {programas.length > programasChips.length && (
+            <button type="button" className="chip" onClick={() => setMasProgramas(true)}>
+              Todos ({programas.length})
+            </button>
+          )}
+        </div>
+        <p className="disp-programas__pedir">
+          {programaBuscado
+            ? <>Ningún equipo tiene «{programaBuscado}». </>
+            : faltanJuntos
+              ? <>¿Los necesita en un mismo equipo? </>
+              : <>¿No está el programa que necesita? </>}
+          <button type="button" className="link-btn" onClick={() => abrirPedido(programaBuscado || (faltanJuntos ? elegidos.join(', ') : ''))}>
+            {faltanJuntos ? 'Pida que los instalen' : 'Pida que lo instalen en la sala'}
+          </button>
+        </p>
+      </div>
+      <PedirSoftware abierto={pedirSoftware} cerrar={() => setPedirSoftware(false)} equipos={equipos} inicial={pedidoInicial} />
 
       {!staff && (espera ? (
         <div className="alert info">
@@ -391,8 +402,10 @@ export default function Disponibilidad() {
 
       {!cargando && !error && visibles.length === 0 && (
         <div className="card">
-          <Empty icono="monitor" titulo="Ningún equipo con esos filtros">
-            Quite un filtro o cambie la búsqueda.
+          <Empty icono="monitor" titulo={programaBuscado ? `Ningún equipo tiene «${programaBuscado}»` : 'Ningún equipo con esos filtros'}>
+            {programaBuscado
+              ? <>Si es un programa, <button type="button" className="link-btn" onClick={() => abrirPedido(programaBuscado)}>pida que lo instalen</button>.</>
+              : 'Quite un filtro o cambie la búsqueda.'}
           </Empty>
         </div>
       )}

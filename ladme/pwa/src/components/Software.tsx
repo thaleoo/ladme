@@ -50,7 +50,7 @@ export function CamposSoftware({ valor, cambiar, equipos }: { valor: DatosSoftwa
   return (
     <div className="stack software-campos">
       <div className="field">
-        <label className="field__label" htmlFor="sw-nombre">Software que necesita</label>
+        <label className="field__label" htmlFor="sw-nombre">Programa que necesita</label>
         <input id="sw-nombre" maxLength={200} value={valor.software} onChange={(e) => cambiar({ ...valor, software: e.target.value })}
                placeholder="Ej.: QGIS, Stata, MATLAB" />
       </div>
@@ -83,7 +83,7 @@ export function CamposSoftware({ valor, cambiar, equipos }: { valor: DatosSoftwa
 }
 
 /** Pedido sin reserva (desde Disponibilidad). */
-export function PedirSoftware({ abierto, cerrar, equipos }: { abierto: boolean; cerrar: () => void; equipos: Equipo[] }) {
+export function PedirSoftware({ abierto, cerrar, equipos, inicial = '' }: { abierto: boolean; cerrar: () => void; equipos: Equipo[]; inicial?: string }) {
   const lim = useLimites()
   const toast = useToast()
   const minimo = primeraFechaSoftware(lim.softwareAnticipacion)
@@ -92,6 +92,10 @@ export function PedirSoftware({ abierto, cerrar, equipos }: { abierto: boolean; 
   const [equipo, setEquipo] = useState('')
   const [ocupado, setOcupado] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Al abrir con un nombre (lo que se buscó o se eligió), ya viene escrito.
+  useEffect(() => {
+    if (abierto && inicial) setDatos((d) => (d.software ? d : { ...d, software: inicial }))
+  }, [abierto, inicial])
 
   async function enviar() {
     setOcupado(true)
@@ -109,7 +113,7 @@ export function PedirSoftware({ abierto, cerrar, equipos }: { abierto: boolean; 
   }
 
   return (
-    <Modal abierto={abierto} titulo="Pedir un software" onCerrar={cerrar}>
+    <Modal abierto={abierto} titulo="Pedir un programa" descripcion="El laboratorio lo pide a TI para instalarlo en la sala o en el equipo que indique." onCerrar={cerrar}>
       <div className="stack">
         <p className="small muted" style={{ margin: 0 }}>
           La instalación pasa por TI, así que pídalo con al menos {lim.softwareAnticipacion} días hábiles de anticipación.
@@ -121,9 +125,9 @@ export function PedirSoftware({ abierto, cerrar, equipos }: { abierto: boolean; 
             <input id="sw-fecha" type="date" min={minimo} value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </div>
           <div className="field">
-            <label className="field__label" htmlFor="sw-equipo">Equipo (opcional)</label>
+            <label className="field__label" htmlFor="sw-equipo">¿Dónde lo necesita?</label>
             <select id="sw-equipo" value={equipo} onChange={(e) => setEquipo(e.target.value)}>
-              <option value="">Cualquiera</option>
+              <option value="">En cualquier equipo de la sala</option>
               {equipos.filter((e) => !e.archivado).map((e) => <option key={e.id} value={e.codigo}>{e.codigo}</option>)}
             </select>
           </div>
