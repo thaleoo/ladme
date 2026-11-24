@@ -4908,3 +4908,65 @@ a.ronda-fila__codigo:hover { text-decoration: underline; text-underline-offset: 
 .appbar__marca.appbar__marca { display: grid; place-items: center; width: 40px; min-height: 40px; border: 0; background: transparent; box-shadow: none; border-radius: 12px; }
 .appbar__marca.appbar__marca svg.marca__logo { width: 32px; height: 32px; border-radius: 9px; }
 .sidebar__brand strong { color: var(--ink-900); font-weight: 600; }
+
+/* ==========================================================================
+   Ingreso (login): la sala en puntos, como el logo, y el formulario al lado
+   ========================================================================== */
+.ingreso { min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--ink-900); }
+.ingreso--cargando { align-items: center; justify-content: center; }
+.ingreso__sala {
+  margin: calc(env(safe-area-inset-top) + 12px) 12px 0; padding: 22px 22px 26px; border-radius: 28px;
+  background: #000; color: #fff; display: flex; flex-direction: column; gap: 18px;
+}
+@media (prefers-color-scheme: dark) { .ingreso__sala { background: var(--surface); } }
+.ingreso__marca { display: flex; align-items: center; gap: 12px; font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; }
+.ingreso__marca .marca__logo { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.14); }
+.sala-puntos { display: grid; gap: clamp(10px, 3.2vw, 18px); width: 100%; max-width: 340px; margin: 6px 0 0; }
+.sala-puntos__p {
+  aspect-ratio: 1; border-radius: 50%; background: rgb(255 255 255 / 0.18);
+  animation: punto-entra 520ms var(--ease) both;
+}
+.sala-puntos__p.libre { background: #fff; }
+.sala-puntos__p.acento { background: #7c6cf0; }
+.sala-puntos__p.mantenimiento, .sala-puntos__p.bloqueado { background: transparent; box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.22); }
+.sala-puntos--logo { max-width: 150px; }
+@keyframes punto-entra { from { opacity: 0; transform: scale(0.4); } }
+@media (prefers-reduced-motion: reduce) { .sala-puntos__p { animation: none; } }
+.ingreso__ahora { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.ingreso__ahora strong { font-size: 56px; font-weight: 600; letter-spacing: -0.04em; line-height: 0.9; font-variant-numeric: tabular-nums; }
+.ingreso__ahora span { font-size: var(--text-lg); color: rgb(255 255 255 / 0.72); }
+.ingreso__lab { margin: 0; font-size: var(--text-sm); color: rgb(255 255 255 / 0.55); line-height: 1.4; }
+
+.ingreso__panel { flex: 1; display: flex; justify-content: center; padding: 28px 20px calc(env(safe-area-inset-bottom) + 32px); }
+.ingreso__caja { width: 100%; max-width: 400px; display: flex; flex-direction: column; }
+.ingreso__titulo { margin: 0; font-size: var(--text-3xl); font-weight: 600; letter-spacing: -0.025em; }
+.ingreso__sub { margin: 8px 0 24px; color: var(--ink-500); line-height: 1.45; }
+.ingreso__sub strong { color: var(--ink-900); font-weight: 600; }
+.ingreso__botones, .ingreso__form { display: flex; flex-direction: column; gap: 10px; }
+.ingreso__form .field { margin: 0 0 6px; }
+.ingreso__google { gap: 12px; }
+.ingreso__g { width: 26px; height: 26px; border-radius: 50%; background: #fff; display: grid; place-items: center; flex: none; }
+.ingreso__campo.ingreso__campo { min-height: 56px; font-size: var(--text-lg); border-radius: 16px; padding: 0 18px; background: var(--surface); border-color: transparent; }
+.ingreso__otp.ingreso__otp { min-height: 64px; font-size: 30px; letter-spacing: 0.4em; text-align: center; border-radius: 16px; background: var(--surface); border-color: transparent; font-variant-numeric: tabular-nums; }
+.ingreso__volver { align-self: center; margin-top: 6px; }
+.ingreso__enlaces { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.ingreso__nota { margin: 28px 0 0; color: var(--ink-500); font-size: var(--text-sm); line-height: 1.5; }
+
+@media (min-width: 900px) {
+  .ingreso { flex-direction: row; }
+  .ingreso__sala {
+    margin: 16px 0 16px 16px; width: min(46vw, 620px); padding: 40px 44px; border-radius: 32px;
+    justify-content: space-between;
+  }
+  .sala-puntos { max-width: 420px; gap: 22px; margin: 0; }
+  .ingreso__ahora strong { font-size: 80px; }
+  .ingreso__ahora span { font-size: var(--text-xl); }
+  .ingreso__panel { align-items: center; padding: 48px; }
+}
+.ingreso__ahora strong { font-variant-numeric: normal; }
+@media (max-width: 899px) {
+  .ingreso__sala { gap: 14px; padding: 20px 20px 22px; }
+  .sala-puntos { max-width: 260px; gap: 10px; }
+  .ingreso__ahora strong { font-size: 48px; }
+  .ingreso__panel { padding-top: 24px; }
+}

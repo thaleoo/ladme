@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { salaPublica, type EquipoSala } from '../lib/api'
 import { Navigate, useLocation } from 'react-router-dom'
 import { tomarDestino } from '../lib/rutas'
 import { useAuth } from '../context/AuthContext'
@@ -16,6 +17,17 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null)
   const [espera, setEspera] = useState(0)
   const location = useLocation()
+  // La sala en vivo, sin datos personales: lo primero que se ve es cuántos equipos hay libres.
+  const [sala, setSala] = useState<EquipoSala[] | null>(null)
+  const libres = sala?.filter((e) => e.estado === 'libre').length ?? 0
+
+  useEffect(() => {
+    let vivo = true
+    salaPublica().then((l) => vivo && setSala(l)).catch(() => vivo && setSala(null))
+    return () => {
+      vivo = false
+    }
+  }, [])
 
   useEffect(() => {
     if (espera <= 0) return
@@ -25,14 +37,10 @@ export default function Login() {
 
   if (cargando) {
     return (
-      <div className="acceso">
-        <div className="acceso__panel">
-          <div className="acceso__caja center">
-            <div className="cargando" style={{ justifyContent: 'center' }}>
-              <span className="spinner" aria-hidden="true" />
-              <span>Cargando LADME…</span>
-            </div>
-          </div>
+      <div className="ingreso ingreso--cargando">
+        <div className="cargando" style={{ justifyContent: 'center' }}>
+          <span className="spinner" aria-hidden="true" />
+          <span>Cargando LADME…</span>
         </div>
       </div>
     )
@@ -81,75 +89,66 @@ export default function Login() {
   }
 
   return (
-    <div className="acceso">
-      <aside className="acceso__marca">
-        <div className="marca">
-          <Logo size={44} />
-          <div className="marca__texto">
-            <strong>LADME</strong>
-            <span>Laboratorio de Aprendizaje de Datos y Modelado Estadístico</span>
-          </div>
+    <div className="ingreso">
+      <section className="ingreso__sala" aria-label="La sala en este momento">
+        <div className="ingreso__marca">
+          <Logo size={40} />
+          <span>LADME</span>
         </div>
-
-        <div>
-          <h1 className="acceso__titular">El laboratorio, siempre a mano.</h1>
-          <ul className="acceso__lista">
-            <li>
-              <Icon nombre="check-circulo" />
-              Consulte en segundos qué equipos están libres.
-            </li>
-            <li>
-              <Icon nombre="check-circulo" />
-              Reserve hasta 7 días y lleve su credencial con QR.
-            </li>
-            <li>
-              <Icon nombre="check-circulo" />
-              Reciba avisos antes de que termine su reserva.
-            </li>
-            <li>
-              <Icon nombre="check-circulo" />
-              Registre llegadas y mantenimiento sin planillas aparte.
-            </li>
-          </ul>
+        <SalaEnPuntos equipos={sala} />
+        <div className="ingreso__ahora" aria-live="polite">
+          {sala && sala.length > 0 ? (
+            <>
+              <strong>{libres}</strong>
+              <span>
+                de {sala.length} equipos libres ahora
+              </span>
+            </>
+          ) : (
+            <span>Laboratorio de Datos y Modelamiento Estadístico</span>
+          )}
         </div>
+        <p className="ingreso__lab">
+          {sala && sala.length > 0 ? 'Laboratorio de Datos y Modelamiento Estadístico · ' : ''}UNAL sede La Paz
+        </p>
+      </section>
 
-        <p className="acceso__pie">Universidad Nacional de Colombia · Sede La Paz</p>
-      </aside>
-
-      <div className="acceso__panel">
-        <div className="acceso__caja">
-          <div className="acceso__movil-marca">
-            <Logo size={56} />
-          </div>
-
-          <h1 style={{ fontSize: 'var(--text-2xl)' }}>Ingresar</h1>
-          <p className="small muted" style={{ marginBottom: 'var(--s5)' }}>
-            Use su cuenta institucional <strong>@unal.edu.co</strong>. No necesita crear una contraseña.
-          </p>
-
+      <main className="ingreso__panel">
+        <div className="ingreso__caja">
           {paso === 'inicio' && (
-            <div className="stack">
-              <button className="btn lg block" type="button" onClick={google} disabled={enviando}>
-                <Icon nombre="usuario" />
-                {enviando ? 'Abriendo Google…' : 'Continuar con Google'}
-              </button>
-              <div className="separador">
-                <span>o</span>
+            <>
+              <h1 className="ingreso__titulo">Ingresar</h1>
+              <p className="ingreso__sub">Con su correo <strong>@unal.edu.co</strong>. No necesita contraseña.</p>
+              <div className="ingreso__botones">
+                <button className="btn lg block ingreso__google" type="button" onClick={google} disabled={enviando}>
+                  <span className="ingreso__g" aria-hidden="true">
+                    <svg viewBox="0 0 48 48" width="18" height="18">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                  </span>
+                  {enviando ? 'Abriendo Google…' : 'Continuar con Google'}
+                </button>
+                <button className="btn gray lg block" type="button" onClick={() => { setError(null); setPaso('correo') }}>
+                  Recibir un código por correo
+                </button>
               </div>
-              <button className="btn ghost block" type="button" onClick={() => { setError(null); setPaso('correo') }}>
-                <Icon nombre="clave" /> Recibir un código en mi correo
-              </button>
-            </div>
+            </>
           )}
 
           {paso === 'correo' && (
-            <form onSubmit={pedirCodigo} className="stack">
+            <form onSubmit={pedirCodigo} className="ingreso__form">
+              <h1 className="ingreso__titulo">Su correo</h1>
+              <p className="ingreso__sub">Le enviaremos un código de 6 dígitos que sirve una sola vez.</p>
               <div className="field">
-                <label className="field__label" htmlFor="correo">
+                <label className="field__label solo-lector" htmlFor="correo">
                   Correo institucional
                 </label>
                 <input
                   id="correo"
+                  className="ingreso__campo"
                   type="email"
                   autoComplete="email"
                   inputMode="email"
@@ -159,7 +158,6 @@ export default function Login() {
                   required
                   autoFocus
                 />
-                <p className="help">Le enviaremos un código de 6 dígitos. Sirve una sola vez.</p>
               </div>
               <button className="btn lg block" type="submit" disabled={enviando || espera > 0}>
                 {enviando ? (
@@ -167,37 +165,30 @@ export default function Login() {
                     <span className="spinner" aria-hidden="true" /> Enviando…
                   </>
                 ) : espera > 0 ? (
-                  `Podrá reintentar en ${espera} s`
+                  `Podrá pedir otro en ${espera} s`
                 ) : (
-                  <>
-                    <Icon nombre="flecha" /> Enviarme el código
-                  </>
+                  'Enviarme el código'
                 )}
               </button>
-              <button className="btn gray block" type="button" onClick={() => { setError(null); setPaso('inicio') }}>
+              <button className="link-btn ingreso__volver" type="button" onClick={() => { setError(null); setPaso('inicio') }}>
                 Volver
               </button>
             </form>
           )}
 
           {paso === 'codigo' && (
-            <form onSubmit={verificar} className="stack">
-              <div className="alert ok">
-                <Icon nombre="check-circulo" />
-                <div className="alert__body">
-                  <strong>Código enviado a {correo.trim().toLowerCase()}</strong>
-                  <p className="small" style={{ margin: '4px 0 0' }}>
-                    Revise también la carpeta de spam. El código vence en pocos minutos.
-                  </p>
-                </div>
-              </div>
+            <form onSubmit={verificar} className="ingreso__form">
+              <h1 className="ingreso__titulo">Revise su correo</h1>
+              <p className="ingreso__sub">
+                Enviamos un código a <strong>{correo.trim().toLowerCase()}</strong>. Vence en pocos minutos; si no llega, mire en spam.
+              </p>
               <div className="field">
-                <label className="field__label" htmlFor="codigo">
+                <label className="field__label solo-lector" htmlFor="codigo">
                   Código de acceso
                 </label>
                 <input
                   id="codigo"
-                  className="codigo-otp"
+                  className="codigo-otp ingreso__otp"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   pattern="[0-9]*"
@@ -214,22 +205,17 @@ export default function Login() {
                     <span className="spinner" aria-hidden="true" /> Verificando…
                   </>
                 ) : (
-                  <>
-                    <Icon nombre="check" /> Ingresar
-                  </>
+                  'Ingresar'
                 )}
               </button>
-              <button
-                className="btn gray block"
-                type="button"
-                disabled={enviando || espera > 0}
-                onClick={() => void pedirCodigo()}
-              >
-                {espera > 0 ? `Pedir otro código en ${espera} s` : 'Pedir otro código'}
-              </button>
-              <button className="btn ghost block" type="button" onClick={() => { setError(null); setPaso('correo') }}>
-                Cambiar de correo
-              </button>
+              <div className="ingreso__enlaces">
+                <button className="link-btn" type="button" disabled={enviando || espera > 0} onClick={() => void pedirCodigo()}>
+                  {espera > 0 ? `Pedir otro código en ${espera} s` : 'Pedir otro código'}
+                </button>
+                <button className="link-btn" type="button" onClick={() => { setError(null); setPaso('correo') }}>
+                  Cambiar de correo
+                </button>
+              </div>
             </form>
           )}
 
@@ -240,20 +226,44 @@ export default function Login() {
             </div>
           )}
 
-          <div className="card tight" style={{ marginTop: 'var(--s5)', background: 'var(--surface-2)' }}>
-            <h2 style={{ fontSize: 'var(--text-base)', marginBottom: 4 }}>¿Es su primera vez?</h2>
-            <p className="tiny muted" style={{ margin: 0 }}>
-              Al ingresar se crea su perfil automáticamente y queda habilitado, porque solo se admiten
-              correos <strong>@unal.edu.co</strong>. Si su cuenta aparece bloqueada o necesita permisos
-              especiales, escriba a <strong>labdatos_paz@unal.edu.co</strong>.
-            </p>
-          </div>
-
-          <p className="tiny muted" style={{ marginTop: 'var(--s5)', textAlign: 'center' }}>
-            Instale LADME desde el menú del navegador para usarla como aplicación y recibir avisos.
+          <p className="ingreso__nota">
+            ¿Primera vez? Su perfil se crea al ingresar. Si no puede entrar o necesita permisos, escriba a{' '}
+            <a href="mailto:labdatos_paz@unal.edu.co">labdatos_paz@unal.edu.co</a>.
           </p>
         </div>
+      </main>
+    </div>
+  )
+}
+
+/**
+ * La sala como una cuadrícula de puntos, igual que el logo: cada punto es un equipo en su lugar
+ * del plano; los libres se encienden. Si no hay datos (sin conexión), queda el logo en grande.
+ */
+function SalaEnPuntos({ equipos }: { equipos: EquipoSala[] | null }) {
+  if (!equipos || equipos.length === 0) {
+    const logo = ['t', 't', 'a', 't', 'l', 't', 'l', 't', 't']
+    return (
+      <div className="sala-puntos sala-puntos--logo" aria-hidden="true" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        {logo.map((t, i) => (
+          <span key={i} className={`sala-puntos__p ${t === 'l' ? 'libre' : t === 'a' ? 'acento' : ''}`} />
+        ))}
       </div>
+    )
+  }
+  const conPos = equipos.every((e) => e.x && e.y)
+  const cols = conPos ? Math.max(...equipos.map((e) => e.x ?? 1)) : Math.min(6, Math.ceil(Math.sqrt(equipos.length)))
+  const ordenados = [...equipos].sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }))
+  return (
+    <div className="sala-puntos" role="img" aria-label={`Plano de la sala: ${equipos.filter((e) => e.estado === 'libre').length} equipos libres`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+      {ordenados.map((e, i) => (
+        <span
+          key={e.codigo}
+          className={`sala-puntos__p ${e.estado}`}
+          style={{ ...(conPos ? { gridColumn: e.x ?? undefined, gridRow: e.y ?? undefined } : {}), animationDelay: `${i * 35}ms` }}
+          title={`${e.codigo}: ${e.estado === 'libre' ? 'libre' : e.estado === 'ocupado' ? 'en uso' : e.estado === 'mantenimiento' ? 'en mantenimiento' : 'bloqueado'}`}
+        />
+      ))}
     </div>
   )
 }
