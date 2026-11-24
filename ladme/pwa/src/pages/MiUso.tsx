@@ -98,7 +98,7 @@ export default function MiUso() {
       <PageHeader
         eyebrow="Historial"
         titulo="Mi uso"
-        sub="Cuánto ha usado el laboratorio. Sirve como soporte para su trabajo de grado o informe."
+        sub="Horas de uso del laboratorio, útiles como soporte de su trabajo de grado."
         volver={{ a: '/cuenta', texto: 'Mi cuenta' }}
       />
 

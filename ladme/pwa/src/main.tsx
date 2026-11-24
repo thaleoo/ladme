@@ -9,6 +9,7 @@ import { iniciarServiceWorker } from './lib/sw'
 import { instalarCapturaDeErrores } from './lib/telemetria'
 import { aplicarTema, temaGuardado } from './lib/tema'
 import './components/InstalarApp' // registra el aviso de instalación lo antes posible
+import '@fontsource-variable/onest'
 import './index.css'
 
 instalarCapturaDeErrores()

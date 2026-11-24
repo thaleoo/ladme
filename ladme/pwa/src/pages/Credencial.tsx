@@ -179,7 +179,7 @@ export default function Credencial() {
       <PageHeader
         eyebrow="Credencial"
         titulo="Su pase"
-        sub="Muéstrelo al personal del laboratorio. Se actualiza solo si la reserva cambia."
+        sub="Muéstrelo al personal del laboratorio."
         volver={{ a: '/mis-reservas', texto: 'Mis reservas' }}
       />
 

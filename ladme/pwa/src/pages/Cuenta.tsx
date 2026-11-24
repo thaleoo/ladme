@@ -57,7 +57,6 @@ export default function Cuenta() {
       <PageHeader
         eyebrow="Cuenta institucional"
         titulo="Mi cuenta"
-        sub="Sus datos de acceso, el rol que tiene en el laboratorio y las reglas de uso."
       />
 
       <section className="card">

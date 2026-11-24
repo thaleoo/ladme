@@ -366,7 +366,6 @@ export default function MisReservas() {
       <PageHeader
         eyebrow="Operación"
         titulo="Mis reservas"
-        sub="Sus turnos vigentes y el historial completo. Las cancelaciones se conservan con su motivo."
         acciones={
           <Link className="btn" to="/reservar">
             <Icon nombre="mas2" /> Nueva reserva

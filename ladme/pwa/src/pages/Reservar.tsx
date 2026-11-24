@@ -251,8 +251,7 @@ export default function Reservar() {
         titulo="Nueva reserva"
         sub={
           <>
-            Hasta <strong>{lim.maxHoras} h</strong> por reserva y una extensión de{' '}
-            <strong>{lim.maxExtension} h</strong>. Para más tiempo, se envía una solicitud.
+            Hasta {lim.maxHoras} h por reserva. Para más tiempo, envíe una solicitud.
           </>
         }
         volver={{ a: '/', texto: 'Volver a disponibilidad' }}

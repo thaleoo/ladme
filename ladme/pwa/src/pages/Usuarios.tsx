@@ -134,7 +134,7 @@ export default function Usuarios() {
       <PageHeader
         eyebrow="Gestión"
         titulo="Usuarios y roles"
-        sub="Las cuentas se crean solas al ingresar con un correo @unal.edu.co. Toque a una persona para cambiar su rol, su permiso técnico o inhabilitarla."
+        sub="Toque a una persona para cambiar su rol o inhabilitar su cuenta."
       />
 
       <section className="card stack">

@@ -7,7 +7,6 @@ import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
-import Pestanas from '../components/Pestanas'
 import Deslizar from '../components/Deslizar'
 import { PedirSoftware } from '../components/Software'
 import { guardarCache, leerCache } from '../lib/cacheLocal'
@@ -41,6 +40,21 @@ const TEXTO: Record<Situacion, string> = {
   ocupado: 'Ocupado',
   bloqueado: 'Bloqueado',
   inactivo: 'No disponible'
+}
+
+/** Texto de estado de una fila: dice qué pasa y hasta cuándo, en una frase. */
+function textoEstado(c: Celda): string {
+  if (c.situacion === 'inactivo') return c.detalle
+  if (c.situacion === 'libre') return c.proxima ? `Libre hasta ${cuando(c.proxima.inicio)}` : c.detalle.startsWith('Uso compartido') ? c.detalle : 'Libre, sin reservas próximas'
+  return `${TEXTO[c.situacion]} ${c.detalle}`
+}
+
+const COLORES_PROGRAMA = ['#E5B53A', '#5B9BFF', '#FF7A59', '#F39A3B', '#3FBF84', '#F06FA9', '#36BDBD', '#A98BFF']
+/** Color estable por programa, para reconocerlo de un vistazo en los filtros. */
+function colorPrograma(nombre: string): string {
+  let h = 0
+  for (const ch of nombre.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return COLORES_PROGRAMA[h % COLORES_PROGRAMA.length]
 }
 
 /** Vista de línea de tiempo: un equipo por fila y siete días de corrido. */
@@ -101,7 +115,8 @@ export default function Disponibilidad() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('TODOS')
-  const [categoria, setCategoria] = useState('TODAS')
+  // Las categorías se muestran como grupos de la lista, sin pestañas.
+  const categoria: string = 'TODAS'
   const [so, setSo] = useState('TODOS')
   const [programa, setPrograma] = useState('TODOS')
   const [espera, setEspera] = useState<Espera | null>(null)
@@ -194,10 +209,10 @@ export default function Disponibilidad() {
   const sistemas = useMemo(() => [...new Set(equipos.map((e) => e.sistema_operativo).filter(Boolean) as string[])].sort(), [equipos])
   // Programas que Faro detectó en los equipos (R, Python, SPSS…), para filtrar.
   const [pedirSoftware, setPedirSoftware] = useState(false)
+  const [masProgramas, setMasProgramas] = useState(false)
   const programas = useMemo(() => [...new Set(equipos.flatMap((e) => e.software ?? []))].sort((a, b) => a.localeCompare(b, 'es')), [equipos])
   const cuenta = (s: Situacion) => celdas.filter((c) => c.situacion === s).length
   const libres = cuenta('libre')
-  const ocupados = celdas.length - libres
 
   const visibles = celdas.filter((c) => {
     if (categoria !== 'TODAS' && c.equipo.categoria !== categoria) return false
@@ -216,22 +231,18 @@ export default function Disponibilidad() {
   const agendaSel = sel ? (porEquipo.get(sel.equipo.codigo) ?? []).filter((o) => new Date(o.fin).getTime() > Date.now()).slice(0, 5) : []
   const specs = sel ? Object.entries(sel.equipo.especificaciones ?? {}).slice(0, 4) : []
 
+  const fotoDe = (e: Equipo) => (e as Equipo & { foto_url?: string | null }).foto_url ?? null
+  const libresVisibles = visibles.filter((c) => c.situacion === 'libre')
+  // Programas más comunes primero; el resto queda en «Más programas».
+  const programasOrdenados = [...programas].sort(
+    (x, y) => equipos.filter((e) => (e.software ?? []).includes(y)).length - equipos.filter((e) => (e.software ?? []).includes(x)).length || x.localeCompare(y, 'es')
+  )
+  const programasChips = programasOrdenados.slice(0, 6)
+  if (programa !== 'TODOS' && !programasChips.includes(programa)) programasChips.push(programa)
+
   return (
     <>
-      <PageHeader
-        eyebrow={staff ? 'Laboratorio' : 'Operación'}
-        titulo="Disponibilidad"
-        sub={
-          staff
-            ? 'Estado de todos los recursos en este momento. Para gestionar reservas, use Administración.'
-            : `Hola ${perfil?.nombre?.split(' ')[0] || 'de nuevo'}: toque un equipo para ver su detalle o reservarlo.`
-        }
-        acciones={
-          <Link className="btn" to="/reservar">
-            <Icon nombre="mas2" /> Nueva reserva
-          </Link>
-        }
-      />
+      <PageHeader titulo="Disponibilidad" />
 
       <Deslizar alActualizar={refrescar} />
 
@@ -249,77 +260,38 @@ export default function Disponibilidad() {
         </div>
       )}
 
-      <section className="barra-filtros">
-        <div className="segmented" role="group" aria-label="Filtrar por estado">
-          {(
-            [
-              ['TODOS', `Todos ${celdas.length}`],
-              ['LIBRES', `Libres ${libres}`],
-              ['OCUPADOS', `No libres ${ocupados}`]
-            ] as const
-          ).map(([valor, etiqueta]) => (
-            <button key={valor} className={filtro === valor ? 'activo' : ''} onClick={() => setFiltro(valor)} type="button">
-              {etiqueta}
-            </button>
-          ))}
-        </div>
-        <div className="segmented" role="group" aria-label="Tipo de vista">
-          {(['cuadricula', 'linea'] as const).map((v) => (
-            <button
-              key={v}
-              className={vista === v ? 'activo' : ''}
-              type="button"
-              onClick={() => {
-                setVista(v)
-                localStorage.setItem('ladme-vista', v)
-              }}
-            >
-              {v === 'cuadricula' ? 'Ahora' : '7 días'}
-            </button>
-          ))}
-        </div>
-        {equipos.length > 8 && (
-          <div className="field barra-filtros__buscar">
-            <label className="solo-lector" htmlFor="buscar-equipo">
-              Buscar equipo
-            </label>
-            <input
-              id="buscar-equipo"
-              type="search"
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              placeholder="Buscar: UNAL-05, Ubuntu…"
-            />
-          </div>
-        )}
-      </section>
-
-      {sistemas.length > 1 && (
-        <div className="chips" role="group" aria-label="Sistema operativo">
-          {['TODOS', ...sistemas].map((s) => (
-            <button key={s} type="button" className="chip" aria-pressed={so === s} onClick={() => setSo(s)}>
-              {s === 'TODOS' ? 'Cualquier sistema' : s}
-              <span className="chip__n">{s === 'TODOS' ? equipos.length : equipos.filter((e) => e.sistema_operativo === s).length}</span>
-            </button>
-          ))}
-        </div>
+      {equipos.length > 8 && (
+        <label className="disp-buscar">
+          <Icon nombre="buscar" width={20} height={20} />
+          <span className="solo-lector">Buscar equipo o programa</span>
+          <input type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Equipo o programa" />
+        </label>
       )}
 
-      <div className="filtro-programa">
-        {programas.length > 0 && (
-          <div className="field" style={{ maxWidth: 320, flex: '1 1 240px' }}>
-            <label className="field__label" htmlFor="filtro-programa">Programa instalado</label>
-            <select id="filtro-programa" value={programa} onChange={(e) => setPrograma(e.target.value)}>
-              <option value="TODOS">Cualquier programa</option>
-              {programas.map((p) => (
-                <option key={p} value={p}>{p} ({equipos.filter((e) => (e.software ?? []).includes(p)).length})</option>
-              ))}
-            </select>
-          </div>
+      <div className="chips-desliza" role="group" aria-label="Filtros">
+        <button type="button" className="chip" aria-pressed={filtro === 'LIBRES'} onClick={() => setFiltro(filtro === 'LIBRES' ? 'TODOS' : 'LIBRES')}>
+          <span className="punto-estado libre" aria-hidden="true" /> Libres <span className="chip__n">{libres}</span>
+        </button>
+        {sistemas.length > 1 &&
+          sistemas.map((x) => (
+            <button key={x} type="button" className="chip" aria-pressed={so === x} onClick={() => setSo(so === x ? 'TODOS' : x)}>
+              {x}
+            </button>
+          ))}
+        {programasChips.map((x) => (
+          <button key={x} type="button" className="chip" aria-pressed={programa === x} onClick={() => setPrograma(programa === x ? 'TODOS' : x)}>
+            <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
+            {x}
+          </button>
+        ))}
+        {programas.length > programasChips.length && (
+          <button type="button" className="chip" onClick={() => setMasProgramas(true)}>
+            Más programas
+          </button>
         )}
         {!staff && (
-          <button type="button" className="link-btn small pedir-software" onClick={() => setPedirSoftware(true)}>
-            <Icon nombre="mas2" width={15} height={15} /> ¿Necesita un software que no está instalado?
+          <button type="button" className="chip chip--suave" onClick={() => setPedirSoftware(true)}>
+            <Icon nombre="mas2" width={16} height={16} /> Pedir un programa
           </button>
         )}
       </div>
@@ -329,14 +301,14 @@ export default function Disponibilidad() {
         <div className="alert info">
           <Icon nombre="campana" />
           <div className="alert__body">
-            Está en la lista de espera{espera.software ? ` para un equipo con ${espera.software}` : ''}. Le avisaremos en cuanto haya uno libre.{' '}
+            Está en la lista de espera{espera.software ? ` para un equipo con ${espera.software}` : ''}. Le avisaremos cuando se libere uno.{' '}
             <button className="link-btn" type="button" disabled={esperaOcupado}
                     onClick={() => { setEsperaOcupado(true); void salirEspera().then(() => setEspera(null)).finally(() => setEsperaOcupado(false)) }}>
               Salir de la lista
             </button>
           </div>
         </div>
-      ) : libres === 0 || (programa !== 'TODOS' && visibles.every((c) => c.situacion !== 'libre')) ? (
+      ) : !cargando && (libres === 0 || (programa !== 'TODOS' && visibles.every((c) => c.situacion !== 'libre'))) ? (
         <div className="alert warn">
           <Icon nombre="reloj" />
           <div className="alert__body">
@@ -352,15 +324,6 @@ export default function Disponibilidad() {
         </div>
       ) : null)}
 
-      {categorias.length > 1 && (
-        <Pestanas
-          etiqueta="Categorías"
-          opciones={['TODAS', ...categorias].map((c) => ({ id: c, texto: c === 'TODAS' ? 'Todo' : c }))}
-          actual={categoria}
-          alCambiar={setCategoria}
-        />
-      )}
-
       {cargando && (
         <div className="grid cols-2">
           <Esqueleto />
@@ -368,10 +331,53 @@ export default function Disponibilidad() {
         </div>
       )}
 
+      {!cargando && vista === 'cuadricula' && libresVisibles.length > 0 && (
+        <section>
+          <div className="seccion-cabecera">
+            <h2>Libres ahora</h2>
+            {libresVisibles.length > 2 && filtro !== 'LIBRES' && (
+              <button type="button" className="link-btn seccion-cabecera__mas" onClick={() => setFiltro('LIBRES')}>
+                Ver los {libresVisibles.length} <Icon nombre="flecha-der" width={16} height={16} />
+              </button>
+            )}
+          </div>
+          <div className="libres-carrusel">
+            {libresVisibles.map((c) => (
+              <button key={c.equipo.id} type="button" className={`libre-card${fotoDe(c.equipo) ? '' : ' libre-card--vacia'}`} onClick={() => setAbierto(c.equipo.codigo)}
+                      aria-label={`${c.equipo.codigo}, libre ${c.proxima ? `hasta ${cuando(c.proxima.inicio)}` : 'sin reservas próximas'}`}>
+                {fotoDe(c.equipo) ? (
+                  <img className="libre-card__foto" src={fotoDe(c.equipo) ?? undefined} alt="" loading="lazy" />
+                ) : (
+                  <span className="libre-card__foto libre-card__foto--vacia" aria-hidden="true">
+                    <Icon nombre="monitor" width={40} height={40} />
+                  </span>
+                )}
+                <span className="libre-card__hasta">{c.proxima ? `Hasta ${cuando(c.proxima.inicio)}` : 'Todo el día'}</span>
+                <span className="libre-card__codigo">{c.equipo.codigo}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!cargando && (
+        <div className="seccion-cabecera">
+          <h2>{vista === 'linea' ? 'Próximos 7 días' : 'Toda la sala'}</h2>
+          <div className="segmented segmented--sm" role="group" aria-label="Tipo de vista">
+            {(['cuadricula', 'linea'] as const).map((v) => (
+              <button key={v} className={vista === v ? 'activo' : ''} type="button" aria-pressed={vista === v}
+                      onClick={() => { setVista(v); localStorage.setItem('ladme-vista', v) }}>
+                {v === 'cuadricula' ? 'Ahora' : 'Semana'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!cargando && !error && visibles.length === 0 && (
         <div className="card">
-          <Empty icono="monitor" titulo="Nada con ese filtro">
-            Cambie el filtro o la búsqueda para ver más recursos.
+          <Empty icono="monitor" titulo="Ningún equipo con esos filtros">
+            Quite un filtro o cambie la búsqueda.
           </Empty>
         </div>
       )}
@@ -382,36 +388,52 @@ export default function Disponibilidad() {
 
       {!cargando && vista === 'cuadricula' &&
         grupos.map((g) => (
-          <section key={g.cat}>
-            {categorias.length > 1 && (
-              <h2 className="grupo-titulo">
-                {g.cat} <span>{g.lista.filter((c) => c.situacion === 'libre').length} libres de {g.lista.length}</span>
-              </h2>
+          <section key={g.cat} className="disp-grupo">
+            {grupos.length > 1 && (
+              <h3 className="disp-grupo__titulo">
+                {g.cat} <span>{g.lista.filter((c) => c.situacion === 'libre').length} de {g.lista.length} libres</span>
+              </h3>
             )}
-            <div className="mosaico">
+            <div className="sala-lista">
               {g.lista.map((c) => (
-                <button
-                  key={c.equipo.id}
-                  type="button"
-                  className={`mosaico__celda mosaico__celda--${c.situacion}`}
-                  onClick={() => setAbierto(c.equipo.codigo)}
-                  aria-label={`${c.equipo.codigo}: ${TEXTO[c.situacion]} ${c.situacion === 'libre' && !c.proxima ? '' : c.detalle}`}
-                >
-                  <span className="mosaico__codigo">{c.equipo.codigo}</span>
-                  {etiquetaSO(c.equipo) && <span className="mosaico__so">{etiquetaSO(c.equipo)}</span>}
-                  <span className="mosaico__estado">
-                    <span className="mosaico__punto" aria-hidden="true" />
-                    {TEXTO[c.situacion]}
+                <button key={c.equipo.id} type="button" className="sala-fila" onClick={() => setAbierto(c.equipo.codigo)}>
+                  {fotoDe(c.equipo) ? (
+                    <img className="sala-fila__foto" src={fotoDe(c.equipo) ?? undefined} alt="" loading="lazy" />
+                  ) : (
+                    <span className="sala-fila__foto sala-fila__foto--vacia" aria-hidden="true">
+                      <Icon nombre="monitor" width={26} height={26} />
+                    </span>
+                  )}
+                  <span className="sala-fila__texto">
+                    <span className="sala-fila__titulo">
+                      {c.equipo.codigo}
+                      {etiquetaSO(c.equipo) && <span className="sala-fila__so">{etiquetaSO(c.equipo)}</span>}
+                    </span>
+                    <span className="sala-fila__estado">
+                      <span className={`punto-estado ${c.situacion}`} aria-hidden="true" />
+                      {textoEstado(c)}
+                      {c.actual?.desatendido ? ', proceso desatendido' : ''}
+                    </span>
                   </span>
-                  <span className="mosaico__detalle">
-                    {c.situacion === 'libre' && !c.proxima ? 'sin reservas hoy' : c.detalle}
-                    {c.actual?.desatendido ? ' · desatendido' : ''}
-                  </span>
+                  <Icon nombre="flecha-der" width={18} height={18} className="sala-fila__flecha" />
                 </button>
               ))}
             </div>
           </section>
         ))}
+
+      <Modal abierto={masProgramas} titulo="Programas instalados" onCerrar={() => setMasProgramas(false)}>
+        <div className="lista-programas">
+          {programasOrdenados.map((x) => (
+            <button key={x} type="button" className="chip" aria-pressed={programa === x}
+                    onClick={() => { setPrograma(programa === x ? 'TODOS' : x); setMasProgramas(false) }}>
+              <span className="chip__marca" style={{ borderColor: colorPrograma(x) }} aria-hidden="true" />
+              {x}
+              <span className="chip__n">{equipos.filter((e) => (e.software ?? []).includes(x)).length}</span>
+            </button>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         abierto={!!sel}

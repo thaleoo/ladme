@@ -181,7 +181,6 @@ export default function Admin() {
       <PageHeader
         eyebrow="Gestión"
         titulo="Administración"
-        sub="El estado del laboratorio, todas las reservas y la configuración."
       />
 
       <div className="admin-nav" ref={nav}>

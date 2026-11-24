@@ -243,7 +243,7 @@ export default function Clases() {
       <PageHeader
         eyebrow="Docentes"
         titulo="Sala para clases"
-        sub="Pida los computadores del LADME para su clase. El laboratorio asigna los equipos libres y usted imprime la lista para sus estudiantes."
+        sub="Pida los computadores para su clase; el laboratorio le asigna los equipos libres."
         acciones={
           docente && (
             <button type="button" onClick={() => setNueva(true)}>
