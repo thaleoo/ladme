@@ -267,3 +267,11 @@ importar la hoja (`docs/MUDANZA.md`).
   quién hizo cada cambio y qué cambió, eventos de Faro durante la reserva, inasistencia, software pedido y fallas.
 - `grant select on reservas_importadas` (la política existente lo limita al personal) para mostrar el titular
   original de las reservas migradas en el panel.
+
+## Migración 0019 — Límites al guardar el perfil
+
+`migrations/0019_perfil_limites.sql`, después de 0018.
+
+- Guardar el perfil sin cambios no escribe nada (disparador `perfiles_a_limite`, que corre antes que `perfiles_docente`).
+- Una persona puede cambiar sus datos hasta 6 veces por hora (`perfiles.perfil_cambios`, `perfil_cambios_desde`).
+- Volver a elegir Docente/Investigador dentro de 24 h reabre la misma verificación sin avisar otra vez al personal.

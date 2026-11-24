@@ -927,3 +927,24 @@ declare r reservas; j jsonb; begin
                      'el historial dice quién extendió y qué cambió');
   perform pg_temp.ok(reserva_detalle(gen_random_uuid()) is null, 'una reserva que no existe da nulo');
 end $$;
+
+-- 0019: guardar el perfil sin cambios no escribe; hay un límite por hora y alternar docente no reabre verificaciones.
+do $$
+declare v perfiles; n int; begin
+  perform pg_temp.como('beto@unal.edu.co');
+  update perfiles set perfil_cambios = 0, perfil_cambios_desde = null where id = auth.uid();
+  select * into v from perfiles where id = auth.uid();
+  update perfiles set nombre = v.nombre, programa = v.programa where id = auth.uid();
+  perform pg_temp.ok((select perfil_cambios from perfiles where id = auth.uid()) = 0, 'guardar sin cambios no cuenta');
+  for i in 1..6 loop update perfiles set nombre = 'Beto ' || i where id = auth.uid(); end loop;
+  perform pg_temp.falla($q$update perfiles set nombre = 'Beto 7' where id = auth.uid()$q$, 'varias veces');
+  update perfiles set perfil_cambios = 0, perfil_cambios_desde = null where id = auth.uid();
+  n := (select count(*) from verificaciones_docente where perfil_id = auth.uid());
+  update perfiles set tipo_usuario = 'Docente/Investigador' where id = auth.uid();
+  update perfiles set tipo_usuario = 'Estudiante' where id = auth.uid();
+  update perfiles set tipo_usuario = 'Docente/Investigador' where id = auth.uid();
+  perform pg_temp.ok((select count(*) from verificaciones_docente where perfil_id = auth.uid()) = n + 1, 'alternar docente no abre verificaciones nuevas');
+  perform pg_temp.ok(exists (select 1 from verificaciones_docente where perfil_id = auth.uid() and estado = 'pendiente'), 'la verificación reabierta queda pendiente');
+  update perfiles set perfil_cambios = 0, perfil_cambios_desde = null where id = auth.uid();
+  update perfiles set tipo_usuario = 'Estudiante', nombre = v.nombre where id = auth.uid();
+end $$;

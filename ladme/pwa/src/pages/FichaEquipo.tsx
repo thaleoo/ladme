@@ -211,29 +211,20 @@ export default function FichaEquipo() {
 
   return (
     <>
+      {equipo.foto_url && (
+        <figure className="equipo-foto equipo-foto--portada">
+          <img src={equipo.foto_url} alt={`Foto del ${equipo.codigo}`} />
+        </figure>
+      )}
+
       <PageHeader
-        eyebrow="Equipo"
         titulo={equipo.codigo}
-        sub={
-          <>
-            {equipo.nombre}
-            {equipo.marca ? ` · ${equipo.marca}` : ''} {equipo.modelo ?? ''}
-            {equipo.ubicacion ? ` · ${equipo.ubicacion}` : ''}
-            {textoSO(equipo) && (
-              <>
-                <br />
-                <span className="badge outline" style={{ marginTop: 6 }}>
-                  <Icon nombre="monitor" width={13} height={13} /> {textoSO(equipo)}
-                </span>
-              </>
-            )}
-          </>
-        }
+        sub={[[equipo.marca, equipo.modelo].filter(Boolean).join(' ') || equipo.nombre, textoSO(equipo), equipo.ubicacion].filter(Boolean).join(', ')}
         volver={{ a: '/', texto: 'Disponibilidad' }}
         acciones={
           equipo.estado === 'activo' ? (
             <Link className="btn" to={`/reservar?equipo=${encodeURIComponent(equipo.codigo)}`}>
-              <Icon nombre="reservar" /> Reservar
+              Reservar
             </Link>
           ) : (
             <span className="badge gray">{equipo.estado.replace('_', ' ')}</span>
@@ -241,46 +232,24 @@ export default function FichaEquipo() {
         }
       />
 
-      {equipo.foto_url && (
-        <figure className="equipo-foto">
-          <img src={equipo.foto_url} alt={`Foto del ${equipo.codigo}`} loading="lazy" />
-          <figcaption>
-            <strong>{equipo.codigo}</strong>
-            <span>{[equipo.marca, equipo.modelo].filter(Boolean).join(' ') || equipo.nombre}</span>
-          </figcaption>
-        </figure>
-      )}
-
-      <div className="stats stats--2">
-        <div className={`stat ${libre ? 'ok' : 'warn'}`}>
-          <div className="stat__label">
-            <Icon nombre="monitor" width={14} height={14} /> Estado actual
-          </div>
-          <div className="stat__value" style={{ fontSize: '1.1rem' }}>
+      <div className="ficha-estado">
+        <span className={`punto-estado ${equipo.estado !== 'activo' ? 'inactivo' : libre ? 'libre' : 'ocupado'}`} aria-hidden="true" />
+        <span>
+          <strong>
             {equipo.estado !== 'activo'
-              ? equipo.estado.replace('_', ' ')
+              ? equipo.estado.replace('_', ' ').replace(/^./, (c) => c.toUpperCase())
               : libre
-                ? 'Libre'
+                ? siguiente
+                  ? `Libre hasta ${hora(siguiente.inicio)}${new Date(siguiente.inicio).toDateString() === ahora.toDateString() ? '' : ` del ${dia(siguiente.inicio)}`}`
+                  : 'Libre, sin reservas próximas'
                 : 'Ocupado'}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat__label">
-            <Icon nombre="reloj" width={14} height={14} /> Próxima disponibilidad
-          </div>
-          <div className="stat__value" style={{ fontSize: '1rem' }}>
-            {enCurso ? (
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span>{dia(proximoLibre.toISOString())}</span>
-                <span className="muted" style={{ fontSize: 'var(--text-sm)', fontWeight: 550 }}>
-                  desde las {hora(proximoLibre.toISOString())}
-                </span>
-              </span>
-            ) : (
-              'Ahora'
-            )}
-          </div>
-        </div>
+          </strong>
+          {enCurso && (
+            <span className="muted">
+              Vuelve a estar libre el {dia(proximoLibre.toISOString())} desde las {hora(proximoLibre.toISOString())}
+            </span>
+          )}
+        </span>
       </div>
 
       {compartidoAhora && !enCurso && !(mia && new Date(mia.inicio).getTime() === new Date(compartidoAhora.inicio).getTime()) && (
@@ -441,23 +410,19 @@ export default function FichaEquipo() {
         )}
       </section>
 
+      {especificaciones.length > 0 && (
       <section className="card">
         <h2 style={{ fontSize: 'var(--text-lg)' }}>Especificaciones</h2>
-        {especificaciones.length === 0 ? (
-          <p className="muted small" style={{ marginBottom: 0 }}>
-            Sin especificaciones registradas.
-          </p>
-        ) : (
-          <div className="datos">
-            {especificaciones.map(([k, v]) => (
-              <div key={k} className="datos__fila">
-                <span className="datos__clave">{k.replace(/_/g, ' ')}</span>
-                <span className="datos__valor">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="datos">
+          {especificaciones.map(([k, v]) => (
+            <div key={k} className="datos__fila">
+              <span className="datos__clave">{k.replace(/_/g, ' ')}</span>
+              <span className="datos__valor">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+            </div>
+          ))}
+        </div>
       </section>
+      )}
 
       <Modal
         abierto={dialogo === 'rapida'}

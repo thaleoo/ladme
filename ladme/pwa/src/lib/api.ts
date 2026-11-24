@@ -7,7 +7,7 @@ function fail(contexto: string, error: { message: string } | null): never {
   throw new Error(error?.message ? `${contexto}: ${error.message}` : contexto)
 }
 
-const SELECT_RESERVA = '*, equipos(codigo, nombre, ubicacion), perfiles(nombre, correo, programa)'
+const SELECT_RESERVA = '*, equipos(codigo, nombre, ubicacion, foto_url), perfiles(nombre, correo, programa)'
 
 /** Perfil del usuario autenticado (lo crea un trigger al registrarse). */
 /**

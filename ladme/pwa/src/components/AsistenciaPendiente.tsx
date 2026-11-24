@@ -45,13 +45,13 @@ export default function AsistenciaPendiente() {
   if (faltan <= 0) return null
   const empezo = new Date(pendiente.inicio).getTime() <= Date.now()
   return (
-    <Link className={`asistencia-pill ${faltan <= 10 ? 'urgente' : ''}`} to="/llegada">
-      <span className="asistencia-pill__icono"><Icon nombre="check" width={16} height={16} /></span>
-      <span className="asistencia-pill__t">
-        <strong>Confirmar asistencia · {pendiente.equipo}</strong>
-        <span>{empezo ? `Quedan ${faltan} min` : 'Su reserva está por empezar'}</span>
+    <Link className={`asistencia-aviso${faltan <= 10 ? ' urgente' : ''}`} to="/llegada">
+      <span className="asistencia-aviso__icono" aria-hidden="true"><Icon nombre="qr" width={20} height={20} /></span>
+      <span className="asistencia-aviso__t">
+        <strong>Confirme su llegada a <span className="nowrap">{pendiente.equipo}</span></strong>
+        <span>{empezo ? `Le quedan ${faltan} min para hacerlo` : 'Su reserva está por empezar'}</span>
       </span>
-      <Icon nombre="flecha" width={16} height={16} />
+      <Icon nombre="flecha-der" width={18} height={18} />
     </Link>
   )
 }

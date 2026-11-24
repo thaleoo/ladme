@@ -20,7 +20,7 @@ export function aplicarTema(tema: Tema): void {
   if (tema === 'auto') raiz.removeAttribute('data-tema')
   else raiz.setAttribute('data-tema', tema)
   const oscuro = tema === 'oscuro' || (tema === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', oscuro ? '#0c0b14' : '#f7f6fb'))
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', oscuro ? '#000000' : '#ffffff'))
   try {
     if (tema === 'auto') localStorage.removeItem(CLAVE)
     else localStorage.setItem(CLAVE, tema)

@@ -12,7 +12,6 @@ import { guardarCache, leerCache } from '../lib/cacheLocal'
 import {
   aInputLocal,
   duracion,
-  tonoEstado,
   esFuturo,
   esPasado,
   estadoReserva,
@@ -30,6 +29,14 @@ import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 
 type Dialogo = { tipo: 'cancelar' | 'extender' | 'liberar'; reserva: Reserva } | null
+
+const PUNTO: Record<string, string> = {
+  'En curso': 'libre',
+  Programada: 'programada',
+  'Sin registrar llegada': 'ocupado',
+  Finalizada: 'inactivo',
+  Cancelada: 'inactivo'
+}
 
 export default function MisReservas() {
   const toast = useToast()
@@ -279,30 +286,33 @@ export default function MisReservas() {
     return (
       <article key={r.id} className={`reserva-card ${vigente ? '' : 'pasada'}`}>
         <header className="reserva-card__cab">
+          {r.equipos?.foto_url ? (
+            <img className="reserva-card__foto" src={r.equipos.foto_url} alt="" loading="lazy" />
+          ) : (
+            <span className="reserva-card__foto reserva-card__foto--vacia" aria-hidden="true">
+              <Icon nombre="monitor" width={24} height={24} />
+            </span>
+          )}
           <div className="reserva-card__titulo">
             <Link className="reserva-card__codigo" to={r.equipos?.codigo ? `/equipo/${r.equipos.codigo}` : '#'}>
               {r.equipos?.codigo ?? 'Equipo'}
             </Link>
-            <span className={`badge ${tonoEstado(estado)}`}>
-              {estado === 'En curso' && <span className="punto" />}
-              {estado}
+            <span className="reserva-card__estado">
+              <span className={`punto-estado ${PUNTO[estado] ?? 'inactivo'}`} aria-hidden="true" />
+              <span>
+                {estado}
+                {r.estado !== 'cancelada' && <span className="muted">{`, ${cuando.charAt(0).toLowerCase()}${cuando.slice(1)}`}</span>}
+              </span>
             </span>
           </div>
-          <span className="reserva-card__cuando">{cuando}</span>
         </header>
 
-        <p className="reserva-card__horario">
-          <Icon nombre="calendario" width={14} height={14} />
-          <span>{rangoCorto(r.inicio, r.fin)}</span>
-        </p>
+        <p className="reserva-card__horario">{rangoCorto(r.inicio, r.fin)}</p>
 
         <p className="reserva-card__meta">
-          <span className="reserva-card__dur num">{duracion(r.inicio, r.fin)}</span>
-          <span className="reserva-card__meta-t">{[r.actividad, r.codigo_legible, r.equipos?.nombre].filter(Boolean).join(' · ')}</span>
-          {r.desatendido && <span className="badge gray">Desatendido</span>}
-          {r.compartida && <span className="badge info">Compartida</span>}
-          {r.excepcion && <span className="badge outline">Larga</span>}
-          {r.extensiones > 0 && <span className="badge outline">Extendida</span>}
+          {[duracion(r.inicio, r.fin), r.actividad, r.desatendido && 'proceso desatendido', r.compartida && 'compartida', r.excepcion && 'reserva larga', r.extensiones > 0 && 'extendida']
+            .filter(Boolean)
+            .join(', ')}
         </p>
 
         {estado === 'Sin registrar llegada' && (
@@ -363,15 +373,7 @@ export default function MisReservas() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Operación"
-        titulo="Mis reservas"
-        acciones={
-          <Link className="btn" to="/reservar">
-            <Icon nombre="mas2" /> Nueva reserva
-          </Link>
-        }
-      />
+      <PageHeader titulo="Mis reservas" />
 
       <Deslizar alActualizar={cargar} />
 
@@ -393,7 +395,6 @@ export default function MisReservas() {
       )}
 
       <Inasistencias />
-      <MisSoftware />
 
       <div className="segmented" role="tablist" aria-label="Filtro de reservas">
         <button
@@ -481,6 +482,8 @@ export default function MisReservas() {
           {lista.map(tarjeta)}
         </div>
       )}
+
+      {pestana === 'vigentes' && <MisSoftware />}
 
       <Modal
         abierto={dialogo?.tipo === 'cancelar'}

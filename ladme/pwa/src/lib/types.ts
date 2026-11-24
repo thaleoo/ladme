@@ -71,7 +71,7 @@ export interface Reserva {
   excepcion: boolean
   funciono: boolean | null
   creado_en: string
-  equipos?: { codigo: string; nombre: string; ubicacion: string | null } | null
+  equipos?: { codigo: string; nombre: string; ubicacion: string | null; foto_url?: string | null } | null
   perfiles?: { nombre: string; correo: string; programa: string | null } | null
   clase_id?: number | null
   tipo_usuario?: string | null

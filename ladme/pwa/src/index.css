@@ -4618,3 +4618,78 @@ input[type='checkbox'].interruptor:focus-visible { box-shadow: var(--ring); }
   .reservar-layout { grid-template-columns: minmax(0, 640px) minmax(260px, 340px); align-items: start; }
   .reservar-lado { display: grid; gap: var(--s3); position: sticky; top: var(--s6); padding: var(--s5); border-radius: var(--r-lg); background: var(--surface); }
 }
+
+/* Recordatorio de llegada: una fila en la página, no una barra de color flotando */
+.asistencia-aviso {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border-radius: var(--r-lg);
+  background: var(--surface); color: var(--ink-900); text-decoration: none; margin-bottom: var(--s4);
+}
+.asistencia-aviso:hover { color: var(--ink-900); text-decoration: none; background: var(--surface-2); }
+.asistencia-aviso__icono { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); }
+.asistencia-aviso__t { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.asistencia-aviso__t strong { font-weight: 600; font-size: var(--text-sm); }
+.asistencia-aviso__t span { font-size: var(--text-sm); color: var(--ink-500); }
+.asistencia-aviso > svg { color: var(--ink-400); flex: none; }
+.asistencia-aviso.urgente .asistencia-aviso__icono { background: var(--warning-bg); color: var(--warning-fg); }
+.asistencia-aviso.urgente .asistencia-aviso__t span { color: var(--warning-fg); }
+
+/* --- Avisos, como una bandeja de notificaciones --- */
+.notis { display: grid; }
+.notis + .notis { margin-top: var(--s5); }
+.notis__dia { margin: 0 0 var(--s2); font-size: var(--text-sm); font-weight: 600; color: var(--ink-500); }
+.notis__item { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; color: var(--ink-900); text-decoration: none; }
+a.notis__item:hover { color: var(--ink-900); text-decoration: none; }
+a.notis__item:hover .notis__linea strong { text-decoration: underline; text-underline-offset: 3px; }
+.notis__icono { flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--ink-700); }
+.notis__icono--verde { background: color-mix(in srgb, #3fbf84 18%, transparent); color: #1f9b63; }
+.notis__icono--rojo { background: color-mix(in srgb, #e5484d 16%, transparent); color: #d1373c; }
+.notis__icono--ambar { background: color-mix(in srgb, #e5a33a 18%, transparent); color: #b7791f; }
+.notis__icono--naranja { background: color-mix(in srgb, #f3793b 18%, transparent); color: #d4621f; }
+.notis__icono--violeta { background: color-mix(in srgb, #8b7bff 18%, transparent); color: #6d5ce6; }
+.notis__icono--azul { background: color-mix(in srgb, #5b9bff 18%, transparent); color: #3a7be0; }
+@media (prefers-color-scheme: dark) {
+  .notis__icono--verde { color: #5fd9a0; } .notis__icono--rojo { color: #ff8a8d; } .notis__icono--ambar { color: #f2c46d; }
+  .notis__icono--naranja { color: #ffa16b; } .notis__icono--violeta { color: #b4a8ff; } .notis__icono--azul { color: #8cb8ff; }
+}
+.notis__texto { flex: 1; min-width: 0; display: grid; gap: 3px; padding-top: 2px; }
+.notis__linea { font-size: var(--text-base); line-height: 1.35; }
+.notis__linea strong { font-weight: 600; }
+.notis__linea time { color: var(--ink-500); font-size: var(--text-sm); white-space: nowrap; }
+.notis__cuerpo { font-size: var(--text-sm); color: var(--ink-500); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.notis__nuevo { flex: none; width: 9px; height: 9px; margin-top: 8px; border-radius: 50%; background: var(--brand-500); }
+
+/* --- Mis reservas --- */
+.punto-estado.programada { background: #3a7be0; }
+@media (prefers-color-scheme: dark) { .punto-estado.programada { background: #8cb8ff; } }
+.reserva-card { gap: 8px; padding: 16px; border: 0; background: var(--surface); box-shadow: none; }
+.reserva-card.pasada { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.reserva-card__cab { justify-content: flex-start; gap: 14px; }
+.reserva-card__foto { flex: none; width: 56px; height: 56px; border-radius: var(--r-md); object-fit: cover; background: var(--surface-3); }
+.reserva-card__foto--vacia { display: grid; place-items: center; color: var(--ink-400); }
+.reserva-card.pasada .reserva-card__foto { opacity: 0.7; }
+.reserva-card__titulo { flex-direction: column; align-items: flex-start; gap: 2px; flex-wrap: nowrap; }
+.reserva-card__codigo { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; }
+.reserva-card__codigo:hover { color: var(--ink-900); text-decoration: underline; text-underline-offset: 4px; }
+.reserva-card__estado { display: flex; align-items: center; gap: 7px; font-size: var(--text-sm); color: var(--ink-700); flex-wrap: wrap; }
+.reserva-card__horario { font-size: var(--text-lg); font-weight: 600; margin-top: 4px; letter-spacing: -0.01em; }
+.reserva-card__meta { font-size: var(--text-sm); color: var(--ink-500); }
+.reserva-card__nota { font-size: var(--text-sm); }
+.reserva-card__acciones { border-top: 0; padding-top: 6px; gap: 8px; }
+.reserva-card__acciones .btn.ok { --btn-bg: var(--primary-bg); --btn-fg: var(--primary-fg); }
+
+/* --- Ficha del equipo --- */
+.equipo-foto--portada { border: 0; box-shadow: none; aspect-ratio: 16 / 10; margin-bottom: var(--s4); }
+.equipo-foto--portada:hover img { transform: none; }
+@media (max-width: 639px) { .equipo-foto--portada { margin-inline: calc(-1 * var(--s4)); margin-top: calc(-1 * var(--s4)); border-radius: 0; } }
+.ficha-estado { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; border-radius: var(--r-lg); background: var(--surface); font-size: var(--text-lg); }
+.ficha-estado .punto-estado { width: 11px; height: 11px; margin-top: 0.5em; }
+.ficha-estado > span:last-child { display: grid; gap: 2px; }
+.ficha-estado strong { font-weight: 600; }
+.ficha-estado .muted { font-size: var(--text-sm); }
+.ag-fila { background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+.ag-fila:last-child { border-bottom: 0; }
+
+/* --- Administración --- */
+.stat { border: 0; background: var(--surface); box-shadow: none; }
+.ronda__equipo, .ronda__equipo a { color: var(--ink-900); }
+.pestanas, .tabs { border-bottom-color: var(--line); }

@@ -272,6 +272,7 @@ export default function Shell() {
               <AvisosPush />
               {perfil && !perfil.reglamento_aceptado_en && <Reglamento />}
               <InstalarApp />
+              <AsistenciaPendiente />
               <Suspense fallback={<div className="cargando"><span className="spinner" aria-hidden="true" /> Cargando…</div>}>
                 {/* La clave reinicia la animación de entrada en cada cambio de página. */}
                 <div className="pagina" key={location.pathname}>
@@ -283,7 +284,6 @@ export default function Shell() {
         </main>
       </div>
 
-      <AsistenciaPendiente />
       <BannerActualizacion />
 
       <nav className="bottomnav" aria-label="Navegación principal">

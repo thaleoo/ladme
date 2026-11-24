@@ -2,11 +2,33 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listarAvisos, marcarAvisosLeidos } from '../lib/api'
 import type { Aviso } from '../lib/types'
-import { fecha, hace } from '../lib/format'
+import { diaCorto, fecha, hace, hora } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon, { type NombreIcono } from '../components/Icon'
 import { esStaff, useAuth } from '../context/AuthContext'
 import Deslizar from '../components/Deslizar'
+
+function tono(tipo: string): string {
+  if (tipo === 'cancelacion' || tipo === 'solicitud_rechazada' || tipo.startsWith('inasistencia')) return 'rojo'
+  if (tipo === 'fin_proximo' || tipo.startsWith('sin_llegada') || tipo.startsWith('llegada')) return 'ambar'
+  if (tipo.startsWith('reporte')) return 'naranja'
+  if (tipo.startsWith('mantenimiento')) return 'gris'
+  if (tipo === 'equipo_libre' || tipo.startsWith('software')) return 'violeta'
+  if (tipo === 'contacto' || tipo.startsWith('solicitud') || tipo.startsWith('verificacion') || tipo.startsWith('clase')) return 'azul'
+  return 'verde'
+}
+
+/** «Hoy», «Ayer» o el día, para agrupar como un historial. */
+function grupoDia(iso: string): string {
+  const d = new Date(iso)
+  const hoy = new Date()
+  const ayer = new Date()
+  ayer.setDate(hoy.getDate() - 1)
+  if (d.toDateString() === hoy.toDateString()) return 'Hoy'
+  if (d.toDateString() === ayer.toDateString()) return 'Ayer'
+  const t = diaCorto(d)
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
 
 function icono(tipo: string): NombreIcono {
   if (tipo.startsWith('mantenimiento')) return 'llave'
@@ -48,15 +70,7 @@ export default function Avisos() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Novedades"
-        titulo="Avisos"
-        sub={
-          staff
-            ? 'Novedades del laboratorio: reportes de fallas, solicitudes, mantenimientos y reservas sin llegada.'
-            : 'Lo que ha pasado con sus reservas, sus solicitudes y sus reportes.'
-        }
-      />
+      <PageHeader titulo="Avisos" />
 
       <Deslizar alActualizar={cargar} />
 
@@ -78,34 +92,47 @@ export default function Avisos() {
         </div>
       )}
 
-      {avisos.length > 0 && (
-        <div className="avisos">
-          {avisos.map((a) => {
-            const contenido = (
-              <>
-                <span className="avisos__icono">
-                  <Icon nombre={icono(a.tipo)} />
-                </span>
-                <span className="avisos__texto">
-                  <strong>{a.titulo ?? 'Novedad en LADME'}</strong>
-                  {a.cuerpo && <span>{a.cuerpo}</span>}
-                  <small title={fecha(a.creado_en)}>{hace(a.creado_en)}</small>
-                </span>
-                {!a.leido_en && <span className="avisos__nuevo" aria-label="Nuevo" />}
-              </>
-            )
-            return a.url ? (
-              <Link key={a.id} to={a.url} className="avisos__item">
-                {contenido}
-              </Link>
-            ) : (
-              <div key={a.id} className="avisos__item">
-                {contenido}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {avisos.length > 0 &&
+        Object.entries(
+          avisos.reduce<Record<string, Aviso[]>>((g, a) => {
+            const k = grupoDia(a.creado_en)
+            ;(g[k] ??= []).push(a)
+            return g
+          }, {})
+        ).map(([dia, lista]) => (
+          <section key={dia} className="notis">
+            <h2 className="notis__dia">{dia}</h2>
+            {lista.map((a) => {
+              const reciente = Date.now() - new Date(a.creado_en).getTime() < 86400000
+              const contenido = (
+                <>
+                  <span className={`notis__icono notis__icono--${tono(a.tipo)}`} aria-hidden="true">
+                    <Icon nombre={icono(a.tipo)} width={22} height={22} />
+                  </span>
+                  <span className="notis__texto">
+                    <span className="notis__linea">
+                      <strong>{a.titulo ?? 'Novedad en LADME'}</strong>{' '}
+                      <time dateTime={a.creado_en} title={fecha(a.creado_en)}>
+                        {reciente ? hace(a.creado_en) : hora(a.creado_en)}
+                      </time>
+                    </span>
+                    {a.cuerpo && <span className="notis__cuerpo">{a.cuerpo}</span>}
+                  </span>
+                  {!a.leido_en && <span className="notis__nuevo" aria-label="Sin leer" />}
+                </>
+              )
+              return a.url ? (
+                <Link key={a.id} to={a.url} className="notis__item">
+                  {contenido}
+                </Link>
+              ) : (
+                <div key={a.id} className="notis__item">
+                  {contenido}
+                </div>
+              )
+            })}
+          </section>
+        ))}
     </>
   )
 }

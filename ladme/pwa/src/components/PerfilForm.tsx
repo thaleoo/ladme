@@ -25,10 +25,20 @@ export default function PerfilForm({ alGuardar }: { alGuardar?: () => void }) {
   const verificado = !!perfil?.docente_verificado_en
   const eraDocente = perfil?.tipo_usuario === 'Docente/Investigador'
   const pideDocente = tipo === 'Docente/Investigador' && !staff && !verificado
+  // Solo se puede guardar si algo cambió (la base además ignora los guardados idénticos
+  // y limita los cambios por hora).
+  const hayCambios =
+    nombre.trim() !== (perfil?.nombre ?? '').trim() ||
+    tipo !== (perfil?.tipo_usuario ?? '') ||
+    programa.trim() !== (perfil?.programa ?? '').trim() ||
+    (estudiante ? matricula : '') !== (perfil?.tipo_usuario === 'Estudiante' ? perfil?.matricula ?? '' : '') ||
+    (pideDocente && verificacion.trim().length >= 5)
+  const completo = !!perfil?.tipo_usuario && !!perfil?.programa
 
   async function enviar(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!hayCambios || guardando) return
     if (nombre.trim().length < 3) return setError('Escriba su nombre completo.')
     if (!tipo) return setError('Indique si es estudiante o docente/investigador.')
     if (!programa.trim()) return setError('Seleccione su programa.')
@@ -140,18 +150,19 @@ export default function PerfilForm({ alGuardar }: { alGuardar?: () => void }) {
           <div className="alert__body">{error}</div>
         </div>
       )}
-      <div className="row">
-        <button type="submit" disabled={guardando}>
+      <div className="row" style={{ alignItems: 'center' }}>
+        <button type="submit" disabled={guardando || !hayCambios}>
           {guardando ? (
             <>
               <span className="spinner" aria-hidden="true" /> Guardando…
             </>
+          ) : completo ? (
+            'Guardar cambios'
           ) : (
-            <>
-              <Icon nombre="check" /> Guardar perfil
-            </>
+            'Guardar perfil'
           )}
         </button>
+        {!hayCambios && completo && !guardando && <span className="small muted">Sin cambios por guardar</span>}
       </div>
     </form>
   )
