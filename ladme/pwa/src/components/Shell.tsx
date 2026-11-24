@@ -163,7 +163,7 @@ export default function Shell() {
           <Logo />
           <span>
             <strong>LADME</strong>
-            <span>Reservas y equipos · UNAL</span>
+            <span>UNAL La Paz</span>
           </span>
         </Link>
 

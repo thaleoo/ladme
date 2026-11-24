@@ -88,9 +88,9 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'],
       manifest: {
-        name: 'LADME — Reservas y equipos',
+        name: 'LADME',
         short_name: 'LADME',
-        description: 'Reservas, disponibilidad, credencial y mantenimiento del Laboratorio de Datos UNAL.',
+        description: 'Laboratorio de Datos y Modelamiento Estadístico de la UNAL sede La Paz: disponibilidad, reservas y credencial.',
         lang: 'es-CO',
         start_url: '/',
         scope: '/',
