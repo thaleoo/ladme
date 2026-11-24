@@ -312,20 +312,22 @@ export default function Equipos() {
                   <div className="foto-equipo-campo__fila">
                     {b.foto_url ? <img src={b.foto_url} alt="" /> : <span className="foto-equipo-campo__vacia"><Icon nombre="monitor" /></span>}
                     <span className="row tight">
-                      <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
-                        {subiendo ? 'Subiendo…' : b.foto_url ? 'Cambiar' : 'Subir foto'}
-                        <input type="file" accept="image/*" capture="environment" hidden disabled={subiendo}
-                               onChange={(e) => {
-                                 const f = e.target.files?.[0]
-                                 e.target.value = ''
-                                 if (!f || !b.id) return
-                                 setSubiendo(true)
-                                 void subirFotoEquipo(b.id, b.codigo, f)
-                                   .then((url) => { setB((x) => (x ? { ...x, foto_url: url } : x)); void cargar() })
-                                   .catch((err: unknown) => setError(err instanceof Error ? err.message : 'No se pudo subir la foto.'))
-                                   .finally(() => setSubiendo(false))
-                               }} />
-                      </label>
+                      {(['galeria', 'camara'] as const).map((origen) => (
+                        <label key={origen} className="btn ghost sm" style={{ cursor: 'pointer' }}>
+                          {subiendo ? 'Subiendo…' : origen === 'galeria' ? 'Elegir de la galería' : 'Tomar foto'}
+                          <input type="file" accept="image/*" capture={origen === 'camara' ? 'environment' : undefined} hidden disabled={subiendo}
+                                 onChange={(e) => {
+                                   const f = e.target.files?.[0]
+                                   e.target.value = ''
+                                   if (!f || !b.id) return
+                                   setSubiendo(true)
+                                   void subirFotoEquipo(b.id, b.codigo, f)
+                                     .then((url) => { setB((x) => (x ? { ...x, foto_url: url } : x)); void cargar() })
+                                     .catch((err: unknown) => setError(err instanceof Error ? err.message : 'No se pudo subir la foto.'))
+                                     .finally(() => setSubiendo(false))
+                                 }} />
+                        </label>
+                      ))}
                       {b.foto_url && (
                         <button type="button" className="btn ghost sm" disabled={subiendo}
                                 onClick={() => b.id && void quitarFotoEquipo(b.id).then(() => { setB((x) => (x ? { ...x, foto_url: null } : x)); void cargar() })}>
@@ -334,7 +336,7 @@ export default function Equipos() {
                       )}
                     </span>
                   </div>
-                  <p className="help">Se ve en la ficha del equipo. Se reduce sola antes de subirla.</p>
+                  <p className="help">Se ve en la ficha y en Disponibilidad. Sin foto se muestra la ilustración de LADME. Se reduce sola antes de subirla.</p>
                 </div>
               )}
               <div className="field">

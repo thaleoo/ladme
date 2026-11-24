@@ -7,7 +7,6 @@ import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
-import Deslizar from '../components/Deslizar'
 import { PedirSoftware } from '../components/Software'
 import { guardarCache, leerCache } from '../lib/cacheLocal'
 
@@ -134,12 +133,7 @@ export default function Disponibilidad() {
   )
 
   const [copia, setCopia] = useState<string | null>(null)
-  const [tick, setTick] = useState(0)
-  const refrescar = () =>
-    new Promise<void>((listo) => {
-      setTick((n) => n + 1)
-      window.setTimeout(listo, 600)
-    })
+  const tick = 0
 
   useEffect(() => {
     let vivo = true
@@ -247,8 +241,6 @@ export default function Disponibilidad() {
   return (
     <>
       <PageHeader titulo="Disponibilidad" />
-
-      <Deslizar alActualizar={refrescar} />
 
       {copia && (
         <div className="alert warn">

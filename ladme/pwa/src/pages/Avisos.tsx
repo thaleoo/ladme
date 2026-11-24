@@ -6,7 +6,6 @@ import { diaCorto, fecha, hace, hora } from '../lib/format'
 import PageHeader, { Cargando, Empty } from '../components/PageHeader'
 import Icon, { type NombreIcono } from '../components/Icon'
 import { esStaff, useAuth } from '../context/AuthContext'
-import Deslizar from '../components/Deslizar'
 
 function tono(tipo: string): string {
   if (tipo === 'cancelacion' || tipo === 'solicitud_rechazada' || tipo.startsWith('inasistencia')) return 'rojo'
@@ -71,8 +70,6 @@ export default function Avisos() {
   return (
     <>
       <PageHeader titulo="Avisos" />
-
-      <Deslizar alActualizar={cargar} />
 
       {error && (
         <div className="alert danger">

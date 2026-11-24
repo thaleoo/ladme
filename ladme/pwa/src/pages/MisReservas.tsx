@@ -7,7 +7,6 @@ import {
 import { fotoEquipo, type Reserva, type Solicitud } from '../lib/types'
 import { useLimites } from '../lib/politicas'
 import ReporteFalla from '../components/ReporteFalla'
-import Deslizar from '../components/Deslizar'
 import { guardarCache, leerCache } from '../lib/cacheLocal'
 import {
   aInputLocal,
@@ -368,8 +367,6 @@ export default function MisReservas() {
   return (
     <>
       <PageHeader titulo="Mis reservas" />
-
-      <Deslizar alActualizar={cargar} />
 
       {copia && (
         <div className="alert warn">

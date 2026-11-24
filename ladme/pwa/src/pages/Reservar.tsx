@@ -133,6 +133,13 @@ export default function Reservar() {
     setFin(aInputLocal(new Date(sumarHoras(aIso(inicio), horas))))
   }
 
+  // Cada error se avisa también con una notificación breve, esté donde esté la persona en la página.
+  useEffect(() => {
+    if (error) toast.mostrar(error, 'danger')
+  }, [error, toast])
+  // Al cambiar el horario, el equipo o la actividad, el error anterior deja de aplicar.
+  useEffect(() => setError(null), [inicio, fin, equipo, actividad])
+
   // Disponibilidad del horario elegido: se consulta sola al cambiar el horario (con una pausa breve).
   useEffect(() => {
     if (problema) return setDisponibles(null)
@@ -274,6 +281,14 @@ export default function Reservar() {
   const textoFin = fin && durValida ? cuandoLargo(aIso(fin), aIso(inicio)) : '—'
   const libreEnHorario = disponibles && equipo ? disponibles.includes(equipo) : null
   const otrosLibres = (disponibles ?? []).filter((c) => c !== equipo)
+  // Lo que impide reservar, dicho en el botón fijo (siempre a la vista).
+  const ocupadoEnHorario = libreEnHorario === false && !problema && !esLarga
+  const bloqueo =
+    problema ??
+    (ocupadoEnHorario ? `${equipo} está ocupado en ese horario` : null) ??
+    (tope.alcanzado ? 'Ya tiene una reserva vigente' : null) ??
+    (lim.reservasPausadas && !esStaff(perfil) ? 'Las reservas están pausadas por unos minutos' : null) ??
+    (sancion.hasta ? 'No puede reservar mientras dure la sanción' : null)
   const proximasEquipo = ocupEquipo.filter((o) => new Date(o.fin).getTime() > Date.now()).sort((x, y) => x.inicio.localeCompare(y.inicio)).slice(0, 6)
 
   return (
@@ -563,33 +578,44 @@ export default function Reservar() {
             <div className="alert__body">{aviso}</div>
           </div>
         )}
-        {error && (
-          <div className="alert danger">
-            <Icon nombre="alerta" />
-            <div className="alert__body">{error}</div>
-          </div>
-        )}
-
         <p className="small muted reservar-clase">
           ¿Necesita varios equipos para una clase? <Link to="/clases">Solicite la sala</Link>
         </p>
 
-        <div className="reservar-pie">
+        <div className={`reservar-pie${bloqueo || error ? ' reservar-pie--alerta' : ''}`} aria-live="polite">
           <span className="reservar-pie__resumen">
-            {equipoActual?.codigo ?? 'Equipo'}
-            <span>{durValida ? resumenHorario(aIso(inicio), aIso(fin)) : 'Elija el horario'}</span>
-          </span>
-          <button type="submit" className="btn lg" disabled={enviando || cargando || tope.alcanzado || !!problema || (adminExcede && !confirmaExceso)}>
-            {enviando ? (
+            {bloqueo || error ? (
               <>
-                <span className="spinner" aria-hidden="true" /> Enviando…
+                <span className="reservar-pie__aviso">
+                  <span className={`punto-estado ${ocupadoEnHorario ? 'ocupado' : 'inactivo'}`} aria-hidden="true" />
+                  {error ?? bloqueo}
+                </span>
+                <span>{ocupadoEnHorario ? 'Elija otro equipo o cambie el horario' : durValida ? resumenHorario(aIso(inicio), aIso(fin)) : 'Elija el horario'}</span>
               </>
-            ) : esLarga ? (
-              'Enviar solicitud'
             ) : (
-              'Reservar'
+              <>
+                {equipoActual?.codigo ?? 'Equipo'}
+                <span>{durValida ? resumenHorario(aIso(inicio), aIso(fin)) : 'Elija el horario'}</span>
+              </>
             )}
-          </button>
+          </span>
+          {ocupadoEnHorario ? (
+            <button type="button" className="btn lg" onClick={() => setEligiendo(true)}>
+              Elegir otro
+            </button>
+          ) : (
+            <button type="submit" className="btn lg" disabled={enviando || cargando || !!bloqueo || (adminExcede && !confirmaExceso)}>
+              {enviando ? (
+                <>
+                  <span className="spinner" aria-hidden="true" /> Enviando…
+                </>
+              ) : esLarga ? (
+                'Enviar solicitud'
+              ) : (
+                'Reservar'
+              )}
+            </button>
+          )}
         </div>
       </form>
 

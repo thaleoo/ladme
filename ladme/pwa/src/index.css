@@ -3440,28 +3440,6 @@ button:active:not(:disabled),
   }
 }
 
-/* Deslizar para actualizar */
-.deslizar {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + 64px);
-  left: 50%;
-  z-index: 70;
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-md, var(--shadow-lg));
-  color: var(--soft-brand-icon);
-  font-weight: 800;
-  pointer-events: none;
-}
-.deslizar__flecha {
-  display: inline-block;
-  transition: transform 80ms linear;
-}
 
 /* Panel de usuarios */
 .chip__n {
@@ -4693,3 +4671,22 @@ a.notis__item:hover .notis__linea strong { text-decoration: underline; text-unde
 .stat { border: 0; background: var(--surface); box-shadow: none; }
 .ronda__equipo, .ronda__equipo a { color: var(--ink-900); }
 .pestanas, .tabs { border-bottom-color: var(--line); }
+
+/* Botón fijo de Nueva reserva cuando algo impide reservar */
+.reservar-pie--alerta { border-color: color-mix(in srgb, var(--warn) 55%, var(--line-strong)); }
+.reservar-pie__aviso { display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: normal; }
+.reservar-pie__aviso .punto-estado { flex: none; }
+
+/* Notificaciones breves: arriba en el celular, como las del sistema */
+@media (max-width: 1023px) {
+  .toast-host { top: calc(10px + env(safe-area-inset-top)); bottom: auto; }
+  @keyframes subir-toast { from { opacity: 0; transform: translateY(-14px) scale(0.98); } to { opacity: 1; transform: none; } }
+}
+.toast {
+  border-radius: var(--r-lg); padding: 12px 14px; font-weight: 500;
+  background: color-mix(in srgb, var(--toast-bg) 94%, transparent);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 16px 40px -12px rgb(0 0 0 / 0.45);
+}
+.reservar-pie__resumen .reservar-pie__aviso { white-space: normal; overflow: visible; color: var(--ink-900); font-size: var(--text-sm); line-height: 1.3; }
+.reservar-pie { background: color-mix(in srgb, var(--surface-2) 97%, transparent); }
