@@ -285,3 +285,16 @@ importar la hoja (`docs/MUDANZA.md`).
 - Los programas de cada equipo (`equipos.software`) siguen lo que Faro encuentra: lo que se desinstala sale de la lista y lo nuevo entra.
 - Lo que el personal marcó a mano y Faro no sabe reconocer (por ejemplo, GeoDa) se conserva: `agentes.software_previo` guarda la lectura anterior para distinguir «Faro lo dejó de ver» de «Faro nunca lo vio».
 - Si el personal edita la lista de un equipo, esa edición manda (el disparador solo actúa en las escrituras de Faro).
+
+## Migración 0021 — Cambiar el código de un equipo
+
+`migrations/0021_renombrar_equipo.sql`, después de 0020.
+
+- `renombrar_equipo(id, código)` (solo personal) cambia el código en una transacción. El código admite letras, números y guiones (3 a 20).
+- El código anterior se guarda en `equipo_codigos_anteriores`: una etiqueta NFC/QR grabada con «UNAL-05» sigue llevando al equipo aunque hoy se llame «UNAL-17». No hay que regrabar ni reemplazar la tarjeta.
+- Se actualizan los lugares donde el código se guardó como texto: `clases.equipos`, `faro_anuncios.equipos`, `solicitudes_software.equipos_instalados` e `inasistencias.equipo_codigo`. Reservas, mantenimientos y Faro se enlazan por el id del equipo y no cambian.
+- `resolver_codigo_equipo(código)` devuelve el código vigente de un código actual o anterior. La ficha (`/equipo/…`, `?asset=…`) y Reservar (`?equipo=…`) lo usan y abren siempre con el código vigente.
+- Un código vigente nunca figura como anterior: si se da de alta un equipo con un código anterior, o dos equipos intercambian códigos (pasando por uno provisional), el código queda en el equipo actual (disparador `equipos_codigo_libre`).
+- Cada cambio queda en el registro de la consola.
+
+Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha y Reservar solo pierden la traducción de códigos anteriores.

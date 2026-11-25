@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { guardarEquipo, listarEquipos, quitarFotoEquipo, subirFotoEquipo } from '../../lib/api'
+import { codigosAnterioresEquipo, guardarEquipo, listarEquipos, quitarFotoEquipo, renombrarEquipo, subirFotoEquipo } from '../../lib/api'
 import { SISTEMAS, textoSO, type Equipo } from '../../lib/types'
 import { Cargando } from '../../components/PageHeader'
 import Icon from '../../components/Icon'
@@ -60,7 +60,7 @@ function aBorrador(e?: Equipo): Borrador {
   }
 }
 
-/** Catálogo de equipos: alta, edición, estado y archivo. Los códigos de las etiquetas no se cambian. */
+/** Catálogo de equipos: alta, edición, estado y archivo. El código se puede cambiar: las etiquetas viejas siguen funcionando. */
 export default function Equipos() {
   const toast = useToast()
   const [equipos, setEquipos] = useState<Equipo[]>([])
@@ -71,6 +71,15 @@ export default function Equipos() {
   const [ocupado, setOcupado] = useState(false)
   const [texto, setTexto] = useState('')
   const [filtro, setFiltro] = useState<'todos' | Equipo['estado'] | 'archivados'>('todos')
+  // Cambio de código: null = cerrado; si no, el código nuevo que se está escribiendo.
+  const [nuevoCodigo, setNuevoCodigo] = useState<string | null>(null)
+  const [anteriores, setAnteriores] = useState<string[]>([])
+  const idAbierto = b?.id
+  useEffect(() => {
+    setNuevoCodigo(null)
+    setAnteriores([])
+    if (idAbierto) void codigosAnterioresEquipo(idAbierto).then(setAnteriores)
+  }, [idAbierto])
 
   const visibles = useMemo(() => {
     const q = texto.trim().toLowerCase()
@@ -98,6 +107,26 @@ export default function Equipos() {
   useEffect(() => {
     void cargar()
   }, [cargar])
+
+  async function cambiarCodigo() {
+    if (!b?.id || nuevoCodigo === null) return
+    const nuevo = nuevoCodigo.trim().toUpperCase()
+    if (!/^[A-Z0-9-]{3,20}$/.test(nuevo)) return setError('El código usa solo letras, números y guiones (3 a 20), p. ej. UNAL-17.')
+    setError(null)
+    setOcupado(true)
+    try {
+      const r = await renombrarEquipo(b.id, nuevo)
+      setB({ ...b, codigo: r.codigo })
+      setNuevoCodigo(null)
+      setAnteriores(await codigosAnterioresEquipo(b.id))
+      toast.mostrar(`Código cambiado a ${r.codigo}. Las etiquetas con ${r.anterior} siguen funcionando.`)
+      await cargar()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo cambiar el código.')
+    } finally {
+      setOcupado(false)
+    }
+  }
 
   async function guardar() {
     if (!b) return
@@ -237,10 +266,43 @@ export default function Equipos() {
         {b && (
           <div className="stack">
             <div className="grid cols-2 gap-sm">
-              {campo('codigo', 'Código', {
-                bloqueado: !!b.id,
-                ayuda: b.id ? 'Es el de la etiqueta NFC/QR: no se cambia.' : 'Será el de la etiqueta NFC/QR.'
-              })}
+              {b.id ? (
+                <div className="field">
+                  <label className="field__label" htmlFor="eq-codigo">
+                    Código
+                  </label>
+                  {nuevoCodigo === null ? (
+                    <>
+                      <div className="row tight">
+                        <input id="eq-codigo" value={b.codigo} disabled />
+                        <button type="button" className="btn ghost sm" onClick={() => setNuevoCodigo(b.codigo)} disabled={ocupado}>
+                          Cambiar
+                        </button>
+                      </div>
+                      <p className="help">Es el de la etiqueta NFC/QR. Si lo cambia, las etiquetas ya grabadas siguen llevando a este equipo.</p>
+                      {anteriores.length > 0 && <p className="help">Códigos anteriores que siguen funcionando: {anteriores.join(', ')}.</p>}
+                    </>
+                  ) : (
+                    <>
+                      <div className="row tight">
+                        <input id="eq-codigo" value={nuevoCodigo} autoFocus maxLength={20} autoCapitalize="characters" spellCheck={false}
+                               onChange={(e) => setNuevoCodigo(e.target.value.toUpperCase())} />
+                        <button type="button" className="btn sm" onClick={cambiarCodigo} disabled={ocupado || nuevoCodigo.trim() === '' || nuevoCodigo.trim() === b.codigo}>
+                          {ocupado ? 'Cambiando…' : 'Cambiar código'}
+                        </button>
+                        <button type="button" className="btn gray sm" onClick={() => setNuevoCodigo(null)} disabled={ocupado}>
+                          Cancelar
+                        </button>
+                      </div>
+                      <p className="help">
+                        Las etiquetas con «{b.codigo}» seguirán abriendo este equipo. Se aplica al instante y no hace falta pulsar «Guardar».
+                      </p>
+                    </>
+                  )}
+                </div>
+              ) : (
+                campo('codigo', 'Código', { ayuda: 'Será el de la etiqueta NFC/QR.' })
+              )}
               <div className="field">
                 <label className="field__label" htmlFor="eq-estado">
                   Estado

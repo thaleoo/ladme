@@ -4520,7 +4520,8 @@ textarea { min-height: 96px; }
 .actividad__punto { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .chip[aria-checked='true'] { background: var(--ink-900); border-color: var(--ink-900); color: var(--bg); }
 
-.opcion { display: grid; gap: var(--s3); padding: 14px 0; border-top: 1px solid var(--line); }
+/* minmax(0, 1fr): sin esto la columna crece hasta el ancho de los chips y estira todo lo que lleva dentro. */
+.opcion { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); padding: 14px 0; border-top: 1px solid var(--line); }
 .opcion:last-child { border-bottom: 1px solid var(--line); }
 .opcion__fila { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); cursor: pointer; }
 .opcion__fila--sub { padding-top: var(--s2); }

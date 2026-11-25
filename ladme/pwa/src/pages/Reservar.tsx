@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AvisoSancion, useSancion } from '../components/Inasistencias'
 import { CamposSoftware, SOFTWARE_VACIO, alcanzaParaSoftware, type DatosSoftware } from '../components/Software'
 import CampoDocente, { docenteRecordado, recordarDocente, validarDocente } from '../components/CampoDocente'
-import { solicitarSoftware, crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, solicitarExcepcion } from '../lib/api'
+import { solicitarSoftware, crearReserva, equiposDisponibles, listarEquipos, marcarCompartida, ocupacionPublica, resolverCodigoEquipo, solicitarExcepcion } from '../lib/api'
 import { ACTIVIDADES, fotoEquipo, perfilCompleto, pideDocente, textoSO, type Equipo, type Ocupacion } from '../lib/types'
 import { aIso, aInputLocal, fecha, horasEntre, nuevoIdSolicitud, sumarHoras } from '../lib/format'
 import { useLimites } from '../lib/politicas'
@@ -76,11 +76,17 @@ export default function Reservar() {
   useEffect(() => {
     let vivo = true
     listarEquipos()
-      .then((lista) => {
-        if (!vivo) return
+      .then(async (lista) => {
         const reservables = lista.filter((e) => e.estado === 'activo')
+        // Un enlace con el código anterior de un equipo (etiqueta vieja) elige el equipo actual.
+        const pedido = params.get('equipo')?.toUpperCase()
+        const actual = pedido && !reservables.some((e) => e.codigo === pedido) ? await resolverCodigoEquipo(pedido).catch(() => null) : null
+        if (!vivo) return
         setEquipos(reservables)
-        setEquipo((prev) => (prev && reservables.some((e) => e.codigo === prev) ? prev : reservables[0]?.codigo || ''))
+        setEquipo((prev) => {
+          const quiere = actual && prev === pedido ? actual : prev
+          return quiere && reservables.some((e) => e.codigo === quiere) ? quiere : reservables[0]?.codigo || ''
+        })
       })
       .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : 'No se pudieron cargar los equipos.'))
       .finally(() => vivo && setCargando(false))
@@ -539,7 +545,7 @@ export default function Reservar() {
                     <div className="stack">
                       <span className="field__label">Programas que nadie debe cerrar</span>
                       {(equipoActual?.software ?? []).length > 0 && (
-                        <div className="chips" role="group" aria-label="Programas protegidos">
+                        <div className="chips chips--envolver" role="group" aria-label="Programas protegidos">
                           {(equipoActual?.software ?? []).map((x) => (
                             <button key={x} type="button" className="chip" aria-pressed={protegidos.includes(x)}
                                     onClick={() => setProtegidos((l) => (l.includes(x) ? l.filter((y) => y !== x) : [...l, x]))}>

@@ -980,3 +980,43 @@ declare t text; j jsonb; begin
   update equipos set software = array['QGIS', 'R'] where codigo = 'UNAL-12';
   perform pg_temp.ok((select software from equipos where codigo = 'UNAL-12') = array['QGIS', 'R'], 'el personal puede quitar a mano un programa');
 end $$;
+
+-- 0021: renombrar el código de un equipo conserva las etiquetas viejas.
+do $$
+declare j jsonb; v_id uuid; v_otro uuid;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  select id into v_id from equipos where codigo = 'UNAL-12';
+  select id into v_otro from equipos where codigo = 'UNAL-11';
+  insert into faro_anuncios (texto, equipos, hasta) values ('Prueba de renombrado', array['UNAL-12', 'UNAL-11'], now() + interval '1 hour');
+
+  perform pg_temp.como('beto@unal.edu.co');
+  perform pg_temp.falla(format($q$select renombrar_equipo(%L, 'UNAL-90')$q$, v_id), 'Solo el personal');
+
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.falla(format($q$select renombrar_equipo(%L, 'x')$q$, v_id), 'letras, números y guiones');
+  perform pg_temp.falla(format($q$select renombrar_equipo(%L, 'UNAL-11')$q$, v_id), 'Ya existe un equipo');
+  perform pg_temp.falla(format($q$select renombrar_equipo(%L, 'UNAL-12')$q$, v_id), 'ya es el código');
+
+  j := renombrar_equipo(v_id, ' unal-90 ');
+  perform pg_temp.ok(j ->> 'codigo' = 'UNAL-90' and j ->> 'anterior' = 'UNAL-12', 'renombrar devuelve el código nuevo y el anterior');
+  perform pg_temp.ok((select codigo from equipos where id = v_id) = 'UNAL-90', 'el equipo quedó con el código nuevo');
+  perform pg_temp.ok(resolver_codigo_equipo('UNAL-12') = 'UNAL-90', 'la etiqueta vieja sigue llevando al equipo');
+  perform pg_temp.ok(resolver_codigo_equipo('unal-90') = 'UNAL-90', 'el código nuevo se resuelve a sí mismo');
+  perform pg_temp.ok(resolver_codigo_equipo('UNAL-77') is null, 'un código que nunca existió no se resuelve');
+  perform pg_temp.ok((select equipos from faro_anuncios where texto = 'Prueba de renombrado') = array['UNAL-90', 'UNAL-11'], 'los anuncios de Faro siguen al equipo');
+  perform pg_temp.ok(exists (select 1 from consola_registro where comando like '%UNAL-12 → UNAL-90%'), 'el cambio queda en el registro');
+
+  -- Intercambio de códigos: UNAL-11 ↔ UNAL-90 pasando por uno provisional.
+  perform renombrar_equipo(v_otro, 'UNAL-TMP');
+  perform renombrar_equipo(v_id, 'UNAL-11');
+  perform renombrar_equipo(v_otro, 'UNAL-90');
+  perform pg_temp.ok((select codigo from equipos where id = v_id) = 'UNAL-11' and (select codigo from equipos where id = v_otro) = 'UNAL-90', 'dos equipos pueden intercambiar códigos');
+  perform pg_temp.ok(resolver_codigo_equipo('UNAL-TMP') = 'UNAL-90', 'el código provisional también se resuelve');
+  perform pg_temp.ok(not exists (select 1 from equipo_codigos_anteriores a join equipos e on e.codigo = a.codigo), 'un código vigente nunca figura como anterior');
+
+  -- Volver a dar de alta un código anterior lo toma el equipo nuevo.
+  insert into equipos (codigo, nombre) values ('UNAL-TMP', 'Equipo nuevo');
+  perform pg_temp.ok(resolver_codigo_equipo('UNAL-TMP') = 'UNAL-TMP', 'un código anterior puede reutilizarse en un equipo nuevo');
+end $$;
+

@@ -133,7 +133,35 @@ export async function obtenerEquipo(codigo: string): Promise<Equipo | null> {
     .eq('codigo', codigo.toUpperCase())
     .maybeSingle()
   if (error) fail('No se pudo cargar el equipo', error)
-  return (data as Equipo | null) ?? null
+  if (data) return data as Equipo
+  // Una etiqueta NFC/QR vieja (de antes de cambiar el código del equipo) lleva al equipo actual.
+  const actual = await resolverCodigoEquipo(codigo).catch(() => null)
+  return actual && actual !== codigo.toUpperCase() ? obtenerEquipo(actual) : null
+}
+
+/** Código vigente del equipo que hoy se llama así o que antes se llamaba así (null si no existe). */
+export async function resolverCodigoEquipo(codigo: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('resolver_codigo_equipo', { p_codigo: codigo })
+  if (error) fail('No se pudo resolver el código del equipo', error)
+  return (data as string | null) ?? null
+}
+
+/** Cambia el código de un equipo; las etiquetas con el código anterior siguen funcionando. Solo el personal. */
+export async function renombrarEquipo(id: string, codigo: string): Promise<{ anterior: string; codigo: string }> {
+  const { data, error } = await supabase.rpc('renombrar_equipo', { p_equipo: id, p_codigo: codigo })
+  if (error) fail('No se pudo cambiar el código', error)
+  return data as { anterior: string; codigo: string }
+}
+
+/** Códigos que el equipo tuvo antes y que siguen llevando a él (etiquetas viejas). Solo el personal. */
+export async function codigosAnterioresEquipo(id: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('equipo_codigos_anteriores')
+    .select('codigo')
+    .eq('equipo_id', id)
+    .order('reemplazado_en', { ascending: false })
+  if (error) return [] // la migración 0021 aún no se ha ejecutado
+  return (data ?? []).map((f) => (f as { codigo: string }).codigo)
 }
 
 export async function obtenerReserva(id: string): Promise<Reserva | null> {

@@ -165,6 +165,11 @@ export default function FichaEquipo() {
           setError(`No existe un equipo con el código ${codigo}.`)
           return
         }
+        if (eq.codigo !== codigo.toUpperCase()) {
+          // Entró con un código anterior (etiqueta vieja): se pasa a la dirección vigente y la ficha se vuelve a cargar.
+          navigate(`/equipo/${encodeURIComponent(eq.codigo)}${window.location.hash}`, { replace: true })
+          return
+        }
         setEquipo(eq)
         const ocs = await ocupacionPublica(eq.codigo)
         if (vivo) setOcupacion(ocs)
