@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type {
-  Aviso, Clase, Equipo, EstadoClase, EstadoSoftware, Inasistencia, SolicitudSoftware, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
+  Aviso, Clase, Equipo, ReglamentoVersion, ReglamentoVigente, EstadoClase, EstadoSoftware, Inasistencia, SolicitudSoftware, Estadisticas, EstadisticasSoporte, Mantenimiento, Reporte, Ocupacion, Perfil, Politica, Reserva, ResultadoValidacion, Rol, Solicitud
 } from './types'
 
 function fail(contexto: string, error: { message: string } | null): never {
@@ -565,6 +565,29 @@ export async function alternarAlerta(equipo: string): Promise<boolean> {
 export async function aceptarReglamento(): Promise<void> {
   const { error } = await supabase.rpc('aceptar_reglamento')
   if (error) fail('No se pudo registrar la aceptación', error)
+}
+
+/** Última versión del reglamento y si esta persona debe aceptarla. Null si la migración 0022 aún no se ejecutó. */
+export async function reglamentoVigente(): Promise<ReglamentoVigente | null> {
+  const { data, error } = await supabase.rpc('reglamento_vigente')
+  if (error) return null
+  return (data as ReglamentoVigente | null) ?? null
+}
+
+export async function historialReglamento(): Promise<ReglamentoVersion[]> {
+  const { data, error } = await supabase
+    .from('reglamento_versiones')
+    .select('version, reglas, obligatoria, nota, publicado_en')
+    .order('version', { ascending: false })
+  if (error) fail('No se pudo cargar el reglamento', error)
+  return (data ?? []) as ReglamentoVersion[]
+}
+
+/** Publica una versión nueva del reglamento (solo administración). Devuelve el número de versión. */
+export async function publicarReglamento(reglas: Array<{ titulo: string; texto: string }>, obligatoria: boolean, nota: string): Promise<number> {
+  const { data, error } = await supabase.rpc('publicar_reglamento', { p_reglas: reglas, p_obligatoria: obligatoria, p_nota: nota })
+  if (error) fail('No se pudo publicar el reglamento', error)
+  return data as number
 }
 
 export async function valorarReserva(id: string, funciono: boolean): Promise<void> {

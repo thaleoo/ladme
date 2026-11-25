@@ -32,7 +32,7 @@ begin
   perform pg_temp.ok(politica_int('reservas_activas_max') = 1, 'por defecto, una reserva a la vez por usuario');
   update politicas set valor = '0' where clave = 'reservas_activas_max';
   -- Reglamento (0003): sin aceptarlo no se puede reservar para uno mismo.
-  update perfiles set reglamento_aceptado_en = now() where correo <> 'beto@unal.edu.co';
+  update perfiles set reglamento_aceptado_en = now(), reglamento_version = (select max(version) from reglamento_versiones) where correo <> 'beto@unal.edu.co';
   update perfiles set rol = 'administrador', tipo_usuario = 'Docente/Investigador', programa = 'Profesor/Investigador' where correo = 'admin@unal.edu.co';
   update perfiles set rol = 'laboratorista', tipo_usuario = 'Docente/Investigador', programa = 'Profesor/Investigador' where correo = 'lab@unal.edu.co';
   update perfiles set tipo_usuario = 'Estudiante', programa = 'Estadística', matricula = 'Octava matrícula' where correo = 'beto@unal.edu.co';
@@ -419,7 +419,7 @@ declare r reservas; r2 reservas; t0 timestamptz := date_trunc('hour', now()) + i
 begin
   update politicas set valor = '1' where clave = 'reservas_activas_max';
   insert into auth.users (email, raw_user_meta_data) values ('caro@unal.edu.co', '{"name": "Caro"}');
-  update perfiles set reglamento_aceptado_en = now(), tipo_usuario = 'Estudiante', programa = 'Biología', matricula = 'Novena matrícula'
+  update perfiles set reglamento_aceptado_en = now(), reglamento_version = (select max(version) from reglamento_versiones), tipo_usuario = 'Estudiante', programa = 'Biología', matricula = 'Novena matrícula'
    where correo = 'caro@unal.edu.co';
   perform pg_temp.como('caro@unal.edu.co');
   r := crear_reserva('UNAL-15', t0, t0 + interval '2 hours', 'Docencia');
@@ -484,7 +484,7 @@ do $$
 declare h reservas; g reservas; j jsonb; t6 text; t4 text; c clases; n int; v_hhmm int; v_hoy date := (now() at time zone 'America/Bogota')::date;
 begin
   insert into auth.users (email, raw_user_meta_data) values ('dora@unal.edu.co', '{"name": "Dora"}'), ('doc@unal.edu.co', '{"name": "Docente Uno"}');
-  update perfiles set tipo_usuario = 'Docente/Investigador', programa = 'Estadística', reglamento_aceptado_en = now() where correo = 'doc@unal.edu.co';
+  update perfiles set tipo_usuario = 'Docente/Investigador', programa = 'Estadística', reglamento_aceptado_en = now(), reglamento_version = (select max(version) from reglamento_versiones) where correo = 'doc@unal.edu.co';
   update perfiles set docente_verificado_en = now() where correo = 'doc@unal.edu.co';   -- 0013: docente verificado
 
   -- Uso compartido: Ana deja un proceso y comparte su reserva.
@@ -636,7 +636,7 @@ declare j jsonb; cod text; c clases; v_hoy date := (now() at time zone 'America/
 
   -- 0013: docentes verificados.
   insert into auth.users (email, raw_user_meta_data) values ('eva@unal.edu.co', '{"name": "Eva Docente"}'), ('fer@unal.edu.co', '{"name": "Fer"}');
-  update perfiles set reglamento_aceptado_en = now(), programa = 'Estadística' where correo in ('eva@unal.edu.co', 'fer@unal.edu.co');
+  update perfiles set reglamento_aceptado_en = now(), reglamento_version = (select max(version) from reglamento_versiones), programa = 'Estadística' where correo in ('eva@unal.edu.co', 'fer@unal.edu.co');
   perform pg_temp.como('eva@unal.edu.co');
   update perfiles set tipo_usuario = 'Docente/Investigador' where id = auth.uid();
   perform pg_temp.ok(exists (select 1 from verificaciones_docente where perfil_id = auth.uid() and estado = 'pendiente'),
@@ -755,7 +755,7 @@ begin
   update politicas set valor = '0' where clave = 'llegada_modo';
   insert into auth.users (email, raw_user_meta_data) values ('gil@unal.edu.co', '{"name": "Gil"}');
   select id into g from perfiles where correo = 'gil@unal.edu.co';
-  update perfiles set reglamento_aceptado_en = now(), programa = 'Estadística', tipo_usuario = 'Estudiante', matricula = 'Primera' where id = g;
+  update perfiles set reglamento_aceptado_en = now(), reglamento_version = (select max(version) from reglamento_versiones), programa = 'Estadística', tipo_usuario = 'Estudiante', matricula = 'Primera' where id = g;
   select id into e17 from equipos where codigo = 'UNAL-14';
   perform pg_temp.como('lab@unal.edu.co');
   insert into reservas (equipo_id, usuario_id, inicio, fin, actividad) values
@@ -1018,5 +1018,46 @@ begin
   -- Volver a dar de alta un código anterior lo toma el equipo nuevo.
   insert into equipos (codigo, nombre) values ('UNAL-TMP', 'Equipo nuevo');
   perform pg_temp.ok(resolver_codigo_equipo('UNAL-TMP') = 'UNAL-TMP', 'un código anterior puede reutilizarse en un equipo nuevo');
+end $$;
+
+-- 0022: reglamento editable, con versiones y lectura obligatoria.
+do $$
+declare v int; j jsonb; t0 timestamptz := date_trunc('hour', now()) + interval '30 hours';
+begin
+  update politicas set valor = '0' where clave = 'reservas_activas_max';   -- el límite de una a la vez no es lo que se prueba aquí
+  perform pg_temp.como('ana@unal.edu.co');
+  j := reglamento_vigente();
+  perform pg_temp.ok((j ->> 'version')::int = 2 and jsonb_array_length(j -> 'reglas') >= 10, 'la versión vigente trae las reglas nuevas');
+  perform pg_temp.ok((j ->> 'debe_aceptar')::boolean = false, 'quien aceptó la última versión no tiene que volver a aceptar');
+  perform pg_temp.falla($q$select publicar_reglamento('[{"titulo": "A", "texto": "B"}]'::jsonb)$q$, 'administración');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.falla($q$select publicar_reglamento('[{"titulo": "A", "texto": "B"}]'::jsonb)$q$, 'administración');
+
+  perform pg_temp.como('admin@unal.edu.co');
+  perform pg_temp.falla($q$select publicar_reglamento('[]'::jsonb)$q$, 'entre 1 y 40');
+  perform pg_temp.falla($q$select publicar_reglamento('[{"titulo": "", "texto": "B"}]'::jsonb)$q$, 'título y texto');
+  perform pg_temp.falla($q$select publicar_reglamento('[{"titulo": "A"}]'::jsonb)$q$, 'título y texto');
+  perform pg_temp.falla(format($q$select publicar_reglamento('[{"titulo": "A", "texto": "%s"}]'::jsonb)$q$, repeat('x', 1201)), '1200');
+
+  -- Cambio menor: no obliga a aceptar de nuevo.
+  v := publicar_reglamento('[{"titulo": " Regla  ", "texto": " Texto ", "otro": 1}]'::jsonb, false, ' corrección ');
+  perform pg_temp.ok(v = 3, 'la publicación crea la versión siguiente');
+  perform pg_temp.ok((select reglas from reglamento_versiones where version = 3) = '[{"titulo": "Regla", "texto": "Texto"}]'::jsonb, 'el texto se guarda limpio y sin campos extra');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.ok((reglamento_vigente() ->> 'version')::int = 3 and (reglamento_vigente() ->> 'debe_aceptar')::boolean = false, 'un cambio menor no pide aceptar de nuevo');
+
+  -- Cambio de fondo: todas las personas deben aceptar de nuevo, y el servidor lo exige al reservar.
+  perform pg_temp.como('admin@unal.edu.co');
+  v := publicar_reglamento('[{"titulo": "Regla nueva", "texto": "Texto nuevo"}]'::jsonb, true, null);
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.ok((reglamento_vigente() ->> 'debe_aceptar')::boolean = true, 'un cambio obligatorio pide aceptar de nuevo');
+  perform pg_temp.falla(format($q$select crear_reserva('UNAL-03', %L, %L, 'Docencia')$q$, t0, t0 + interval '1 hour'), 'aceptar el reglamento');
+  perform aceptar_reglamento();
+  perform pg_temp.ok((reglamento_vigente() ->> 'debe_aceptar')::boolean = false and (reglamento_vigente() ->> 'aceptada_version')::int = v, 'tras aceptar queda en la última versión');
+  perform pg_temp.ok((crear_reserva('UNAL-03', t0, t0 + interval '1 hour', 'Docencia')).id is not null, 'tras aceptar de nuevo se puede reservar');
+  perform pg_temp.ok((select count(*) from reglamento_aceptaciones where perfil_id = (select id from perfiles where correo = 'ana@unal.edu.co') and version = v) = 1, 'queda constancia de la aceptación');
+  perform aceptar_reglamento();
+  perform pg_temp.ok((select count(*) from reglamento_aceptaciones where perfil_id = (select id from perfiles where correo = 'ana@unal.edu.co') and version = v) = 1, 'aceptar dos veces no duplica la constancia');
+  perform pg_temp.ok(exists (select 1 from consola_registro where comando = 'Publicar reglamento v' || v), 'la publicación queda en el registro');
 end $$;
 

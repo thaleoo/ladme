@@ -40,6 +40,7 @@ const TITULOS: Array<[RegExp, string]> = [
   [/^\/admin/, 'Administración'],
   [/^\/avisos/, 'Avisos'],
   [/^\/mi-uso/, 'Mi uso'],
+  [/^\/reglamento/, 'Reglas de uso'],
   [/^\/cuenta/, 'Mi cuenta']
 ]
 
@@ -270,7 +271,7 @@ export default function Shell() {
                 </div>
               )}
               <AvisosPush />
-              {perfil && !perfil.reglamento_aceptado_en && <Reglamento />}
+              {perfil && <Reglamento />}
               <InstalarApp />
               <AsistenciaPendiente />
               <Suspense fallback={<div className="cargando"><span className="spinner" aria-hidden="true" /> Cargando…</div>}>

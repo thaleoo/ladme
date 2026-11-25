@@ -14,6 +14,7 @@ import Software from './admin/Software'
 import Equipos from './admin/Equipos'
 import Estadisticas from './admin/Estadisticas'
 import Politicas from './admin/Politicas'
+import ReglamentoAdmin from './admin/Reglamento'
 import Faro from './admin/Faro'
 import Registro from './admin/Registro'
 import Consola from './admin/Consola'
@@ -57,7 +58,8 @@ const GRUPOS = [
     texto: 'Herramientas',
     secciones: [
       { id: 'consola', texto: 'Consola' },
-      { id: 'politicas', texto: 'Políticas', soloAdmin: true }
+      { id: 'politicas', texto: 'Políticas', soloAdmin: true },
+      { id: 'reglamento', texto: 'Reglas de uso', soloAdmin: true }
     ]
   }
 ] as const
@@ -203,6 +205,7 @@ export default function Admin() {
       {actual === 'consola' && <Consola />}
       {actual === 'estadisticas' && <Estadisticas />}
       {actual === 'politicas' && admin && <Politicas />}
+      {actual === 'reglamento' && admin && <ReglamentoAdmin />}
       {actual === 'errores' && <Errores />}
       </div>
     </>

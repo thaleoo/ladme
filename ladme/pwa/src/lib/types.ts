@@ -332,3 +332,23 @@ export interface SolicitudSoftware {
 /** Foto del equipo, o la ilustración genérica de LADME si aún no tiene una. */
 export const FOTO_GENERICA = '/equipo.webp'
 export const fotoEquipo = (url?: string | null) => url || FOTO_GENERICA
+
+/** Respuesta de reglamento_vigente(): la última versión y lo que esta persona ya aceptó. */
+export interface ReglamentoVigente {
+  version: number
+  reglas: Array<{ titulo: string; texto: string }>
+  publicado_en: string
+  nota: string | null
+  aceptada_version: number | null
+  aceptada_en: string | null
+  debe_aceptar: boolean
+}
+
+export interface ReglamentoVersion {
+  version: number
+  reglas: Array<{ titulo: string; texto: string }>
+  obligatoria: boolean
+  nota: string | null
+  publicado_en: string
+}
+

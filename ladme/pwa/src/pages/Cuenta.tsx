@@ -121,6 +121,14 @@ export default function Cuenta() {
             <Icon nombre="flecha-der" width={18} height={18} />
           </Link>
           )}
+          <Link to={'/reglamento'} className="lista-enlaces__fila">
+            <span className="lista-enlaces__icono"><Icon nombre="escudo" /></span>
+            <span className="lista-enlaces__texto">
+              <strong>Reglas de uso</strong>
+              <span>{'Lo que se espera de quien usa el laboratorio.'}</span>
+            </span>
+            <Icon nombre="flecha-der" width={18} height={18} />
+          </Link>
           <Link to={'/mis-reservas'} className="lista-enlaces__fila">
             <span className="lista-enlaces__icono"><Icon nombre="ticket" /></span>
             <span className="lista-enlaces__texto">

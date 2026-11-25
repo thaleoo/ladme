@@ -3201,6 +3201,26 @@ a.avisos__item:hover {
 .reglamento__lista span {
   font-size: var(--text-sm);
   color: var(--ink-600);
+  white-space: pre-line;
+}
+.reglamento__lista b {
+  color: var(--ink-900, inherit);
+}
+
+/* Editor de las reglas (administración) */
+.regla-editor {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.regla-editor__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s2);
 }
 .reglamento__pie {
   position: sticky;

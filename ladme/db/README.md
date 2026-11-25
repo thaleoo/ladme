@@ -298,3 +298,15 @@ importar la hoja (`docs/MUDANZA.md`).
 - Cada cambio queda en el registro de la consola.
 
 Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha y Reservar solo pierden la traducción de códigos anteriores.
+
+## Migración 0022 — Reglas de uso editables, con versiones
+
+`migrations/0022_reglamento_editable.sql`, después de 0021.
+
+- El texto de las reglas deja de estar en el código: vive en `reglamento_versiones` y la administración lo edita en **Administración → Herramientas → Reglas de uso**. Cada publicación crea una versión nueva (`publicar_reglamento`, solo administradores).
+- Al publicar se puede marcar la versión como **obligatoria**: todas las personas deben leerla y aceptarla de nuevo, y el servidor no deja reservar a quien no lo haya hecho (`trg_exigir_reglamento`). Un cambio menor (corrección de redacción) no pide aceptar de nuevo.
+- `reglamento_vigente()` devuelve la última versión y si esta persona debe aceptarla; `aceptar_reglamento()` deja constancia en `reglamento_aceptaciones` (persona, versión, fecha).
+- Las reglas aceptan **negrita** (`**así**`) y dos marcas que siguen a las políticas: `{tolerancia}` (minutos para registrar la llegada) y `{software_dias}` (días hábiles para pedir software).
+- Quien ya había aceptado el reglamento original queda en la versión 1. La versión 2 (el reglamento nuevo) es obligatoria: **al ejecutar la migración todas las personas verán las reglas una vez más**. Para evitarlo, cambie `true` por `false` en la fila de la versión 2 antes de ejecutarla.
+- La PWA queda con el texto nuevo como respaldo: si la migración aún no se ejecutó, se comporta como antes.
+- La página «Reglas de uso» (`/reglamento`, también en Cuenta) permite consultarlas cuando se quiera.
