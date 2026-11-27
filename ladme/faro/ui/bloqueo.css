@@ -1,4 +1,6 @@
-/* Pantalla de bloqueo: negro profundo con luces que se mueven despacio. */
+/* Pantalla de bloqueo: negro profundo con luces que se mueven despacio.
+   Las luces se dibujan ya difuminadas (degradado radial) y solo se desplazan: es el mismo aspecto que un
+   desenfoque, cuesta mucho menos y se ve igual en Windows y en Linux. */
 html { background: var(--negro); overflow: hidden; }
 body { background: transparent; overflow: hidden; position: relative; }
 body { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; }
@@ -11,15 +13,17 @@ body { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; }
   background-size: 64px 64px;
   mask-image: radial-gradient(ellipse at 50% 40%, #000 20%, transparent 75%);
 }
-.fondo i { position: absolute; width: 60vmax; height: 60vmax; border-radius: 50%; filter: blur(80px); opacity: 0.38; }
-.fondo i:nth-child(1) { background: #6d28d9; left: -15vmax; top: -25vmax; animation: deriva 28s ease-in-out infinite alternate; }
-.fondo i:nth-child(2) { background: var(--c); right: -20vmax; bottom: -30vmax; opacity: 0.2; animation: deriva 34s ease-in-out infinite alternate-reverse; }
-.fondo i:nth-child(3) { background: #1d4ed8; left: 30vw; top: 50vh; width: 40vmax; height: 40vmax; opacity: 0.16; animation: deriva 40s ease-in-out infinite alternate; }
+.fondo i { position: absolute; width: 84vmax; height: 84vmax; border-radius: 50%; opacity: 0.42; will-change: transform;
+            background: radial-gradient(closest-side, var(--m) 0%, color-mix(in srgb, var(--m) 60%, transparent) 38%, color-mix(in srgb, var(--m) 18%, transparent) 68%, transparent 100%); }
+.fondo i:nth-child(1) { --m: #6d28d9; left: -27vmax; top: -37vmax; animation: deriva 28s ease-in-out infinite alternate; }
+.fondo i:nth-child(2) { --m: var(--c); right: -32vmax; bottom: -42vmax; opacity: 0.24; animation: deriva 34s ease-in-out infinite alternate-reverse; }
+.fondo i:nth-child(3) { --m: #1d4ed8; left: 22vw; top: 42vh; width: 58vmax; height: 58vmax; opacity: 0.2; animation: deriva 40s ease-in-out infinite alternate; }
 @keyframes deriva { to { transform: translate(8vmax, 6vmax) scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .fondo i { animation: none; } }
 
 .marca { display: flex; align-items: center; gap: 10px; padding: 28px 36px; font-weight: 700; letter-spacing: 0.06em; font-size: 13px; }
 .marca .tenue { color: var(--texto-3); font-weight: 500; letter-spacing: 0.01em; }
-.marca .logo { width: 26px; height: 26px; border-radius: 8px; background: url('icono.png') center / cover; }
+.marca .logo { width: 26px; height: 26px; flex: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); border-radius: 8px; }
 
 main { display: grid; place-items: center; padding: 0 32px; }
 .centro { display: grid; grid-template-columns: auto auto; gap: 72px; align-items: center; max-width: 1100px; animation: entrar 0.6s ease both; }
@@ -33,6 +37,8 @@ main { display: grid; place-items: center; padding: 0 32px; }
           background: rgba(255,255,255,0.05); border: 1px solid var(--borde); font-size: 13px; font-weight: 650; }
 .titulo { margin: 18px 0 8px; font-size: 28px; font-weight: 650; letter-spacing: -0.015em; max-width: 560px; }
 .detalle { margin: 0; color: var(--texto-2); font-size: 16px; line-height: 1.55; max-width: 520px; }
+.mensaje__de { margin: 22px 0 6px; color: var(--texto-3); font-size: 13px; font-weight: 600; }
+.mensaje__de + .mensaje { margin-top: 0; }
 .mensaje { margin-top: 18px; padding: 14px 18px; border-radius: 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--borde);
            color: var(--texto); font-size: 16px; max-width: 520px; }
 .icono-grande { width: 64px; height: 64px; color: var(--c); margin-bottom: 8px; }
@@ -40,8 +46,10 @@ main { display: grid; place-items: center; padding: 0 32px; }
 .tarjeta { width: 300px; padding: 22px; border-radius: 28px; background: rgba(15, 15, 20, 0.6); border: 1px solid var(--borde);
            backdrop-filter: blur(24px); text-align: center; box-shadow: 0 30px 80px -30px rgba(0,0,0,0.9); }
 .tarjeta .qr { width: 220px; margin: 0 auto; }
-.tarjeta .que { margin: 16px 0 4px; font-weight: 650; font-size: 15px; }
-.tarjeta .url { color: var(--texto-3); font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tarjeta .que { margin: 0 0 14px; font-weight: 650; font-size: 16px; letter-spacing: -0.01em; }
+.tarjeta .url { margin-top: 12px; color: var(--texto-3); font: 12.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tarjeta .url b { color: var(--texto-2); font-weight: 500; }
+.tarjeta .nfc-bloqueo { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--borde); }
 .espera { display: flex; text-align: left; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; color: var(--texto-3); font-size: 12.5px; }
 .espera::before { content: ''; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--texto-3); border-top-color: transparent; animation: girar 0.9s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
@@ -60,5 +68,5 @@ main { display: grid; place-items: center; padding: 0 32px; }
 .anuncio { display: flex; gap: 10px; align-items: flex-start; max-width: 520px; margin-top: 18px; padding: 12px 14px; border-radius: 16px;
   background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.35); font-size: 14.5px; line-height: 1.5; text-align: left; }
 .anuncio svg { flex: none; width: 18px; height: 18px; margin-top: 2px; color: #c4b5fd; }
-.nfc-bloqueo { display: flex; align-items: center; gap: 10px; margin-top: 12px; text-align: left; font-size: 13px; line-height: 1.4; color: var(--texto-2); }
+.nfc-bloqueo { display: flex; align-items: center; gap: 12px; margin-top: 12px; text-align: left; font-size: 13px; line-height: 1.4; color: var(--texto-2); }
 .nfc-bloqueo .dibujo-nfc { flex: none; width: 64px; height: 42px; color: var(--texto); }
