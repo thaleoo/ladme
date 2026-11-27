@@ -96,7 +96,7 @@ export default function Reportes() {
             descargarCSV(
               'reportes-ladme.csv',
               ['Fecha', 'Equipo', 'Tipo', 'Descripción', 'Reportó', 'Correo', 'Estado', 'Respuesta'],
-              lista.map((r) => [r.creado_en, r.equipos?.codigo, r.categoria, r.descripcion, r.autor?.nombre, r.autor?.correo, ESTADO[r.estado].texto, r.respuesta])
+              lista.map((r) => [r.creado_en, r.equipos?.codigo, r.categoria, r.descripcion, r.autor?.nombre ?? 'Desde el equipo', r.autor?.correo ?? '', ESTADO[r.estado].texto, r.respuesta])
             )
           }
         >
@@ -134,7 +134,7 @@ export default function Reportes() {
                 {r.descripcion}
               </p>
               <p className="tiny muted" style={{ margin: '4px 0 0', wordBreak: 'break-all' }}>
-                {r.autor?.nombre} · {r.autor?.correo} · {hace(r.creado_en)}
+                {r.autor ? `${r.autor.nombre} · ${r.autor.correo}` : 'Desde el equipo (Faro)'} · {hace(r.creado_en)}
               </p>
               {r.diagnostico && <Diagnostico d={r.diagnostico} />}
               {r.respuesta && (

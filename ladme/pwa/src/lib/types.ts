@@ -221,9 +221,11 @@ export const CATEGORIAS_FALLA = [
 export interface Reporte {
   id: string
   equipo_id: string
-  usuario_id: string
+  /** null: reportado desde la isla de Faro con el equipo libre (0025). */
+  usuario_id: string | null
   categoria: string
   descripcion: string
+  origen?: 'app' | 'faro'
   estado: 'abierto' | 'en_revision' | 'resuelto' | 'descartado'
   respuesta: string | null
   resuelto_en: string | null

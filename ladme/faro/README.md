@@ -7,10 +7,9 @@ notch de un celular, con tres tamaños:
   o la cuenta regresiva. Así casi no ocupa espacio.
 - **Compacta.** Al pasar el mouse muestra el equipo, el estado y la cuenta regresiva. También aparece sola
   unos segundos cuando algo cambia (empieza la reserva, se libera el equipo…).
-- **Abierta.** Al hacer clic se abre un panel con la cuenta regresiva y accesos para extender, liberar,
-  reservar o reportar una falla. Esas acciones muestran un QR para hacerlas desde el celular, porque la
-  cuenta «estudiantes» es compartida y Faro no sabe quién está frente al PC. Se cierra sola al sacar el
-  mouse.
+- **Abierta.** Al hacer clic se abre un panel con la cuenta regresiva y las acciones del momento. Desde
+  Faro 0.6, extender, liberar, reportar una falla y pedir ayuda se hacen **en la isla, sin el celular**
+  (ver «Acciones en la isla»). Se cierra sola al sacar el mouse.
 
 Para que no estorbe:
 - **Solo la isla recibe clics.** Alrededor, aunque la ventana sea más grande, los clics pasan a la app de
@@ -20,22 +19,42 @@ Para que no estorbe:
 - **Pantalla completa.** Mientras una app está a pantalla completa (presentación, video, juego) la isla se
   oculta. Solo vuelve para los avisos urgentes.
 
-Las acciones de la isla muestran un QR que abre en el celular páginas que existen en cualquier versión de
-la PWA:
+### Acciones en la isla (Faro 0.6)
 
-| Acción | Página | Qué hace |
+| Acción | Cómo | Reglas |
 | --- | --- | --- |
-| Reservar | `/reservar?equipo=UNAL-05` | Formulario de reserva con el equipo ya elegido. |
-| Extender | `/equipo/UNAL-05?accion=extender` | Ficha del equipo con «Tu reserva» abierta en extender. |
-| Liberar | `/equipo/UNAL-05?accion=liberar` | Confirmar y liberar, con la pregunta «¿funcionó bien?». |
-| Reportar falla | `/equipo/UNAL-05?accion=reportar` | Ficha con el formulario de falla abierto. |
-| Registrar llegada | `/equipo/UNAL-05?llegada=CÓDIGO` | Registra la llegada (ver abajo). |
+| Extender | +30 min o +1 hora con un toque | Las mismas de la app (extensiones, horas máximas, otra reserva después). Solo si la llegada se confirmó en ese equipo. |
+| Liberar | «¿Terminaste?» y confirmar | Solo si la llegada se confirmó en ese equipo: así nadie libera la reserva de otra persona. |
+| Reportar falla | Elegir el tipo de problema | Se adjunta un diagnóstico del equipo (memoria, disco, red, reloj). Con el equipo libre el reporte queda «desde el equipo». Máx. 3 por hora. |
+| Pedir ayuda | Un toque | Avisa al chat del personal con el código del equipo (una vez cada 10 min). |
 
-Debajo del QR hay un **enlace corto** para escribir a mano si no hay cámara: `…/e/UNAL-05` abre la ficha
-del equipo. En la ficha, quien tiene la reserva de ese equipo ve la tarjeta **«Tu reserva»**: cuenta
-regresiva, registrar llegada, extender, liberar y su pase. Si la persona no ha iniciado sesión, después de
-entrar vuelve a la misma página. (La isla ya no tiene «Abrir aquí»: abrir el navegador del PC fallaba en
-varios sistemas y la cuenta del PC es compartida.)
+Quien tiene la reserva recibe un aviso de todo lo que se haga desde el equipo sobre ella. Solo quedan dos QR,
+cada uno con su propósito: **Reservar este equipo** (`/reservar?equipo=UNAL-05`, con la cuenta de la persona) y
+el **código de llegada**. Con el equipo libre, la isla y la pantalla de bloqueo invitan además a **acercar el
+celular a la tarjeta NFC** de la base del monitor (política `faro_nfc`). Los enlaces de versiones anteriores
+(`/equipo/UNAL-05?accion=extender`…) siguen funcionando en la PWA.
+
+En los últimos minutos de la reserva la isla muestra **«Antes de irte»** (guardar el trabajo, cerrar las cuentas
+personales, liberar). Si Faro pierde la conexión o el reloj del PC está desfasado, lo explica en la isla.
+
+### Línea de comandos `faro`
+
+El mismo Faro responde en una terminal. Al arrancar deja el comando disponible sin permisos de administrador:
+en Linux un enlace `~/.local/bin/faro` al AppImage; en Windows un `faro.cmd` en
+`%LOCALAPPDATA%\Microsoft\WindowsApps` (ya está en el PATH; funciona en cmd y PowerShell).
+
+| Comando | Qué hace |
+| --- | --- |
+| `faro estado` | Vínculo, si Faro está abierto, último contacto con el servidor, modo de la sala y reserva actual. |
+| `faro doctor` | Revisa vínculo, Faro abierto, servidor y su demora, reloj, carpeta, arranque automático, sesión gráfica, herramientas del inventario (Linux), disco y versión publicada. Cada problema trae cómo arreglarlo. Sale con 1 si hay problemas. |
+| `faro logs` | Registro de Faro (`faro.log` en su carpeta). `-n 100`, `-f` para seguirlo, `--desde 30m`/`2h`/`1d`, `--nivel aviso|error`. |
+| `faro inventario` | Lo que Faro envía: procesador, RAM, gráfica, cámaras, disco, sistema, cuenta y programas. |
+| `faro version` | Versión, canal (estable o pruebas) e instalación. |
+| `faro vincular ABCD-EFGH` | Vincula el equipo con un código del panel (si Faro está cerrado, se usa al abrirlo). |
+| `faro actualizar`, `faro desbloquear`, `faro desvincular` | Piden la **clave de emergencia** (sin mostrarla) y se las pasan al Faro abierto, que la verifica como en la isla (5 intentos y una pausa). |
+
+Todos aceptan `--json` (para scripts o para pegar en un reporte) y `--sin-color`. Lo que solo lee funciona
+aunque Faro esté cerrado; las órdenes con clave necesitan a Faro abierto.
 
 Según el **modo** que elija el laboratorio para cada equipo (Administración → Faro):
 

@@ -2,6 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // `faro doctor`, `faro logs`…: la línea de comandos responde y termina, sin abrir ventanas.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| faro_lib::es_comando_cli(a)) {
+        std::process::exit(faro_lib::ejecutar_cli(&args));
+    }
     // En Linux, WebKitGTK dibuja por defecto con DMA-BUF. Con algunas tarjetas gráficas (sobre todo NVIDIA)
     // una ventana transparente como la isla no borra los cuadros anteriores y cada animación deja rastro.
     // Se usa el camino de memoria compartida, un poco más lento pero sin basura. Quien necesite otra cosa

@@ -1159,3 +1159,55 @@ begin
   delete from solicitudes_software where solicitante = v_ana;
   perform pg_temp.como('lab@unal.edu.co');
 end $$;
+
+-- 0025: acciones desde la isla de Faro.
+do $$
+declare t text; j jsonb; v_ana uuid; v_eq uuid; r reservas; v_fin timestamptz; n int;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  t := faro_vincular(faro_codigo_vinculo('UNAL-13') ->> 'codigo', 'PC-13', 'Linux', '0.6.0') ->> 'token';
+  select id into v_ana from perfiles where correo = 'ana@unal.edu.co';
+  select id into v_eq from equipos where codigo = 'UNAL-13';
+  update reservas set estado = 'cancelada' where equipo_id = v_eq and estado = 'activa' and fin > now();
+  perform set_config('request.jwt.claim.sub', '', false);   -- Faro no tiene sesión
+
+  perform pg_temp.falla($q$select faro_accion('token-falso', 'ayuda')$q$, 'no está vinculado');
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'extender')$q$, t), 'No hay una reserva en curso');
+  perform pg_temp.ok((faro_estado(t) ->> 'nfc')::boolean, 'Faro sabe que el equipo tiene tarjeta NFC');
+
+  -- Reserva en curso de Ana, sin llegada confirmada: no se puede liberar desde el equipo.
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  values (v_eq, v_ana, now() - interval '10 minutes', now() + interval '50 minutes', 'Docencia') returning * into r;
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'liberar')$q$, t), 'Primero confirme su llegada');
+
+  update reservas set llegada_en = now() where id = r.id;
+  v_fin := r.fin;
+  j := faro_accion(t, 'extender', '{"minutos": 30}');
+  perform pg_temp.ok((j ->> 'ok')::boolean and (select fin from reservas where id = r.id) = v_fin + interval '30 minutes',
+                     'desde la isla se extiende 30 minutos con las reglas de la app');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_extendida'), 'la persona recibe un aviso de la extensión');
+  perform pg_temp.ok(current_setting('request.jwt.claim.sub', true) = '', 'después de actuar como la persona, Faro sigue sin sesión');
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'extender', '{"minutos": 60}')$q$, t), 'extensión');   -- política: una extensión
+
+  j := faro_accion(t, 'liberar');
+  perform pg_temp.ok((select liberada_en from reservas where id = r.id) is not null, 'desde la isla se libera el equipo');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_liberada'), 'la persona recibe un aviso de la liberación');
+
+  -- Reportar con el equipo libre: el reporte es del equipo, con el diagnóstico de Faro.
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'reportar', '{"categoria": "Explotó"}')$q$, t), 'tipo de problema');
+  j := faro_accion(t, 'reportar', '{"categoria": "Red o internet", "diagnostico": {"en_linea": false, "ram_libre_gb": 3.1}}');
+  perform pg_temp.ok(exists (select 1 from reportes where equipo_id = v_eq and origen = 'faro' and usuario_id is null
+                                and categoria = 'Red o internet' and diagnostico -> 'faro' ->> 'ram_libre_gb' = '3.1'),
+                     'un reporte desde el equipo libre queda sin persona y con el diagnóstico de Faro');
+  perform faro_accion(t, 'reportar', '{"categoria": "Otro"}');
+  perform faro_accion(t, 'reportar', '{"categoria": "Software"}');
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'reportar', '{"categoria": "Otro"}')$q$, t), 'varias fallas');
+
+  -- Pedir ayuda: un aviso al chat del personal, sin repetirse en 10 minutos.
+  perform faro_accion(t, 'ayuda');
+  perform faro_accion(t, 'ayuda');
+  select count(*) into n from cola_chat where tipo = 'faro_ayuda' and texto like '%UNAL-13%';
+  perform pg_temp.ok(n = 1, 'pedir ayuda avisa al personal una vez cada 10 minutos');
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'formatear')$q$, t), 'Acción no válida');
+  perform pg_temp.como('lab@unal.edu.co');
+end $$;

@@ -1,4 +1,4 @@
-import { invocar, escuchar, fijarDesfase, cuenta, cuando, conPunto, textoReloj, textoFecha, esc, ICONOS } from './comun.js';
+import { invocar, escuchar, fijarDesfase, cuenta, cuando, conPunto, textoReloj, textoFecha, esc, ICONOS, DIBUJO_NFC } from './comun.js';
 
 const principal = new URLSearchParams(location.search).has('principal');
 const main = document.getElementById('principal');
@@ -58,6 +58,7 @@ function pintar() {
           <div class="qr">${paquete.qr}</div>
           <div class="que">${desatendido ? '¿Necesitas este equipo? Escríbele al titular' : 'Escanea para reservar'}</div>
           <div class="url">${esc((paquete.url_qr ?? '').replace(/^https?:\/\//, ''))}</div>
+          ${!desatendido && paquete.nfc ? `<div class="nfc-bloqueo">${DIBUJO_NFC}<span>O acerca tu celular a la tarjeta de la base del monitor</span></div>` : ''}
           ${desatendido ? '' : '<div class="espera">Se desbloquea solo al detectar tu reserva</div>'}
         </div>` : ''}
     </div>`;

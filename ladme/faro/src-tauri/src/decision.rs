@@ -31,6 +31,9 @@ pub struct Remoto {
     pub compartido: Option<Compartido>,
     #[serde(default)]
     pub espera: i64,
+    /// Desde la 0025: el equipo tiene tarjeta NFC en la base del monitor.
+    #[serde(default)]
+    pub nfc: bool,
 }
 
 /// Otra persona dejó un proceso corriendo y permite usar el equipo sin cerrar estos programas.
@@ -476,6 +479,7 @@ mod pruebas {
             anuncio: None,
             compartido: None,
             espera: 0,
+            nfc: false,
         }
     }
 

@@ -257,7 +257,7 @@ fn camaras() -> Vec<String> {
 // ------------------------------------------------------------------ sistema y cuenta
 
 /// Nombre del sistema con su versión: «Ubuntu 24.04.1 LTS», «Windows 11 Pro».
-fn nombre_sistema() -> Option<String> {
+pub fn nombre_sistema() -> Option<String> {
     #[cfg(not(windows))]
     if let Ok(t) = std::fs::read_to_string("/etc/os-release") {
         if let Some(n) = t.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=")) {

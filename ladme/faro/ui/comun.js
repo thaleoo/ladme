@@ -72,4 +72,16 @@ export const ICONOS = {
   megafono: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/></svg>',
   papelera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
   candado: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  ayuda: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.3-2.5 3.9M12 17h.01"/></svg>',
+  sinRed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10.5 10.5 0 0 1 14 0M8.5 15.5a5.5 5.5 0 0 1 7 0M12 19h.01M3 3l18 18"/></svg>',
 };
+
+/** Dibujo de la tarjeta NFC: un celular que se acerca a la tarjeta pegada en la base del monitor. */
+export const DIBUJO_NFC = `<svg class="dibujo-nfc" viewBox="0 0 96 64" aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="6" y="2" width="52" height="30" rx="3" stroke="currentColor" stroke-width="2" opacity=".55"/>
+  <path d="M28 32v12M36 32v12" stroke="currentColor" stroke-width="2" opacity=".55"/>
+  <path d="M12 50c0-3 3-5 6-5h28c3 0 6 2 6 5v2H12z" stroke="currentColor" stroke-width="2" opacity=".8"/>
+  <rect x="25" y="46.5" width="14" height="4" rx="1" fill="var(--violeta, #8b5cf6)" stroke="none"/>
+  <path d="M46 40a7 7 0 0 1 4 6M49 36a12 12 0 0 1 6 10" stroke="var(--violeta, #8b5cf6)" stroke-width="2"/>
+  <g transform="rotate(-18 76 36)"><rect x="66" y="18" width="20" height="36" rx="4" stroke="currentColor" stroke-width="2"/><path d="M73 22h6" stroke="currentColor" stroke-width="2"/></g>
+</svg>`;

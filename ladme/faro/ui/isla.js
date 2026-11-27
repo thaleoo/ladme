@@ -1,4 +1,4 @@
-import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoReloj, esc, ICONOS } from './comun.js';
+import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoReloj, esc, ICONOS, DIBUJO_NFC } from './comun.js';
 
 // ------------------------------------------------------------------ estado
 const isla = document.getElementById('isla');
@@ -6,7 +6,9 @@ const capas = Object.fromEntries([...isla.querySelectorAll('.capa')].map((c) => 
 
 let paquete = null;
 let ui = 'compacta';          // 'mini' | 'compacta' | 'abierta'
-let accion = null;            // panel: 'reservar' | 'extender' | 'liberar' | 'reportar' | 'llegada' | 'personal'
+let accion = null;            // panel: 'reservar' | 'llegada' | 'extender' | 'liberar' | 'reportar' | 'ayuda' | 'hecho' | 'personal'
+let resultado = null;         // { ok, texto } de la última acción hecha en la isla
+let haciendo = false;         // una acción en curso (botones deshabilitados)
 let aviso = '';               // mensaje bajo el panel (error o confirmación)
 let confirmar = '';           // botón que pide un segundo clic ('retirar' | 'limpiar')
 let qrLlegada = null;         // { svg, cambia_en } del QR de llegada (cambia cada 30 s)
@@ -28,13 +30,18 @@ const PAUSA_CERRAR = 2600;    // abierta → se cierra sola sin el cursor encima
 const AVISO_CAMBIO = 5000;    // al cambiar de estado se muestra compacta un rato
 const PAUSA_PANEL = 60_000;   // con un QR o la clave en pantalla: hay tiempo para sacar el celular
 
+// Solo dos acciones llevan QR (reservar y confirmar la llegada, que se hacen con la cuenta de la persona);
+// extender, liberar, reportar y pedir ayuda se hacen aquí mismo, sin el celular.
 const ACCIONES = {
-  reservar: { texto: 'Reservar este equipo', titulo: 'Reserva desde tu celular', cuerpo: 'Escanea, elige hasta qué hora y el equipo queda a tu nombre.', icono: ICONOS.mas, principal: true },
-  extender: { texto: 'Extender', titulo: 'Extiende tu reserva', cuerpo: 'Escanea y elige cuánto tiempo más necesitas. Un toque y listo.', icono: ICONOS.reloj, principal: true },
-  liberar:  { texto: 'Liberar', titulo: 'Libera el equipo', cuerpo: 'Si ya terminaste, escanea y confirma: el equipo queda libre para otra persona.', icono: ICONOS.salir },
-  reportar: { texto: 'Reportar falla', titulo: 'Reporta una falla', cuerpo: 'Cuéntale al laboratorio qué pasa con este equipo.', icono: ICONOS.falla },
-  llegada:  { texto: 'Confirmar asistencia', titulo: 'Confirma tu asistencia', cuerpo: 'En tu celular: LADME → «Confirmar asistencia». Escribe este código o escanea el QR.', icono: ICONOS.check, principal: true },
+  reservar: { texto: 'Reservar este equipo', titulo: 'Reserva desde tu celular', cuerpo: 'Escanea, elige hasta qué hora y el equipo queda a tu nombre.', icono: ICONOS.mas, principal: true, qr: true },
+  llegada:  { texto: 'Confirmar asistencia', titulo: 'Confirma tu asistencia', cuerpo: 'En tu celular: LADME → «Confirmar asistencia». Escribe este código o escanea el QR.', icono: ICONOS.check, principal: true, qr: true },
+  extender: { texto: 'Extender', icono: ICONOS.reloj, principal: true },
+  liberar:  { texto: 'Liberar', icono: ICONOS.salir },
+  reportar: { texto: 'Reportar falla', icono: ICONOS.falla },
+  ayuda:    { texto: 'Pedir ayuda', icono: ICONOS.ayuda },
 };
+// Tipos de falla que se reportan con un toque (el equipo está encendido: «No enciende» no aplica).
+const CATEGORIAS = ['Lento o se congela', 'Software', 'Pantalla o periféricos', 'Red o internet', 'Otro'];
 // Rutas que existen en la PWA: la reserva va con ?equipo= y lo demás abre la ficha del equipo.
 const ruta = (a, codigo) => {
   const c = encodeURIComponent(codigo);
@@ -50,9 +57,53 @@ const vista = () => paquete?.vista ?? { estado: 'conectando', titulo: 'Conectand
 const urgente = (v = vista()) => !!v.insistir || ['por_terminar', 'gracia', 'libre_en_uso'].includes(v.estado);
 
 function accionesDe(estado, v = vista()) {
-  if (estado === 'reservado' || estado === 'por_terminar') return [...(v.llegada_pendiente ? ['llegada'] : []), 'extender', 'liberar', 'reportar'];
-  if (estado === 'libre' || estado === 'libre_en_uso' || estado === 'gracia' || estado === 'compartido') return ['reservar', 'reportar'];
-  return ['reportar'];
+  if (estado === 'reservado' || estado === 'por_terminar') return [...(v.llegada_pendiente ? ['llegada'] : []), 'extender', 'liberar', 'reportar', 'ayuda'];
+  if (estado === 'libre' || estado === 'libre_en_uso' || estado === 'gracia' || estado === 'compartido') return ['reservar', 'reportar', 'ayuda'];
+  return ['reportar', 'ayuda'];
+}
+
+/** Paneles de las acciones que se hacen en la isla. */
+function htmlPanel(v) {
+  const volver = `<button class="boton" data-volver title="Volver" ${haciendo ? 'disabled' : ''}>${ICONOS.volver} Volver</button>`;
+  const dis = haciendo ? 'disabled' : '';
+  switch (accion) {
+    case 'extender':
+      return `<div class="panel-accion"><p><strong>¿Cuánto tiempo más?</strong>Se agrega a tu reserva si el equipo sigue libre después.</p>
+        <div class="acciones"><button class="boton principal" data-hacer="extender" data-minutos="30" ${dis}>+30 min</button>
+        <button class="boton principal" data-hacer="extender" data-minutos="60" ${dis}>+1 hora</button>${volver}</div></div>`;
+    case 'liberar':
+      return `<div class="panel-accion"><p><strong>¿Terminaste?</strong>Tu reserva termina ahora y el equipo queda libre para otra persona. Guarda tu trabajo antes.</p>
+        <div class="acciones"><button class="boton peligro" data-hacer="liberar" ${dis}>${ICONOS.salir} Sí, liberar el equipo</button>${volver}</div></div>`;
+    case 'reportar':
+      return `<div class="panel-accion"><p><strong>¿Qué le pasa al equipo?</strong>El laboratorio recibe el aviso con un diagnóstico del equipo.</p>
+        <div class="acciones categorias">${CATEGORIAS.map((c) => `<button class="boton" data-hacer="reportar" data-categoria="${esc(c)}" ${dis}>${esc(c)}</button>`).join('')}</div>
+        <div class="acciones">${volver}</div></div>`;
+    case 'ayuda':
+      return `<div class="panel-accion"><p><strong>¿Necesitas ayuda?</strong>Avisamos al personal del laboratorio que en ${esc(v.equipo ?? 'este equipo')} necesitan ayuda.</p>
+        <div class="acciones"><button class="boton principal" data-hacer="ayuda" ${dis}>${ICONOS.ayuda} Avisar al personal</button>${volver}</div></div>`;
+    case 'hecho':
+      return `<div class="panel-accion ${resultado?.ok ? 'ok' : 'error'}"><p><strong>${resultado?.ok ? 'Listo' : 'No se pudo'}</strong>${esc(resultado?.texto ?? '')}</p>
+        <div class="acciones">${volver}</div></div>`;
+    default:
+      return '';
+  }
+}
+
+/** Lo que Faro explica sobre sí mismo: sin conexión o reloj desfasado. */
+function htmlAvisosFaro() {
+  const partes = [];
+  const sinRed = paquete?.sin_red_seg;
+  if (sinRed != null) {
+    const min = Math.max(1, Math.round(sinRed / 60));
+    partes.push(`<div class="aviso-faro">${ICONOS.sinRed}<span><strong>Sin conexión con LADME${sinRed >= 60 ? ` desde hace ${min} min` : ''}.</strong>
+      Faro sigue con la última información; las acciones vuelven cuando haya red. Revisa el cable o el wifi.</span></div>`);
+  }
+  const desfase = Math.abs(paquete?.desfase_ms ?? 0);
+  if (desfase > 120_000) {
+    partes.push(`<div class="aviso-faro">${ICONOS.reloj}<span><strong>El reloj de este equipo está desfasado ${Math.round(desfase / 60_000)} min.</strong>
+      Faro usa la hora del servidor. Avísale al personal.</span></div>`);
+  }
+  return partes.join('');
 }
 
 function etiqueta(v) {
@@ -115,6 +166,8 @@ function htmlAbierta(v) {
           <button class="boton" data-volver title="Volver">${ICONOS.volver}</button>
         </div>
       </div>`;
+  } else if (accion && !ACCIONES[accion]?.qr) {
+    cuerpo = htmlPanel(v);
   } else if (accion) {
     const a = ACCIONES[accion];
     const r = ruta(accion, codigo);
@@ -126,6 +179,7 @@ function htmlAbierta(v) {
           <p><strong>${a.titulo}</strong>${a.cuerpo}</p>
           ${accion === 'llegada' && qrLlegada?.numero ? `<div class="codigo-llegada num" aria-label="Código ${esc(qrLlegada.numero)}">${esc(qrLlegada.numero.slice(0, 3))}<span></span>${esc(qrLlegada.numero.slice(3))}</div>` : ''}
           ${accion === 'llegada' && v.llegada_hasta ? `<p class="corto">Hazlo antes de las ${textoHora(v.llegada_hasta)}: si no, cuenta como inasistencia.</p>` : ''}
+          ${accion === 'reservar' && paquete?.nfc ? `<p class="corto">O acerca tu celular a la tarjeta de la base del monitor.</p>` : ''}
           ${corto ? `<p class="corto">¿Sin cámara? Entra a <span class="num">${esc(corto)}</span></p>` : ''}
           ${accion === 'llegada' ? `<div class="barra fina"><i data-vivo="qr-llegada"></i></div>` : ''}
           ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
@@ -150,6 +204,11 @@ function htmlAbierta(v) {
       ${v.cuenta_hasta ? `<div class="reloj"><span class="grande num" data-vivo="grande">${cuenta(v.cuenta_hasta)}</span>
           <span class="que">${queCuenta(v)}<br>${textoHora(v.cuenta_hasta)}</span></div>` : ''}
       ${p !== null ? `<div class="barra"><i data-vivo="barra" style="width:${(p * 100).toFixed(1)}%"></i></div>` : ''}
+      ${v.estado === 'por_terminar' ? `<div class="salida"><strong>Antes de irte</strong><ul>
+          <li>Guarda tu trabajo en tu memoria o en la nube.</li>
+          <li>Cierra tu correo y tus cuentas personales.</li>
+          <li>Si ya terminaste, libera el equipo.</li></ul></div>` : ''}
+      ${paquete?.nfc && (v.estado === 'libre' || v.estado === 'libre_en_uso') ? `<div class="nfc">${DIBUJO_NFC}<p><strong>¿Quieres usarlo?</strong>Acerca tu celular a la tarjeta de la base del monitor, o toca «Reservar este equipo».</p></div>` : ''}
       <div class="acciones">${accionesDe(v.estado, v).map((k) => {
         const a = ACCIONES[k];
         return `<button class="boton ${a.principal ? 'principal' : ''}" data-accion="${k}">${a.icono} ${a.texto}</button>`;
@@ -163,11 +222,12 @@ function htmlAbierta(v) {
         ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
         <button class="cerrar" data-cerrar title="Cerrar">${ICONOS.cerrar}</button>
       </div>
+      ${htmlAvisosFaro()}
       ${v.anuncio ? `<div class="anuncio">${ICONOS.megafono}<span>${esc(v.anuncio)}</span></div>` : ''}
       ${v.compartido ? `<div class="protegido">${ICONOS.candado}<span><strong>Uso compartido${v.compartido.titular ? ` de ${esc(v.compartido.titular)}` : ''}.</strong>
         ${v.compartido.protegidos?.length ? `No cierres ${esc(v.compartido.protegidos.join(', '))}.` : 'No cierres los programas abiertos.'}
         No reinicies, apagues ni cierres la sesión.${v.compartido.nota ? ` «${esc(v.compartido.nota)}»` : ''}</span></div>` : ''}
-      ${v.espera > 0 && (v.estado === 'por_terminar' || v.estado === 'reservado') ? `<div class="espera">${ICONOS.reloj}<span>${v.espera === 1 ? 'Hay 1 persona esperando' : `Hay ${v.espera} personas esperando`} un equipo. Si ya terminaste, libéralo desde el QR.</span></div>` : ''}
+      ${v.espera > 0 && (v.estado === 'por_terminar' || v.estado === 'reservado') ? `<div class="espera">${ICONOS.reloj}<span>${v.espera === 1 ? 'Hay 1 persona esperando' : `Hay ${v.espera} personas esperando`} un equipo. Si ya terminaste, libéralo.</span></div>` : ''}
       ${cuerpo}
       <div class="pie"><span>Faro · LADME ${esc(paquete?.version ?? '')}${paquete?.clave_disponible && accion !== 'personal'
         ? ` · <button class="link-pie" data-personal title="Personal del laboratorio">${ICONOS.llave} Personal</button>` : ''}</span><span class="num" data-vivo="hora">--</span></div>
@@ -223,7 +283,7 @@ function dibujar() {
 function cambiar(nuevo) {
   clearTimeout(timers.crecer);
   if (nuevo === ui) return;
-  if (nuevo !== 'abierta') { accion = null; aviso = ''; confirmar = ''; fijaHasta = 0; }
+  if (nuevo !== 'abierta') { accion = null; aviso = ''; confirmar = ''; fijaHasta = 0; resultado = null; }
   ui = nuevo;
   dibujar();
 }
@@ -269,7 +329,7 @@ async function alRecibir(p) {
     clearTimeout(timers.reposo);
     setTimeout(programar, AVISO_CAMBIO - PAUSA_MINI);
   }
-  if (estadoAntes !== v.estado && accion !== 'personal') accion = null;
+  if (estadoAntes !== v.estado && accion !== 'personal' && accion !== 'hecho') accion = null;
   if (accion === 'llegada' && !v.llegada_pendiente) accion = null;
   insistiaAntes = !!v.insistir;
   estadoAntes = v.estado;
@@ -349,12 +409,31 @@ isla.addEventListener('click', async (e) => {
   if (d.cerrar !== undefined) { cambiar(urgente() ? 'compacta' : 'mini'); return; }
   const otroConfirmar = confirmar;
   confirmar = '';
-  if (d.volver !== undefined) { accion = null; aviso = ''; }
+  if (d.volver !== undefined) { accion = null; aviso = ''; resultado = null; }
   else if (d.accion) {
     accion = d.accion; aviso = '';
     if (accion === 'llegada') { await refrescarLlegada(); programar(); return; }
-    const r = ruta(accion, codigo);
-    if (!(r in qrCache)) qrCache[r] = await invocar('qr', { ruta: r });
+    if (ACCIONES[accion]?.qr) {
+      const r = ruta(accion, codigo);
+      if (!(r in qrCache)) qrCache[r] = await invocar('qr', { ruta: r });
+    }
+  } else if (d.hacer) {
+    // Extender, liberar, reportar o pedir ayuda: lo resuelve el servidor y se muestra el resultado.
+    haciendo = true;
+    dibujar();
+    try {
+      const texto = await invocar('accion_isla', {
+        accion: d.hacer,
+        categoria: d.categoria ?? null,
+        minutos: d.minutos ? Number(d.minutos) : null,
+      });
+      resultado = { ok: true, texto };
+    } catch (err) {
+      resultado = { ok: false, texto: String(err) };
+    }
+    haciendo = false;
+    accion = 'hecho';
+    fijaHasta = Date.now() + 8000;
   } else if (d.personal !== undefined) {
     accion = 'personal'; aviso = '';
     invocar('isla_foco');

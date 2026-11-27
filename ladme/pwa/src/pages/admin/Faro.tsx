@@ -78,6 +78,10 @@ export default function Faro() {
   }, [cargar])
 
   const equipos = useMemo(() => panel?.equipos ?? [], [panel])
+  // La versión más nueva entre los equipos: los que tienen una anterior aún no se actualizaron.
+  const ultimaVersion = useMemo(() => equipos.map((e) => e.version).filter((v): v is string => !!v).sort(compararVersion).pop() ?? null, [equipos])
+  const desactualizado = (v?: string | null) => !!v && !!ultimaVersion && compararVersion(v, ultimaVersion) < 0
+  const atrasados = equipos.filter((e) => e.vinculado && desactualizado(e.version))
   const cuentas = useMemo(() => ({
     todos: equipos.length,
     linea: equipos.filter((e) => e.vinculado && enLinea(e)).length,
@@ -254,6 +258,13 @@ export default function Faro() {
         </div>
       )}
 
+      {atrasados.length > 0 && (
+        <p className="small muted" style={{ margin: '0 0 var(--s3)' }}>
+          {atrasados.length === 1 ? '1 equipo tiene' : `${atrasados.length} equipos tienen`} una versión de Faro anterior a la {ultimaVersion}
+          {' '}({atrasados.map((e) => e.codigo).join(', ')}). Se actualizan solos cuando nadie los usa.
+        </p>
+      )}
+
       <div className="faro-tiles">
         {visibles.map((e) => {
           const c = conexion(e)
@@ -268,7 +279,8 @@ export default function Faro() {
               <span className="faro-tile__extra tiny">
                 {!e.vinculado ? 'Toca para vincular'
                   : [MODOS.find((m) => m.id === e.modo)?.texto, enLinea(e) && e.cpu_pct != null ? `CPU ${e.cpu_pct}%` : null,
-                     e.bloqueado && enLinea(e) ? 'bloqueado' : null, e.desbloqueo_hasta ? `libre ${hora(e.desbloqueo_hasta)}` : null]
+                     e.bloqueado && enLinea(e) ? 'bloqueado' : null, e.desbloqueo_hasta ? `libre ${hora(e.desbloqueo_hasta)}` : null,
+                     desactualizado(e.version) ? `Faro ${e.version}` : null]
                      .filter(Boolean).join(' · ')}
               </span>
               {e.usos_sin_reserva_7d > 0 && <span className="faro-tile__alerta" title="Usos sin reserva en 7 días">{e.usos_sin_reserva_7d}</span>}
@@ -291,7 +303,7 @@ export default function Faro() {
               </div>
               <p className="small muted" style={{ margin: 0 }}>
                 {e.vinculado
-                  ? [e.host, e.so, e.version && `Faro ${e.version}`].filter(Boolean).join(' · ') || 'Sin datos del equipo todavía'
+                  ? [e.host, e.so, e.version && `Faro ${e.version}${desactualizado(e.version) ? ` (hay una más nueva: ${ultimaVersion})` : ''}`].filter(Boolean).join(' · ') || 'Sin datos del equipo todavía'
                   : [e.categoria, e.nombre].filter(Boolean).join(' · ')}
               </p>
               {e.usos_sin_reserva_7d > 0 && (
@@ -563,4 +575,15 @@ function DetalleEquipo({ e, admin, ocupado, orden, canal }: {
       </div>
     </div>
   )
+}
+
+/** Compara versiones «0.5.10» y «0.6.0» por número, no como texto. */
+function compararVersion(a: string, b: string): number {
+  const x = a.split('.').map((n) => parseInt(n, 10) || 0)
+  const y = b.split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
 }

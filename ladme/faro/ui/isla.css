@@ -143,3 +143,27 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
 /* Código de 6 dígitos para confirmar la asistencia desde el celular. */
 .codigo-llegada { display: flex; align-items: center; gap: 4px; margin: 2px 0 10px; font-size: 34px; font-weight: 750; letter-spacing: 0.08em; color: var(--texto); user-select: none; -webkit-user-select: none; }
 .codigo-llegada span { width: 8px; }
+
+/* Faro 0.6: acciones en la isla, sin el celular */
+.panel-accion { width: 380px; max-width: 100%; }
+.panel-accion p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--texto-2); }
+.panel-accion p strong { display: block; margin-bottom: 2px; font-size: 14px; color: var(--texto); }
+.panel-accion .acciones { margin-top: 12px; }
+.panel-accion .categorias .boton { font-size: 12.5px; padding-inline: 12px; }
+.panel-accion.ok p strong { color: #6ee7b7; }
+.panel-accion.error p strong { color: #fca5a5; }
+
+.salida { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--borde);
+          font-size: 12.5px; line-height: 1.45; color: var(--texto-2); }
+.salida strong { color: var(--texto); }
+.salida ul { margin: 4px 0 0; padding-left: 18px; }
+
+.nfc { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 10px 12px; border-radius: 14px;
+       background: rgba(139, 92, 246, 0.10); border: 1px solid rgba(139, 92, 246, 0.30); }
+.nfc p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--texto-2); }
+.nfc p strong { display: block; color: var(--texto); }
+.dibujo-nfc { flex: none; width: 72px; height: 48px; color: var(--texto); }
+
+.aviso-faro { display: flex; gap: 9px; align-items: flex-start; margin-top: 10px; padding: 9px 12px; border-radius: 14px; font-size: 12.5px;
+              line-height: 1.45; background: rgba(251, 191, 36, 0.10); border: 1px solid rgba(251, 191, 36, 0.35); color: var(--texto); }
+.aviso-faro svg { flex: none; width: 15px; height: 15px; margin-top: 1px; color: #fcd34d; }

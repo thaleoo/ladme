@@ -60,3 +60,5 @@ main { display: grid; place-items: center; padding: 0 32px; }
 .anuncio { display: flex; gap: 10px; align-items: flex-start; max-width: 520px; margin-top: 18px; padding: 12px 14px; border-radius: 16px;
   background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.35); font-size: 14.5px; line-height: 1.5; text-align: left; }
 .anuncio svg { flex: none; width: 18px; height: 18px; margin-top: 2px; color: #c4b5fd; }
+.nfc-bloqueo { display: flex; align-items: center; gap: 10px; margin-top: 12px; text-align: left; font-size: 13px; line-height: 1.4; color: var(--texto-2); }
+.nfc-bloqueo .dibujo-nfc { flex: none; width: 64px; height: 42px; color: var(--texto); }

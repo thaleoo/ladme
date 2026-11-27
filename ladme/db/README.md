@@ -332,3 +332,14 @@ Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha 
 - Al personal y a los procesos del sistema (importaciones, tareas, Faro) no se les rechaza nada: solo se limpia. El nombre que llega de Google al crear la cuenta tampoco se rechaza.
 - **Límites nuevos**: como máximo 5 solicitudes de software en curso y 5 por día por persona; como máximo 5 solicitudes de clase pendientes por docente.
 - Faro 0.5.7 y la PWA cortan las palabras largas sin espacios para que no se salgan de su caja; en Faro el mensaje ocupa como máximo tres líneas.
+
+## Migración 0025 — Acciones en la isla de Faro (Faro 0.6)
+
+`migrations/0025_faro_acciones.sql`, después de 0024.
+
+- `faro_accion(token, acción, datos)`: desde la isla se **extiende** (+30 min o +1 h), se **libera**, se **reporta una falla** y se **pide ayuda**, sin el celular.
+- Extender y liberar llaman a `extender_reserva` y `liberar_reserva` actuando como la persona de la reserva (dentro de la misma transacción): valen exactamente las mismas reglas que en la app. Solo funcionan si la **llegada se confirmó** en ese equipo, para que quien se siente en un equipo reservado por otra persona no pueda liberarlo. La persona recibe un aviso (`faro_extendida`, `faro_liberada`).
+- Reportar: `reportes.usuario_id` admite null (reporte hecho con el equipo libre) y `reportes.origen` dice si vino de la app o de Faro. El diagnóstico que envía Faro queda en `reportes.diagnostico -> 'faro'`. Como máximo 3 reportes por equipo y por hora desde Faro.
+- Pedir ayuda: un aviso al chat del personal, como máximo uno por equipo cada 10 minutos.
+- Freno general: 20 acciones por equipo y por hora. Cada acción queda en `agente_eventos` (tipo `accion`).
+- `faro_estado` devuelve `nfc` (política `faro_nfc`, encendida por defecto): Faro invita a acercar el celular a la tarjeta de la base del monitor.
