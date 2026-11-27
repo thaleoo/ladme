@@ -2,6 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // El servicio del sistema (Linux, como root): el núcleo sin ventanas, para todas las cuentas.
+    #[cfg(unix)]
+    if std::env::args().nth(1).as_deref() == Some("--servicio") {
+        faro_lib::correr_servicio();
+        return;
+    }
     // `faro doctor`, `faro logs`…: la línea de comandos responde y termina, sin abrir ventanas.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| faro_lib::es_comando_cli(a)) {

@@ -17,6 +17,9 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Where the system service keeps its state and log (Linux, readable only by root).
+const SERVICIO_CARPETA: &str = "/var/lib/ladme-faro";
+
 /// First arguments that mean «run the command line» instead of opening Faro.
 pub const COMANDOS: &[&str] = &[
     "status", "doctor", "logs", "inventory", "version", "link", "update", "unlock", "unlink", "start", "stop", "restart", "help",
@@ -190,7 +193,31 @@ pub fn responder(c: &Path, id: &str, ok: bool, texto: &str) {
     let _ = escribir_privado(&archivo_respuesta(c), &serde_json::to_vec(&r).unwrap_or_default());
 }
 
+/// Linux con el servicio del sistema instalado: el estado vive en el servicio y se le pregunta por su
+/// socket (sin secretos); las órdenes con clave también van por ahí.
+fn modo_servicio() -> bool {
+    #[cfg(target_os = "linux")]
+    return crate::servicio::instalado();
+    #[allow(unreachable_code)]
+    false
+}
+
+/// Configuración y estado de Faro: del servicio, si está instalado, o de la carpeta de esta cuenta.
+fn fuente(c: &Path) -> (Config, Copia) {
+    #[cfg(target_os = "linux")]
+    if modo_servicio() {
+        if let Ok(v) = crate::servicio::preguntar(json!({ "op": "resumen" }), Duration::from_secs(5)) {
+            return (serde_json::from_value(v["cfg"].clone()).unwrap_or_default(), serde_json::from_value(v["copia"].clone()).unwrap_or_default());
+        }
+    }
+    (config::cargar(c), config::cargar_copia(c))
+}
+
 fn faro_abierto(c: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    if modo_servicio() {
+        return crate::servicio::vivo();
+    }
     std::fs::read_to_string(c.join("faro.pid"))
         .ok()
         .and_then(|t| t.trim().parse::<u32>().ok())
@@ -214,8 +241,14 @@ fn en_ingles(t: &str) -> String {
 
 fn enviar_orden(c: &Path, orden: &str, clave: Option<String>, codigo: Option<String>, espera: Duration) -> Result<String, String> {
     let id = format!("{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
-    let _ = std::fs::remove_file(archivo_respuesta(c));
     let o = OrdenCli { id: id.clone(), orden: orden.into(), clave, codigo };
+    #[cfg(target_os = "linux")]
+    if modo_servicio() {
+        return crate::servicio::preguntar(json!({ "op": "orden", "orden": o }), espera)
+            .map(|v| en_ingles(v.as_str().unwrap_or_default()))
+            .map_err(|e| en_ingles(&e));
+    }
+    let _ = std::fs::remove_file(archivo_respuesta(c));
     escribir_privado(&archivo_orden(c), &serde_json::to_vec(&o).unwrap_or_default()).map_err(|e| format!("Could not write the order: {e}"))?;
     let hasta = std::time::Instant::now() + espera;
     while std::time::Instant::now() < hasta {
@@ -293,7 +326,7 @@ pub fn ejecutar(args: &[String]) -> i32 {
         }
     };
     let s = Salida { json: cli.json, color: !cli.json && !cli.no_color && std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal() };
-    let c = carpeta();
+    let c = if modo_servicio() { PathBuf::from(SERVICIO_CARPETA) } else { carpeta() };
     match cli.command {
         Comando::Status => estado(&s, &c),
         Comando::Doctor { fix, verbose } => {
@@ -325,8 +358,7 @@ pub fn ejecutar(args: &[String]) -> i32 {
 // ------------------------------------------------------------------ status
 
 fn estado(s: &Salida, c: &Path) -> i32 {
-    let cfg = config::cargar(c);
-    let copia = config::cargar_copia(c);
+    let (cfg, copia) = fuente(c);
     let abierto = faro_abierto(c);
     let r = copia.remoto.as_ref();
     let equipo = cfg.equipo.clone().or_else(|| r.map(|r| r.equipo.codigo.clone()));
@@ -458,7 +490,23 @@ pub fn servicio_activo() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(target_os = "linux")]
+fn usuario_activo(unidad: &str) -> bool {
+    std::process::Command::new("systemctl")
+        .args(["--user", "is-active", unidad])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
+        .unwrap_or(false)
+}
+
 fn abrir(c: &Path) {
+    #[cfg(target_os = "linux")]
+    if modo_servicio() {
+        // Pide la contraseña de administrador (polkit) si hace falta; luego la interfaz de esta sesión.
+        let _ = std::process::Command::new("systemctl").args(["start", "ladme-faro-servicio.service"]).status();
+        let _ = std::process::Command::new("systemctl").args(["--user", "start", "ladme-faro.service"]).status();
+        return;
+    }
     crate::vigia::quitar_pausa(c);
     #[cfg(target_os = "linux")]
     if servicio_instalado() {
@@ -492,7 +540,12 @@ fn reiniciar(c: &Path) -> i32 {
         eprintln!("{e}");
         return 1;
     }
-    if esperar(|| faro_abierto(c) && leer_pid(c) != antes, 20) {
+    // El servicio no deja leer su pid: se espera a que se vaya y vuelva.
+    let servicio = modo_servicio();
+    if servicio {
+        esperar(|| !faro_abierto(c), 10);
+    }
+    if esperar(|| faro_abierto(c) && (servicio || leer_pid(c) != antes), 20) {
         println!("Faro restarted.");
         0
     } else {
@@ -541,7 +594,7 @@ fn arreglar(c: &Path) {
         hecho = true;
         abrir(c);
         println!("→ Faro was not running: {}", if esperar(|| faro_abierto(c), 15) { "started" } else { "could not start it" });
-    } else if config::cargar_copia(c).recibido_en.is_some_and(|d| (chrono::Utc::now() - d).num_seconds() > 300) {
+    } else if fuente(c).1.recibido_en.is_some_and(|d| (chrono::Utc::now() - d).num_seconds() > 300) {
         hecho = true;
         println!("→ Faro was not talking to the server: {}", if reiniciar(c) == 0 { "restarted" } else { "restart failed" });
     }
@@ -552,8 +605,7 @@ fn arreglar(c: &Path) {
 }
 
 fn doctor(s: &Salida, c: &Path, verbose: bool) -> i32 {
-    let cfg = config::cargar(c);
-    let copia = config::cargar_copia(c);
+    let (cfg, copia) = fuente(c);
     let mut v: Vec<Chequeo> = Vec::new();
     let sistema = crate::inventario::nombre_sistema().unwrap_or_default();
 
@@ -606,9 +658,18 @@ fn doctor(s: &Salida, c: &Path, verbose: bool) -> i32 {
         }
     }
 
+    // Service mode: the service keeps its own folder; what matters is that this session's interface runs.
+    #[cfg(target_os = "linux")]
+    if modo_servicio() {
+        if usuario_activo("ladme-faro.service") {
+            v.push(chequeo(Marca::Ok, "The Faro interface is running in this session", None));
+        } else {
+            v.push(chequeo(Marca::Aviso, "The Faro interface is not running in this session", Some("systemctl --user start ladme-faro.service   (the service also reopens it)")));
+        }
+    }
     // Faro folder.
     let prueba = c.join(".prueba-doctor");
-    match std::fs::create_dir_all(c).and_then(|_| std::fs::write(&prueba, b"ok")) {
+    match if modo_servicio() { Ok(()) } else { std::fs::create_dir_all(c).and_then(|_| std::fs::write(&prueba, b"ok")) } {
         Ok(_) => {
             let _ = std::fs::remove_file(&prueba);
             v.push(chequeo(Marca::Ok, "Faro can save its configuration", None));
@@ -678,7 +739,6 @@ fn doctor(s: &Salida, c: &Path, verbose: bool) -> i32 {
             }
         }
         if verbose {
-            let copia = config::cargar_copia(c);
             println!();
             println!("{}", s.tenue("Details"));
             println!("  Folder       {}", c.display());
@@ -702,6 +762,14 @@ fn doctor(s: &Salida, c: &Path, verbose: bool) -> i32 {
 
 #[cfg(target_os = "linux")]
 fn arranque_automatico() -> Option<String> {
+    if modo_servicio() {
+        let habilitado = std::process::Command::new("systemctl")
+            .args(["is-enabled", "ladme-faro-servicio.service"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "enabled")
+            .unwrap_or(false);
+        return habilitado.then(|| "system service".into());
+    }
     let enabled = std::process::Command::new("systemctl")
         .args(["--user", "is-enabled", "ladme-faro.service"])
         .output()
@@ -765,6 +833,10 @@ fn imprimir_linea(s: &Salida, l: &registro::Linea) {
 
 fn logs(s: &Salida, c: &Path, n: usize, seguir: bool, desde: Option<chrono::Duration>, minimo: Nivel) -> i32 {
     let desde = desde.map(|d| (chrono::Local::now() - d).fixed_offset());
+    if modo_servicio() && std::fs::File::open(registro::ruta(c)).is_err() {
+        eprintln!("The Faro service log needs admin rights: sudo /usr/local/bin/faro logs");
+        return 1;
+    }
     let lineas = registro::leer(c, n, desde, minimo);
     if lineas.is_empty() && !seguir && !s.json {
         println!("{}", s.tenue(&format!("The log is empty ({}).", registro::ruta(c).display())));
@@ -822,7 +894,7 @@ fn inventario(s: &Salida) -> i32 {
 }
 
 fn version(s: &Salida, c: &Path) -> i32 {
-    let copia: Copia = config::cargar_copia(c);
+    let copia: Copia = fuente(c).1;
     let canal = match copia.remoto.as_ref().and_then(|r| r.canal.as_deref()) {
         Some("pruebas") => "testing",
         _ => "stable",
@@ -846,7 +918,7 @@ fn vincular(c: &Path, codigo: &str) -> i32 {
         eprintln!("The link code has 8 characters (for example ABCD-EFGH).");
         return 2;
     }
-    let cfg: Config = config::cargar(c);
+    let cfg: Config = fuente(c).0;
     if let Some(e) = cfg.equipo.as_ref().filter(|_| cfg.token.is_some()) {
         eprintln!("This computer is already linked as {e}. To link it again, first run: faro unlink");
         return 1;
@@ -862,13 +934,17 @@ fn vincular(c: &Path, codigo: &str) -> i32 {
         // Faro tries to link on its next loop (like with the code the installer leaves).
         for _ in 0..90 {
             std::thread::sleep(Duration::from_millis(500));
-            let cfg = config::cargar(c);
+            let cfg = fuente(c).0;
             if let (Some(_), Some(e)) = (cfg.token, cfg.equipo) {
                 println!("Linked as {e}.");
                 return 0;
             }
         }
         eprintln!("Faro has not linked yet. Check «faro logs», or whether the code expired (codes last 30 min).");
+        return 1;
+    }
+    if modo_servicio() {
+        eprintln!("The Faro service is not running. Start it with: sudo systemctl start ladme-faro-servicio");
         return 1;
     }
     // Faro closed: the code is saved and used when it opens.

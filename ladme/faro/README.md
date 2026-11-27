@@ -212,12 +212,20 @@ actualizaciones para los Faro ya instalados, y habría que reinstalarlos.
      ```
      Instala en silencio solo para esa cuenta, sin permisos de administrador, y deja el código para que
      Faro se vincule solo. Faro queda en el inicio de sesión de esa cuenta.
-   - **Linux con AppImage** (recomendado: se actualiza solo):
+   - **Linux con AppImage, como servicio del sistema** (recomendado: sirve para todas las cuentas, nadie
+     sin la contraseña de administrador puede cerrarlo y se actualiza solo):
      ```bash
-     bash instalar-linux.sh ABCD-EFGH
+     sudo bash instalar-linux.sh ABCD-EFGH
      ```
-     Sin sudo. Crea el servicio `ladme-faro` de la cuenta, que lo abre al iniciar sesión y lo reabre si
-     lo cierran.
+     Deja el programa en `/opt/ladme-faro`, el servicio `ladme-faro-servicio` (el núcleo, como root: vínculo,
+     estado y claves en `/var/lib/ladme-faro`) y la interfaz `ladme-faro` en cada sesión, que el servicio
+     vuelve a abrir si alguien la cierra. Si el equipo ya tenía Faro por cuenta, traslada el vínculo y no
+     hace falta código. Para actualizar a mano o reparar, se vuelve a ejecutar el mismo comando. Para
+     retirarlo: `sudo bash desinstalar-linux.sh` (con `--todo` borra también el vínculo). Los registros
+     del servicio se leen con `sudo /usr/local/bin/faro logs`.
+   - **Linux con AppImage, solo para una cuenta** (sin sudo): `bash instalar-linux.sh ABCD-EFGH`. Crea el
+     servicio `ladme-faro` de la cuenta, que lo abre al iniciar sesión y lo reabre si lo cierran, pero la
+     cuenta puede detenerlo.
    - **Linux con paquete** (lo hace TI; se actualiza a mano):
      - Ubuntu/Debian: `sudo apt install ./faro-*.deb`
      - Fedora: `sudo dnf install ./faro-*.rpm`
@@ -233,9 +241,10 @@ arrancar. En Windows es `C:\ProgramData\LADME\faro.json`; en Linux, `/etc/ladme/
 { "supabase_url": "https://xxxx.supabase.co", "supabase_key": "sb_publishable_…", "pwa_url": "https://…" }
 ```
 
-El token del PC se guarda en la carpeta de la cuenta, nunca en ese archivo:
+El token del PC se guarda en la carpeta de Faro, nunca en ese archivo:
 - Windows: `%APPDATA%\co.edu.unal.ladme.faro\faro.json`
-- Linux: `~/.config/co.edu.unal.ladme.faro/faro.json`
+- Linux con el servicio del sistema: `/var/lib/ladme-faro/faro.json` (solo root)
+- Linux por cuenta: `~/.config/co.edu.unal.ladme.faro/faro.json`
 
 En la base de datos solo queda su huella.
 
@@ -245,9 +254,10 @@ En la base de datos solo queda su huella.
   terminar los dos procesos a la vez (por ejemplo, con «Finalizar árbol de procesos»).
   - Faro impide Alt+F4 sobre el bloqueo y registra el intento.
   - Si el proceso muere, el panel muestra el equipo «sin señal».
-  - Para impedirlo de verdad hace falta una fase 3b con TI: un servicio de Windows (o de systemd en
-    Linux) que corra como sistema y vuelva a abrir Faro si lo cierran, o una directiva que bloquee el
-    Administrador de tareas para esa cuenta.
+  - En Linux, con el servicio del sistema (Faro 0.8), el núcleo corre como root: una cuenta normal no
+    puede detenerlo, y si cierra la interfaz el servicio la vuelve a abrir en unos segundos y lo anota.
+  - En Windows falta el equivalente (un servicio de Windows que corra como sistema), o una directiva
+    que bloquee el Administrador de tareas para esa cuenta.
 - **Linux con Wayland.** Fedora y Ubuntu 22.04+ usan Wayland por defecto, y en Wayland una app no puede
   fijar su ventana arriba ni quedarse siempre encima. Por eso Faro arranca en modo XWayland y lee la
   inactividad desde GNOME. Con apps nativas de Wayland, la detección de pantalla completa no siempre

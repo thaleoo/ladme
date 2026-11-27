@@ -416,6 +416,7 @@ function alDentro(d) {
 
 // ------------------------------------------------------------------ datos de Faro
 async function alRecibir(p) {
+  if (!p) return; // con el servicio del sistema, el primer paquete llega por el evento
   paquete = p;
   fijarDesfase(p.desfase_ms);
   const v = vista();

@@ -16,9 +16,19 @@ mod inventario;
 mod isla;
 mod ordenes;
 mod registro;
+#[cfg(unix)]
+mod remoto;
+#[cfg(unix)]
+mod servicio;
 mod vigia;
 
 pub use vigia::ARG as ARG_VIGIA;
+
+/// `ladme-faro --servicio`: lo arranca systemd como root (ver servicio.rs).
+#[cfg(unix)]
+pub fn correr_servicio() {
+    servicio::correr()
+}
 
 /// ¿El primer argumento es un comando de la línea de comandos (`faro doctor`…)?
 pub fn es_comando_cli(a: &str) -> bool {
@@ -39,7 +49,7 @@ use api::{Api, Fallo};
 use chrono::{Duration as Dur, Utc};
 use config::{Config, Copia};
 use decision::{Entrada, Pantalla, Vista};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -75,9 +85,6 @@ struct Nucleo {
     acciones: Vec<(String, Value)>,
 }
 
-/// Despierta al ciclo de actualizaciones cuando el panel ordena «Actualizar ahora».
-struct ActualizarYa(Arc<tokio::sync::Notify>);
-
 type Compartido = Arc<Mutex<Nucleo>>;
 
 #[derive(Serialize, Clone)]
@@ -95,6 +102,37 @@ struct Paquete {
     nfc: bool,
     /// Segundos sin hablar con el servidor (solo si se perdió la conexión).
     sin_red_seg: Option<i64>,
+}
+
+/// Lo que el núcleo de Faro (el ciclo con el servidor) le pide a la interfaz. Con Faro por cuenta, el
+/// núcleo y la interfaz viven en el mismo proceso; con el servicio del sistema, el núcleo vive en el
+/// servicio y esto viaja por el socket a la interfaz de cada sesión.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(tag = "senal", content = "datos", rename_all = "snake_case")]
+pub(crate) enum Senal {
+    Paquete(Value),
+    Vinculado,
+    Desvinculado,
+    Reiniciar,
+    Detener,
+    Retirar,
+}
+
+pub(crate) type Salida = Arc<dyn Fn(Senal) + Send + Sync>;
+
+/// Contexto del núcleo: a quién avisar y cómo despertar el ciclo de actualizaciones.
+#[derive(Clone)]
+pub(crate) struct Ctx {
+    salida: Salida,
+    actualizar: Arc<tokio::sync::Notify>,
+    /// El núcleo corre en el servicio del sistema (no en la cuenta).
+    servicio: bool,
+}
+
+impl Ctx {
+    fn avisar(&self, s: Senal) {
+        (self.salida)(s)
+    }
 }
 
 /// systemd define INVOCATION_ID en los servicios que lanza.
@@ -212,28 +250,14 @@ fn quitar_bloqueo(app: &AppHandle) {
 }
 
 /// Lleva la vista a las ventanas: crea o quita el bloqueo y avisa a la isla.
-fn aplicar(app: &AppHandle, n: &mut Nucleo, mut nueva: Vista) {
+fn aplicar(ctx: &Ctx, n: &mut Nucleo, mut nueva: Vista) {
     if let Some((texto, hasta)) = &n.aviso_local {
         if Instant::now() < *hasta {
             nueva.anuncio = Some(texto.clone());
         }
     }
     let antes = n.vista.as_ref().map(|v| v.pantalla.clone());
-    let cubre = nueva.pantalla != Pantalla::Ninguna;
     if antes.as_ref() != Some(&nueva.pantalla) {
-        if cubre {
-            mostrar_bloqueo(app);
-            if let Some(i) = app.get_webview_window(ISLA) {
-                let _ = i.hide();
-            }
-        } else {
-            quitar_bloqueo(app);
-            if n.config.token.is_some() {
-                if let Some(i) = app.get_webview_window(ISLA) {
-                    let _ = i.show();
-                }
-            }
-        }
         match (antes, &nueva.pantalla) {
             (_, Pantalla::Bloqueo) => n.pendientes.push(("bloqueo".into(), json!({ "estado": format!("{:?}", nueva.estado) }))),
             (_, Pantalla::Suspension) => registro::info("Pantalla suspendida"),
@@ -246,14 +270,98 @@ fn aplicar(app: &AppHandle, n: &mut Nucleo, mut nueva: Vista) {
     let cambio = n.vista.as_ref() != Some(&nueva);
     n.vista = Some(nueva);
     if cambio {
-        let _ = app.emit("faro://vista", paquete(n));
+        ctx.avisar(Senal::Paquete(serde_json::to_value(paquete(n)).unwrap_or(Value::Null)));
     }
-    // Que la pantalla de bloqueo no quede detrás de otra ventana.
-    if cubre {
-        if let Some(w) = ventanas_bloqueo(app).into_iter().find(|w| w.label() == format!("{PREFIJO_BLOQUEO}0")) {
-            if !w.is_focused().unwrap_or(true) {
-                let _ = w.set_always_on_top(true);
-                let _ = w.set_focus();
+}
+
+/// Estado de la interfaz: la última pantalla mostrada y el último paquete (para quien abre después).
+#[derive(Default)]
+pub(crate) struct Interfaz {
+    pantalla: Mutex<Option<String>>,
+    ultimo: Mutex<Option<Value>>,
+}
+
+fn cubre(pantalla: Option<&str>) -> bool {
+    pantalla.is_some_and(|p| p != "ninguna")
+}
+
+/// La interfaz atiende lo que pide el núcleo: muestra u oculta la isla y las pantallas de bloqueo.
+pub(crate) fn atender(app: &AppHandle, s: Senal) {
+    match s {
+        Senal::Paquete(p) => {
+            let estado = app.state::<Interfaz>();
+            let nueva = p["vista"]["pantalla"].as_str().map(String::from);
+            let vinculado = p["vinculado"].as_bool().unwrap_or(false);
+            let antes = estado.pantalla.lock().unwrap().replace(nueva.clone().unwrap_or_else(|| "ninguna".into()));
+            if antes.as_deref() != Some(nueva.as_deref().unwrap_or("ninguna")) {
+                if cubre(nueva.as_deref()) {
+                    mostrar_bloqueo(app);
+                    if let Some(i) = app.get_webview_window(ISLA) {
+                        let _ = i.hide();
+                    }
+                } else {
+                    quitar_bloqueo(app);
+                    if let Some(i) = app.get_webview_window(ISLA) {
+                        let _ = if vinculado { i.show() } else { i.hide() };
+                    }
+                }
+            }
+            *estado.ultimo.lock().unwrap() = Some(p.clone());
+            let _ = app.emit("faro://vista", p);
+        }
+        Senal::Vinculado => {
+            if let Some(i) = app.get_webview_window(ISLA) {
+                let _ = i.show();
+            }
+            if let Some(w) = app.get_webview_window(VINCULAR) {
+                let _ = w.destroy();
+            }
+        }
+        Senal::Desvinculado => {
+            quitar_bloqueo(app);
+            *app.state::<Interfaz>().pantalla.lock().unwrap() = None;
+            if let Some(i) = app.get_webview_window(ISLA) {
+                let _ = i.hide();
+            }
+            abrir_vincular(app);
+        }
+        Senal::Reiniciar => app.restart(),
+        Senal::Detener => {
+            // Con el servicio del sistema, la interfaz se queda esperando a que vuelva.
+            #[cfg(unix)]
+            if app.try_state::<remoto::Remoto>().is_some() {
+                return;
+            }
+            app.exit(0)
+        }
+        Senal::Retirar => {
+            let carpeta = app.path().app_config_dir().unwrap_or_default();
+            let _ = ordenes::retirar(app, &carpeta);
+        }
+    }
+}
+
+/// Sin servicio al que conectarse (modo servicio, conexión perdida): no se muestra nada.
+#[cfg(unix)]
+pub(crate) fn sin_nucleo(app: &AppHandle) {
+    quitar_bloqueo(app);
+    *app.state::<Interfaz>().pantalla.lock().unwrap() = None;
+    if let Some(i) = app.get_webview_window(ISLA) {
+        let _ = i.hide();
+    }
+}
+
+/// Que la pantalla de bloqueo no quede detrás de otra ventana (cada segundo).
+async fn mantener_bloqueo_encima(app: AppHandle) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let tapa = cubre(app.state::<Interfaz>().pantalla.lock().unwrap().as_deref());
+        if tapa {
+            if let Some(w) = ventanas_bloqueo(&app).into_iter().find(|w| w.label() == format!("{PREFIJO_BLOQUEO}0")) {
+                if !w.is_focused().unwrap_or(true) {
+                    let _ = w.set_always_on_top(true);
+                    let _ = w.set_focus();
+                }
             }
         }
     }
@@ -261,7 +369,7 @@ fn aplicar(app: &AppHandle, n: &mut Nucleo, mut nueva: Vista) {
 
 // ------------------------------------------------------------------ ciclo
 
-async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Option<u64>, cpu: u32, programas: Vec<String>) {
+async fn latir(ctx: &Ctx, api: &Api, compartido: &Compartido, inactivo: Option<u64>, cpu: u32, programas: Vec<String>) {
     let (cfg, token, bloqueado, inventario) = {
         let n = compartido.lock().unwrap();
         (n.config.clone(), n.config.token.clone(), n.copia.bloqueado, n.inventario_pendiente.clone())
@@ -308,13 +416,13 @@ async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Op
                 }
             }
             for c in comandos {
-                ejecutar_orden(app, api, compartido, &cfg, &token, c).await;
+                ejecutar_orden(ctx, api, compartido, &cfg, &token, c).await;
             }
         }
         Err(Fallo::NoVinculado) => {
             registro::aviso("El servidor ya no reconoce este equipo: queda desvinculado");
             let mut n = compartido.lock().unwrap();
-            quedar_desvinculado(app, &mut n);
+            quedar_desvinculado(ctx, &mut n);
         }
         Err(Fallo::Red(e)) => registro::aviso(format!("Sin conexión con el servidor ({e})")),
         Err(Fallo::Mensaje(m)) => registro::error(format!("El servidor respondió: {m}")),
@@ -322,29 +430,24 @@ async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Op
 }
 
 /// Quita el vínculo de este equipo y deja la ventana para vincularlo de nuevo.
-fn quedar_desvinculado(app: &AppHandle, n: &mut Nucleo) {
+fn quedar_desvinculado(ctx: &Ctx, n: &mut Nucleo) {
     n.config.token = None;
     n.config.equipo = None;
     n.copia = Copia::default();
     n.vista = None;
     let _ = config::guardar_vinculo(&n.carpeta, None, None);
     config::guardar_copia(&n.carpeta, &n.copia);
-    quitar_bloqueo(app);
-    if let Some(i) = app.get_webview_window(ISLA) {
-        let _ = i.hide();
-    }
-    abrir_vincular(app);
+    ctx.avisar(Senal::Desvinculado);
+    ctx.avisar(Senal::Paquete(serde_json::to_value(paquete(n)).unwrap_or(Value::Null)));
 }
 
 /// Ejecuta una orden del panel e informa el resultado.
-async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg: &Config, token: &str, c: decision::Comando) {
+async fn ejecutar_orden(ctx: &Ctx, api: &Api, compartido: &Compartido, cfg: &Config, token: &str, c: decision::Comando) {
     let carpeta = compartido.lock().unwrap().carpeta.clone();
     let resultado: Result<String, String> = match c.tipo.as_str() {
         "reiniciar" => Ok("reiniciando".into()),
         "actualizar" => {
-            if let Some(a) = app.try_state::<ActualizarYa>() {
-                a.0.notify_one();
-            }
+            ctx.actualizar.notify_one();
             Ok("buscando actualización".into())
         }
         // Nunca se apaga un equipo con un proceso compartido en curso (el servidor también lo evita).
@@ -362,6 +465,7 @@ async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg
             let macs: Vec<String> = c.datos["macs"].as_array().map(|l| l.iter().filter_map(|m| m.as_str().map(String::from)).collect()).unwrap_or_default();
             ordenes::despertar(&macs).map(|n| format!("paquete enviado a {n} equipos"))
         }
+        "desinstalar" if ctx.servicio => Err("con el servicio del sistema lo retira TI: sudo bash desinstalar-linux.sh".into()),
         "desinstalar" => ordenes::se_puede_retirar().map(|_| "retirándose".into()),
         "inventario" => {
             let mut n = compartido.lock().unwrap();
@@ -387,16 +491,16 @@ async fn ejecutar_orden(app: &AppHandle, api: &Api, compartido: &Compartido, cfg
     match c.tipo.as_str() {
         "reiniciar" => {
             vigia::pausar(&carpeta, 30);
-            app.restart();
+            ctx.avisar(Senal::Reiniciar);
         }
-        "desinstalar" => {
-            let _ = ordenes::retirar(app, &carpeta);
-        }
+        "desinstalar" => ctx.avisar(Senal::Retirar),
         _ => {}
     }
 }
 
-async fn ciclo(app: AppHandle, compartido: Compartido) {
+pub(crate) type Inactividad = Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+
+async fn ciclo(ctx: Ctx, compartido: Compartido, inactividad: Inactividad) {
     let api = Api::new();
     let mut medidor = inventario::Medidor::new();
     let mut lector = inventario::Programas::new();
@@ -408,20 +512,21 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
     let mut ultima_revision_vigia = Instant::now();
     let mut estaba_en_linea: Option<bool> = None;
     loop {
-        if revisar_orden_cli(&app, &compartido) {
+        if !ctx.servicio && revisar_orden_cli(&ctx, &compartido) {
             ultimo_intento_vinculo = None; // `faro link`: se intenta ya
         }
-        let inactivo = inactividad::segundos();
-        let (vinculado, carpeta) = {
+        let inactivo = inactividad();
+        let (vinculado, carpeta, forzado) = {
             let n = compartido.lock().unwrap();
-            (n.config.token.is_some(), n.carpeta.clone())
+            (n.config.token.is_some(), n.carpeta.clone(), n.forzar)
         };
-        if !vinculado && ultimo_intento_vinculo.map(|t| t.elapsed() > Duration::from_secs(30)).unwrap_or(true) {
+        // `faro link` por el socket del servicio deja `forzar`: se intenta ya.
+        if !vinculado && (forzado || ultimo_intento_vinculo.map(|t| t.elapsed() > Duration::from_secs(30)).unwrap_or(true)) {
             ultimo_intento_vinculo = Some(Instant::now());
-            vincular_solo(&app, &api, &compartido).await;
+            vincular_solo(&ctx, &api, &compartido).await;
         }
         // El vigía solo acompaña a un Faro vinculado y en la versión instalada.
-        if vinculado && cfg!(not(debug_assertions)) && !gestionado_por_systemd() && ultima_revision_vigia.elapsed() >= Duration::from_secs(3) {
+        if vinculado && !ctx.servicio && cfg!(not(debug_assertions)) && !gestionado_por_systemd() && ultima_revision_vigia.elapsed() >= Duration::from_secs(3) {
             ultima_revision_vigia = Instant::now();
             vigia::asegurar(&carpeta);
         }
@@ -436,7 +541,7 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
         if vinculado && (pedido || Instant::now() >= proximo_inventario) {
             proximo_inventario = Instant::now() + Duration::from_secs(INVENTARIO_CADA_SEG);
             let c = compartido.clone();
-            tauri::async_runtime::spawn_blocking(move || {
+            tokio::task::spawn_blocking(move || {
                 let inv = inventario::recolectar();
                 c.lock().unwrap().inventario_pendiente = Some(inv);
             });
@@ -445,7 +550,7 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
             ultimo_latido = Some(Instant::now());
             let cpu = medidor.cpu_pct();
             let programas = lector.activos();
-            latir(&app, &api, &compartido, inactivo, cpu, programas).await;
+            latir(&ctx, &api, &compartido, inactivo, cpu, programas).await;
         }
         {
             let mut n = compartido.lock().unwrap();
@@ -467,7 +572,7 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
                     inactivo_seg: inactivo,
                     memoria: &n.copia.memoria,
                 });
-                aplicar(&app, &mut n, vista);
+                aplicar(&ctx, &mut n, vista);
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -479,7 +584,7 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
 /// Busca versiones nuevas en los Releases de GitHub (firmadas) y las instala solo cuando nadie
 /// está usando el equipo con una reserva. Solo en Windows (instalación por cuenta) y AppImage:
 /// los .deb y .rpm pedirían la contraseña de administrador, así que esos los actualiza TI.
-async fn actualizaciones(app: AppHandle, compartido: Compartido) {
+async fn actualizaciones(app: AppHandle, compartido: Compartido, despertador: Arc<tokio::sync::Notify>) {
     use tauri::utils::{config::BundleType, platform::bundle_type};
     use tauri_plugin_updater::UpdaterExt;
     let (Some(clave), Some(url)) = (option_env!("FARO_UPDATER_PUBKEY"), option_env!("FARO_UPDATER_URL")) else { return };
@@ -489,7 +594,6 @@ async fn actualizaciones(app: AppHandle, compartido: Compartido) {
     let estable = url.to_string();
     // Canal de pruebas: el manifiesto vive en la release fija «faro-pruebas».
     let pruebas = estable.replace("/releases/latest/download/latest.json", "/releases/download/faro-pruebas/latest.json");
-    let despertador = app.state::<ActualizarYa>().0.clone();
     tokio::select! {
         _ = tokio::time::sleep(Duration::from_secs(120)) => {}
         _ = despertador.notified() => {}
@@ -537,26 +641,86 @@ async fn actualizaciones(app: AppHandle, compartido: Compartido) {
 }
 
 // ------------------------------------------------------------------ comandos
+//
+// Cada acción de la interfaz es una función del núcleo (`c_*`) que devuelve JSON. Con Faro por cuenta,
+// el comando de Tauri la llama directo; con el servicio del sistema, la pide por el socket.
 
-#[tauri::command]
-fn estado_inicial(estado: tauri::State<Compartido>) -> Paquete {
-    paquete(&estado.lock().unwrap())
+/// El núcleo local (Faro por cuenta). `None` cuando la interfaz habla con el servicio.
+fn local(app: &AppHandle) -> Option<(Ctx, Compartido)> {
+    Some((app.try_state::<Ctx>()?.inner().clone(), app.try_state::<Compartido>()?.inner().clone()))
+}
+
+/// Llama a una acción: en el núcleo local o en el servicio.
+async fn pedir(app: &AppHandle, nombre: &str, args: Value) -> Result<Value, String> {
+    #[cfg(unix)]
+    if let Some(r) = app.try_state::<remoto::Remoto>() {
+        return r.llamar(nombre, args).await;
+    }
+    let (ctx, c) = local(app).ok_or("Faro aún no está listo.")?;
+    despachar(&ctx, &c, nombre, args).await
+}
+
+/// Las acciones que la interfaz (o la línea de comandos, por el socket) puede pedirle al núcleo.
+pub(crate) async fn despachar(ctx: &Ctx, c: &Compartido, nombre: &str, a: Value) -> Result<Value, String> {
+    let texto = |k: &str| a[k].as_str().unwrap_or("").to_string();
+    match nombre {
+        "paquete" => Ok(serde_json::to_value(paquete(&c.lock().unwrap())).unwrap_or(Value::Null)),
+        "vincular" => c_vincular(ctx, c, &texto("codigo")).await.map(Value::from),
+        "emergencia" => c_emergencia(c, &texto("clave")).map(|_| Value::Null),
+        "quitar_suspension" => c_quitar_suspension(c, &texto("codigo")).map(Value::from),
+        "confirmar_anuncio" => {
+            c_confirmar_anuncio(c, a["id"].as_i64().unwrap_or(0));
+            Ok(Value::Null)
+        }
+        "qr_llegada" => Ok(c_qr_llegada(c).map(|q| serde_json::to_value(q).unwrap_or(Value::Null)).unwrap_or(Value::Null)),
+        "limpieza_hecha" => {
+            let mut n = c.lock().unwrap();
+            n.copia.memoria.inicio_reciente = None;
+            config::guardar_copia(&n.carpeta, &n.copia);
+            Ok(Value::Null)
+        }
+        "retirar" => c_retirar(ctx, c, &texto("clave")).await.map(|_| Value::Null),
+        "actualizar_ya" => {
+            c.lock().unwrap().forzar = true;
+            Ok(Value::Null)
+        }
+        "accion_isla" => c_accion_isla(c, &a).await.map(Value::from),
+        "evento" => {
+            let tipo = texto("tipo");
+            if tipo == "cierre_intentado" {
+                c.lock().unwrap().pendientes.push((tipo, json!({})));
+            }
+            Ok(Value::Null)
+        }
+        otro => Err(format!("Acción desconocida: {otro}")),
+    }
 }
 
 #[tauri::command]
-async fn vincular(app: AppHandle, estado: tauri::State<'_, Compartido>, codigo: String) -> Result<String, String> {
-    let estado: Compartido = estado.inner().clone();
+fn estado_inicial(app: AppHandle) -> Value {
+    if let Some((_, c)) = local(&app) {
+        return serde_json::to_value(paquete(&c.lock().unwrap())).unwrap_or(Value::Null);
+    }
+    app.state::<Interfaz>().ultimo.lock().unwrap().clone().unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+async fn vincular(app: AppHandle, codigo: String) -> Result<Value, String> {
+    pedir(&app, "vincular", json!({ "codigo": codigo })).await
+}
+
+async fn c_vincular(ctx: &Ctx, estado: &Compartido, codigo: &str) -> Result<String, String> {
     let cfg = estado.lock().unwrap().config.clone();
     let (token, equipo) = Api::new().vincular(&cfg, codigo.trim(), &host(), &sistema()).await.map_err(|f| match f {
         Fallo::Mensaje(m) => m,
         Fallo::Red(_) => "No hay conexión con el servidor. Revise la red e intente de nuevo.".into(),
         Fallo::NoVinculado => "El código no es válido.".into(),
     })?;
-    quedar_vinculado(&app, &estado, token, &equipo)?;
+    quedar_vinculado(ctx, estado, token, &equipo)?;
     Ok(equipo)
 }
 
-fn quedar_vinculado(app: &AppHandle, estado: &Compartido, token: String, equipo: &str) -> Result<(), String> {
+fn quedar_vinculado(ctx: &Ctx, estado: &Compartido, token: String, equipo: &str) -> Result<(), String> {
     {
         let mut n = estado.lock().unwrap();
         config::guardar_vinculo(&n.carpeta, Some(&token), Some(equipo)).map_err(|e| format!("No se pudo guardar: {e}"))?;
@@ -569,14 +733,12 @@ fn quedar_vinculado(app: &AppHandle, estado: &Compartido, token: String, equipo:
         n.pendientes.push(("inicio".into(), json!({ "motivo": "vinculado" })));
     }
     registro::info(format!("Vinculado como {equipo}"));
-    if let Some(i) = app.get_webview_window(ISLA) {
-        let _ = i.show();
-    }
+    ctx.avisar(Senal::Vinculado);
     Ok(())
 }
 
 /// Vinculación sin teclear: el script de instalación deja el código en faro.json.
-async fn vincular_solo(app: &AppHandle, api: &Api, compartido: &Compartido) -> bool {
+async fn vincular_solo(ctx: &Ctx, api: &Api, compartido: &Compartido) -> bool {
     let (cfg, codigo) = {
         let n = compartido.lock().unwrap();
         (n.config.clone(), n.config.codigo_vinculo.clone())
@@ -584,11 +746,7 @@ async fn vincular_solo(app: &AppHandle, api: &Api, compartido: &Compartido) -> b
     let Some(codigo) = codigo else { return false };
     match api.vincular(&cfg, &codigo, &host(), &sistema()).await {
         Ok((token, equipo)) => {
-            if quedar_vinculado(app, compartido, token, &equipo).is_ok() {
-                if let Some(w) = app.get_webview_window(VINCULAR) {
-                    let _ = w.destroy();
-                }
-            }
+            let _ = quedar_vinculado(ctx, compartido, token, &equipo);
             false
         }
         // Código vencido o ya usado: se deja de intentar y queda la ventana para teclear otro.
@@ -682,9 +840,13 @@ fn verificar_clave(n: &mut Nucleo, clave_ingresada: &str) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Result<(), String> {
-    let mut n = estado.lock().unwrap();
-    let llave = verificar_llave(&mut n, &clave_ingresada, true, false)?;
+async fn emergencia(app: AppHandle, clave_ingresada: String) -> Result<Value, String> {
+    pedir(&app, "emergencia", json!({ "clave": clave_ingresada })).await
+}
+
+fn c_emergencia(c: &Compartido, clave: &str) -> Result<(), String> {
+    let mut n = c.lock().unwrap();
+    let llave = verificar_llave(&mut n, clave, true, false)?;
     desbloquear_emergencia(&mut n, llave);
     Ok(())
 }
@@ -729,14 +891,18 @@ fn quitar_suspension_local(n: &mut Nucleo, codigo: Option<(&str, Llave)>) -> Opt
 /// Quita la pantalla suspendida con el código de la reserva, una clave temporal o la clave de emergencia.
 /// Funciona sin conexión: la verificación es local y el servidor se entera después.
 #[tauri::command]
-fn quitar_suspension(estado: tauri::State<Compartido>, codigo: String) -> Result<String, String> {
-    let mut n = estado.lock().unwrap();
-    let llave = verificar_llave(&mut n, &codigo, true, true)?;
+async fn quitar_suspension(app: AppHandle, codigo: String) -> Result<Value, String> {
+    pedir(&app, "quitar_suspension", json!({ "codigo": codigo })).await
+}
+
+fn c_quitar_suspension(c: &Compartido, codigo: &str) -> Result<String, String> {
+    let mut n = c.lock().unwrap();
+    let llave = verificar_llave(&mut n, codigo, true, true)?;
     if llave == Llave::Emergencia {
         desbloquear_emergencia(&mut n, llave);
         return Ok("Desbloqueado por el personal.".into());
     }
-    let equipo = quitar_suspension_local(&mut n, Some((&codigo, llave))).ok_or("La pantalla ya no está suspendida.")?;
+    let equipo = quitar_suspension_local(&mut n, Some((codigo, llave))).ok_or("La pantalla ya no está suspendida.")?;
     registro::info(format!("Suspensión quitada en la pantalla ({})", llave.via()));
     n.forzar = true;
     config::guardar_copia(&n.carpeta, &n.copia);
@@ -745,8 +911,12 @@ fn quitar_suspension(estado: tauri::State<Compartido>, codigo: String) -> Result
 
 /// «Entendido» en un anuncio obligatorio.
 #[tauri::command]
-fn confirmar_anuncio(estado: tauri::State<Compartido>, id: i64) {
-    let mut n = estado.lock().unwrap();
+async fn confirmar_anuncio(app: AppHandle, id: i64) -> Result<Value, String> {
+    pedir(&app, "confirmar_anuncio", json!({ "id": id })).await
+}
+
+fn c_confirmar_anuncio(c: &Compartido, id: i64) {
+    let mut n = c.lock().unwrap();
     n.copia.memoria.anuncio_leido = Some(id);
     n.acciones.push(("leido".into(), json!({ "anuncio": id })));
     n.forzar = true;
@@ -766,8 +936,12 @@ struct QrLlegada {
 /// «Confirmar asistencia» con el código ya puesto. Solo sirve a quien tiene la reserva de este
 /// equipo (lo verifica el servidor).
 #[tauri::command]
-fn qr_llegada(estado: tauri::State<Compartido>) -> Option<QrLlegada> {
-    let n = estado.lock().unwrap();
+async fn qr_llegada(app: AppHandle) -> Result<Value, String> {
+    pedir(&app, "qr_llegada", json!({})).await
+}
+
+fn c_qr_llegada(c: &Compartido) -> Option<QrLlegada> {
+    let n = c.lock().unwrap();
     let r = n.copia.remoto.as_ref()?;
     let secreto = &r.qr.as_ref()?.secreto;
     let ahora = (Utc::now() + Dur::milliseconds(n.copia.desfase_ms)).timestamp();
@@ -784,57 +958,74 @@ fn isla_foco(app: AppHandle) {
     }
 }
 
-/// Borra los archivos que dejó la sesión que acaba de terminar (Descargas y Escritorio).
+/// Borra los archivos que dejó la sesión que acaba de terminar (Descargas y Escritorio de esta cuenta:
+/// lo hace la interfaz, que corre en la cuenta) y le avisa al núcleo.
 #[tauri::command]
-fn limpiar_sesion(estado: tauri::State<Compartido>) -> Result<usize, String> {
-    let desde = estado.lock().unwrap().vista.as_ref().and_then(|v| v.limpieza_desde).ok_or("No hay una sesión reciente para limpiar.")?;
+async fn limpiar_sesion(app: AppHandle) -> Result<usize, String> {
+    let p = estado_inicial(app.clone());
+    let desde = p["vista"]["limpieza_desde"]
+        .as_str()
+        .and_then(|t| t.parse::<chrono::DateTime<Utc>>().ok())
+        .ok_or("No hay una sesión reciente para limpiar.")?;
     let n = ordenes::limpiar(desde)?;
-    let mut nucleo = estado.lock().unwrap();
-    nucleo.copia.memoria.inicio_reciente = None;
-    config::guardar_copia(&nucleo.carpeta, &nucleo.copia);
+    pedir(&app, "limpieza_hecha", json!({})).await?;
     Ok(n)
 }
 
 /// Retira Faro de este PC con la clave de emergencia del laboratorio (sin internet también).
 #[tauri::command]
-async fn retirar(app: AppHandle, estado: tauri::State<'_, Compartido>, clave_ingresada: String) -> Result<(), String> {
-    let (carpeta, cfg, token) = {
-        let mut n = estado.lock().unwrap();
-        verificar_clave(&mut n, &clave_ingresada)?;
-        (n.carpeta.clone(), n.config.clone(), n.config.token.clone())
+async fn retirar(app: AppHandle, clave_ingresada: String) -> Result<Value, String> {
+    pedir(&app, "retirar", json!({ "clave": clave_ingresada })).await
+}
+
+async fn c_retirar(ctx: &Ctx, c: &Compartido, clave: &str) -> Result<(), String> {
+    let (cfg, token) = {
+        let mut n = c.lock().unwrap();
+        verificar_clave(&mut n, clave)?;
+        (n.config.clone(), n.config.token.clone())
     };
+    if ctx.servicio {
+        return Err("Con el servicio del sistema, Faro lo retira TI: sudo bash desinstalar-linux.sh".into());
+    }
     ordenes::se_puede_retirar()?;
     if let Some(t) = token {
         let _ = Api::new().evento(&cfg, &t, "retirado", json!({ "por": "clave de emergencia" })).await;
     }
-    ordenes::retirar(&app, &carpeta)
+    ctx.avisar(Senal::Retirar);
+    Ok(())
+}
+
+/// QR de una ruta de la app (se arma con la dirección de la PWA que trae el paquete).
+#[tauri::command]
+fn qr(app: AppHandle, ruta: String) -> Option<String> {
+    let base = estado_inicial(app)["url_base"].as_str()?.trim_end_matches('/').to_string();
+    qr_svg(&format!("{base}{ruta}"))
 }
 
 #[tauri::command]
-fn qr(estado: tauri::State<Compartido>, ruta: String) -> Option<String> {
-    estado.lock().unwrap().config.url_pwa(&ruta).as_deref().and_then(qr_svg)
+async fn actualizar_ya(app: AppHandle) -> Result<Value, String> {
+    pedir(&app, "actualizar_ya", json!({})).await
 }
 
-#[tauri::command]
-fn actualizar_ya(estado: tauri::State<Compartido>) {
-    estado.lock().unwrap().forzar = true;
-}
-
-/// Una acción en la isla: extender (+30 o +60 min), liberar, reportar una falla (con diagnóstico) o pedir
-/// ayuda. Las reglas las aplica el servidor (las mismas que en la app).
+/// Una acción en la isla: extender (+30 o +60 min), liberar, reportar una falla (con diagnóstico), pedir
+/// ayuda o salir un rato. Las reglas las aplica el servidor (las mismas que en la app).
 #[tauri::command]
 async fn accion_isla(
-    estado: tauri::State<'_, Compartido>,
+    app: AppHandle,
     accion: String,
     categoria: Option<String>,
     minutos: Option<u32>,
     mensaje: Option<String>,
     vuelvo_min: Option<u32>,
-) -> Result<String, String> {
+) -> Result<Value, String> {
+    pedir(&app, "accion_isla", json!({ "accion": accion, "categoria": categoria, "minutos": minutos, "mensaje": mensaje, "vuelvo_min": vuelvo_min })).await
+}
+
+async fn c_accion_isla(estado: &Compartido, a: &Value) -> Result<String, String> {
+    let accion = a["accion"].as_str().unwrap_or("").to_string();
     if !["extender", "liberar", "reportar", "ayuda", "salir"].contains(&accion.as_str()) {
         return Err("Acción no válida.".into());
     }
-    let estado: Compartido = estado.inner().clone();
     let (cfg, token, en_linea, sin_red, desfase) = {
         let n = estado.lock().unwrap();
         let en_linea = n.ultimo_ok.map(|t| t.elapsed() < Duration::from_secs(90)).unwrap_or(false);
@@ -842,16 +1033,16 @@ async fn accion_isla(
     };
     let token = token.ok_or("Este equipo no está vinculado.")?;
     let mut datos = json!({});
-    if let Some(m) = minutos {
+    if let Some(m) = a["minutos"].as_u64() {
         datos["minutos"] = json!(m);
     }
     if accion == "salir" {
-        datos["mensaje"] = json!(mensaje.map(|m| m.trim().chars().take(120).collect::<String>()).filter(|m| !m.is_empty()));
-        datos["vuelvo_min"] = json!(vuelvo_min);
+        datos["mensaje"] = json!(a["mensaje"].as_str().map(|m| m.trim().chars().take(120).collect::<String>()).filter(|m| !m.is_empty()));
+        datos["vuelvo_min"] = a["vuelvo_min"].clone();
     }
     if accion == "reportar" {
-        datos["categoria"] = json!(categoria.unwrap_or_default());
-        datos["diagnostico"] = tauri::async_runtime::spawn_blocking(move || diag::rapido(en_linea, sin_red, None, desfase)).await.unwrap_or(json!({}));
+        datos["categoria"] = json!(a["categoria"].as_str().unwrap_or_default());
+        datos["diagnostico"] = tokio::task::spawn_blocking(move || diag::rapido(en_linea, sin_red, None, desfase)).await.unwrap_or(json!({}));
     }
     match Api::new().accion(&cfg, &token, &accion, datos).await {
         Ok(t) => {
@@ -868,14 +1059,10 @@ async fn accion_isla(
     }
 }
 
-/// Órdenes de la línea de comandos (`faro unlock`, `faro link`…), que llegan como un archivo en la
-/// carpeta de Faro. Devuelve true si hay que intentar vincular ya.
-fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
-    let carpeta = compartido.lock().unwrap().carpeta.clone();
-    let ruta = cli::archivo_orden(&carpeta);
-    let Ok(texto) = std::fs::read_to_string(&ruta) else { return false };
-    let _ = std::fs::remove_file(&ruta);
-    let Ok(o) = serde_json::from_str::<cli::OrdenCli>(&texto) else { return false };
+/// Órdenes de la línea de comandos (`faro unlock`, `faro link`…). Con Faro por cuenta llegan como un
+/// archivo en su carpeta; con el servicio, por el socket. Devuelve la respuesta, lo que hay que hacer
+/// después de responder y si hay que intentar vincular ya.
+pub(crate) fn procesar_orden(ctx: &Ctx, compartido: &Compartido, o: &cli::OrdenCli) -> (Result<String, String>, Option<&'static str>, bool) {
     let mut vincular_ya = false;
     let mut despues: Option<&'static str> = None;
     let r: Result<String, String> = match o.orden.as_str() {
@@ -912,15 +1099,12 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
                         Ok(format!("Unlocked for staff (up to {EMERGENCIA_HORAS} h)."))
                     }
                     "actualizar" => {
-                        drop(n);
-                        if let Some(a) = app.try_state::<ActualizarYa>() {
-                            a.0.notify_one();
-                        }
+                        ctx.actualizar.notify_one();
                         Ok("Checking for a new version: if there is one, it installs when nobody is using the computer.".into())
                     }
                     _ => {
                         registro::info("Desvinculado desde la línea de comandos");
-                        quedar_desvinculado(app, &mut n);
+                        quedar_desvinculado(ctx, &mut n);
                         Ok("Computer unlinked. Link it again with «faro link CODE».".into())
                     }
                 },
@@ -932,6 +1116,17 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
         Ok(t) => registro::info(format!("Orden de la línea de comandos «{}»: {t}", o.orden)),
         Err(e) => registro::aviso(format!("Orden de la línea de comandos «{}» rechazada: {e}", o.orden)),
     }
+    (r, despues, vincular_ya)
+}
+
+/// Faro por cuenta: la orden llega como archivo y se responde con otro.
+fn revisar_orden_cli(ctx: &Ctx, compartido: &Compartido) -> bool {
+    let carpeta = compartido.lock().unwrap().carpeta.clone();
+    let ruta = cli::archivo_orden(&carpeta);
+    let Ok(texto) = std::fs::read_to_string(&ruta) else { return false };
+    let _ = std::fs::remove_file(&ruta);
+    let Ok(o) = serde_json::from_str::<cli::OrdenCli>(&texto) else { return false };
+    let (r, despues, vincular_ya) = procesar_orden(ctx, compartido, &o);
     let (ok, texto) = match r {
         Ok(t) => (true, t),
         Err(e) => (false, e),
@@ -942,7 +1137,7 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
             registro::info("Reinicio pedido desde la línea de comandos");
             vigia::pausar(&carpeta, 30);
             std::thread::sleep(Duration::from_millis(400));
-            app.restart();
+            ctx.avisar(Senal::Reiniciar);
         }
         Some("detener") => {
             registro::aviso("Faro detenido desde la línea de comandos");
@@ -955,7 +1150,7 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
                 let _ = std::process::Command::new("systemctl").args(["--user", "stop", "ladme-faro.service"]).spawn();
                 return vincular_ya;
             }
-            app.exit(0);
+            ctx.avisar(Senal::Detener);
         }
         _ => {}
     }
@@ -963,6 +1158,31 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
 }
 
 // ------------------------------------------------------------------ arranque
+
+/// El núcleo con lo guardado en la carpeta (de la cuenta o del servicio).
+pub(crate) fn nuevo_nucleo(carpeta: PathBuf, reabierto: bool) -> Compartido {
+    let config = config::cargar(&carpeta);
+    let copia = config::cargar_copia(&carpeta);
+    Arc::new(Mutex::new(Nucleo {
+        carpeta,
+        config,
+        copia,
+        ultimo_ok: None,
+        vista: None,
+        pendientes: vec![if reabierto {
+            ("cierre_forzado".into(), json!({ "detalle": "Faro se cerró a la fuerza y el vigía lo volvió a abrir" }))
+        } else {
+            ("inicio".into(), json!({ "motivo": "arranque" }))
+        }],
+        forzar: true,
+        intentos_fallidos: 0,
+        espera_hasta: None,
+        aviso_local: None,
+        inventario_pendiente: None,
+        inventario_ya: false,
+        acciones: Vec::new(),
+    }))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -978,6 +1198,30 @@ pub fn run() {
         .setup(|app| {
             let carpeta = app.path().app_config_dir()?;
             registro::iniciar(&carpeta);
+            app.manage(Interfaz::default());
+            app.manage(isla::iniciar(&carpeta));
+            let isla = isla::crear(app.handle())?;
+            tauri::async_runtime::spawn(isla::vigilar_cursor(app.handle().clone(), app.state::<isla::Compartida>().inner().clone()));
+            tauri::async_runtime::spawn(mantener_bloqueo_encima(app.handle().clone()));
+
+            // Con el servicio del sistema instalado, esta es solo la interfaz de la sesión: el vínculo, el
+            // estado y el ciclo con el servidor viven en el servicio.
+            #[cfg(unix)]
+            if servicio::instalado() && std::env::var_os("FARO_POR_CUENTA").is_none() {
+                registro::info(format!("Faro {} (interfaz) arrancó en {}{}", env!("CARGO_PKG_VERSION"), sistema(),
+                                       diag::sesion_grafica().map(|s| format!(" (sesión {s})")).unwrap_or_default()));
+                // La entrada de inicio de sesión de Faro por cuenta ya no hace falta: la abre systemd.
+                #[cfg(not(debug_assertions))]
+                {
+                    use tauri_plugin_autostart::ManagerExt;
+                    let _ = app.autolaunch().disable();
+                }
+                let r = remoto::Remoto::nuevo();
+                app.manage(r.clone());
+                tauri::async_runtime::spawn(remoto::correr(app.handle().clone(), r));
+                return Ok(());
+            }
+
             registro::info(format!("Faro {} arrancó en {}{}", env!("CARGO_PKG_VERSION"), sistema(),
                                    diag::sesion_grafica().map(|s| format!(" (sesión {s})")).unwrap_or_default()));
             vigia::escribir_pid(&carpeta, "faro.pid");
@@ -985,29 +1229,11 @@ pub fn run() {
             cli::instalar_comando();
             vigia::quitar_pausa(&carpeta);
             let reabierto = std::env::args().any(|a| a == vigia::REABIERTO);
-            let config = config::cargar(&carpeta);
-            let copia = config::cargar_copia(&carpeta);
-            let vinculado = config.token.is_some();
-            let compartido: Compartido = Arc::new(Mutex::new(Nucleo {
-                carpeta,
-                config,
-                copia,
-                ultimo_ok: None,
-                vista: None,
-                pendientes: vec![if reabierto {
-                    ("cierre_forzado".into(), json!({ "detalle": "Faro se cerró a la fuerza y el vigía lo volvió a abrir" }))
-                } else {
-                    ("inicio".into(), json!({ "motivo": "arranque" }))
-                }],
-                forzar: true,
-                intentos_fallidos: 0,
-                espera_hasta: None,
-                aviso_local: None,
-                inventario_pendiente: None,
-                inventario_ya: false,
-                acciones: Vec::new(),
-            }));
-            app.manage(ActualizarYa(Arc::new(tokio::sync::Notify::new())));
+            let compartido = nuevo_nucleo(carpeta, reabierto);
+            let vinculado = compartido.lock().unwrap().config.token.is_some();
+            let manija = app.handle().clone();
+            let ctx = Ctx { salida: Arc::new(move |s| atender(&manija, s)), actualizar: Arc::new(tokio::sync::Notify::new()), servicio: false };
+            app.manage(ctx.clone());
             app.manage(compartido.clone());
 
             // Arranca solo al iniciar sesión en esta cuenta (no requiere permisos de administrador).
@@ -1023,16 +1249,14 @@ pub fn run() {
                 }
             }
 
-            app.manage(isla::iniciar(&compartido.lock().unwrap().carpeta));
-            let isla = isla::crear(app.handle())?;
             if vinculado {
                 let _ = isla.show();
             } else {
                 abrir_vincular(app.handle());
             }
-            tauri::async_runtime::spawn(ciclo(app.handle().clone(), compartido.clone()));
-            tauri::async_runtime::spawn(actualizaciones(app.handle().clone(), compartido));
-            tauri::async_runtime::spawn(isla::vigilar_cursor(app.handle().clone(), app.state::<isla::Compartida>().inner().clone()));
+            let despertador = ctx.actualizar.clone();
+            tauri::async_runtime::spawn(ciclo(ctx, compartido.clone(), Arc::new(inactividad::segundos)));
+            tauri::async_runtime::spawn(actualizaciones(app.handle().clone(), compartido, despertador));
             Ok(())
         })
         .on_window_event(|w, ev| {
@@ -1041,9 +1265,10 @@ pub fn run() {
                 if etiqueta == ISLA || etiqueta.starts_with(PREFIJO_BLOQUEO) {
                     api.prevent_close();
                     if etiqueta.starts_with(PREFIJO_BLOQUEO) {
-                        if let Some(c) = w.app_handle().try_state::<Compartido>() {
-                            c.lock().unwrap().pendientes.push(("cierre_intentado".into(), json!({})));
-                        }
+                        let app = w.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = pedir(&app, "evento", json!({ "tipo": "cierre_intentado" })).await;
+                        });
                     }
                 }
             }
@@ -1072,10 +1297,7 @@ pub fn run() {
         .run(|app, ev| {
             // Cerrar la ventana de vinculación no apaga Faro si el equipo ya está vinculado.
             if let tauri::RunEvent::ExitRequested { code: None, api, .. } = ev {
-                let vinculado = app
-                    .try_state::<Compartido>()
-                    .map(|c| c.lock().unwrap().config.token.is_some())
-                    .unwrap_or(false);
+                let vinculado = estado_inicial(app.clone())["vinculado"].as_bool().unwrap_or(false);
                 if vinculado {
                     api.prevent_exit();
                 }
