@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot};
 
 type Pendientes = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
@@ -65,7 +64,7 @@ impl Remoto {
 pub async fn correr(app: AppHandle, r: Remoto) {
     let mut avisado = false;
     loop {
-        match UnixStream::connect(servicio::SOCKET).await {
+        match servicio::conectar().await {
             Ok(con) => {
                 registro::info("Conectada con el servicio de Faro");
                 avisado = false;
@@ -84,8 +83,8 @@ pub async fn correr(app: AppHandle, r: Remoto) {
     }
 }
 
-async fn sesion(app: &AppHandle, r: &Remoto, con: UnixStream) {
-    let (lector, mut escritor) = con.into_split();
+async fn sesion(app: &AppHandle, r: &Remoto, con: Box<dyn servicio::Flujo>) {
+    let (lector, mut escritor) = tokio::io::split(con);
     let (tx, mut cola) = mpsc::unbounded_channel::<String>();
     *r.salida.lock().unwrap() = Some(tx.clone());
 

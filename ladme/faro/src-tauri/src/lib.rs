@@ -16,18 +16,15 @@ mod inventario;
 mod isla;
 mod ordenes;
 mod registro;
-#[cfg(unix)]
 mod remoto;
-#[cfg(unix)]
 mod servicio;
 mod vigia;
 
 pub use vigia::ARG as ARG_VIGIA;
 
 /// `ladme-faro --servicio`: lo arranca systemd como root (ver servicio.rs).
-#[cfg(unix)]
 pub fn correr_servicio() {
-    servicio::correr()
+    servicio::entrada()
 }
 
 /// ¿El primer argumento es un comando de la línea de comandos (`faro doctor`…)?
@@ -325,15 +322,13 @@ pub(crate) fn atender(app: &AppHandle, s: Senal) {
             }
             abrir_vincular(app);
         }
+        // Con el servicio del sistema, la interfaz sale y la vuelve a abrir systemd o el servicio (con el
+        // programa nuevo, si fue una actualización).
+        Senal::Reiniciar if app.try_state::<remoto::Remoto>().is_some() => app.exit(0),
         Senal::Reiniciar => app.restart(),
-        Senal::Detener => {
-            // Con el servicio del sistema, la interfaz se queda esperando a que vuelva.
-            #[cfg(unix)]
-            if app.try_state::<remoto::Remoto>().is_some() {
-                return;
-            }
-            app.exit(0)
-        }
+        // Con el servicio del sistema, la interfaz se queda esperando a que vuelva.
+        Senal::Detener if app.try_state::<remoto::Remoto>().is_some() => {}
+        Senal::Detener => app.exit(0),
         Senal::Retirar => {
             let carpeta = app.path().app_config_dir().unwrap_or_default();
             let _ = ordenes::retirar(app, &carpeta);
@@ -342,7 +337,6 @@ pub(crate) fn atender(app: &AppHandle, s: Senal) {
 }
 
 /// Sin servicio al que conectarse (modo servicio, conexión perdida): no se muestra nada.
-#[cfg(unix)]
 pub(crate) fn sin_nucleo(app: &AppHandle) {
     quitar_bloqueo(app);
     *app.state::<Interfaz>().pantalla.lock().unwrap() = None;
@@ -652,7 +646,6 @@ fn local(app: &AppHandle) -> Option<(Ctx, Compartido)> {
 
 /// Llama a una acción: en el núcleo local o en el servicio.
 async fn pedir(app: &AppHandle, nombre: &str, args: Value) -> Result<Value, String> {
-    #[cfg(unix)]
     if let Some(r) = app.try_state::<remoto::Remoto>() {
         return r.llamar(nombre, args).await;
     }
@@ -1206,16 +1199,27 @@ pub fn run() {
 
             // Con el servicio del sistema instalado, esta es solo la interfaz de la sesión: el vínculo, el
             // estado y el ciclo con el servidor viven en el servicio.
-            #[cfg(unix)]
             if servicio::instalado() && std::env::var_os("FARO_POR_CUENTA").is_none() {
-                registro::info(format!("Faro {} (interfaz) arrancó en {}{}", env!("CARGO_PKG_VERSION"), sistema(),
-                                       diag::sesion_grafica().map(|s| format!(" (sesión {s})")).unwrap_or_default()));
-                // La entrada de inicio de sesión de Faro por cuenta ya no hace falta: la abre systemd.
+                // La entrada de inicio de sesión de Faro por cuenta ya no hace falta: la abre systemd o el
+                // servicio de Windows.
                 #[cfg(not(debug_assertions))]
                 {
                     use tauri_plugin_autostart::ManagerExt;
                     let _ = app.autolaunch().disable();
                 }
+                // En Windows, la interfaz es la del programa del servicio; otra copia de Faro (una
+                // instalación por cuenta que quedó) se cierra y deja que el servicio abra la suya.
+                #[cfg(windows)]
+                {
+                    let propio = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
+                    let del_servicio = servicio::programa().canonicalize().ok();
+                    if propio.is_some() && del_servicio.is_some() && propio != del_servicio {
+                        registro::info("Faro por cuenta se cierra: este equipo usa el servicio del sistema");
+                        std::process::exit(0);
+                    }
+                }
+                registro::info(format!("Faro {} (interfaz) arrancó en {}{}", env!("CARGO_PKG_VERSION"), sistema(),
+                                       diag::sesion_grafica().map(|s| format!(" (sesión {s})")).unwrap_or_default()));
                 let r = remoto::Remoto::nuevo();
                 app.manage(r.clone());
                 tauri::async_runtime::spawn(remoto::correr(app.handle().clone(), r));

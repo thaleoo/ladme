@@ -1,11 +1,13 @@
-//! Servicio del sistema (Linux): el núcleo de Faro corriendo como root, para cualquier cuenta.
+//! Servicio del sistema: el núcleo de Faro corriendo como root (Linux) o como LocalSystem (Windows),
+//! para cualquier cuenta.
 //!
-//! Lo instala TI una vez (`sudo bash instalar-linux.sh`): systemd lo arranca con el equipo
-//! (`ladme-faro-servicio.service`, `ExecStart=… --servicio`). Guarda el vínculo y el estado en
-//! /var/lib/ladme-faro (solo root), habla con el servidor, se actualiza solo y verifica las claves.
-//! La interfaz de cada sesión (la isla y las pantallas, `ladme-faro.service` de cada cuenta) se conecta
-//! por el socket /run/ladme-faro/faro.sock: recibe el paquete de cada cambio y pide las acciones.
-//! Si alguien cierra la interfaz de la sesión activa, el servicio la vuelve a abrir y lo anota.
+//! Lo instala TI una vez (`sudo bash instalar-linux.sh`, o `instalar-windows.ps1` como administrador):
+//! el sistema lo arranca con el equipo (`ladme-faro … --servicio`). Guarda el vínculo y el estado en una
+//! carpeta que solo lee el sistema, habla con el servidor, se actualiza solo y verifica las claves.
+//! La interfaz de cada sesión (la isla y las pantallas) se conecta por un socket local
+//! (/run/ladme-faro/faro.sock, o la tubería \\.\pipe\ladme-faro): recibe el paquete de cada cambio y
+//! pide las acciones. Si alguien cierra la interfaz de la sesión activa, el servicio la vuelve a abrir
+//! y lo anota. Lo propio de cada sistema está en servicio_linux.rs y servicio_windows.rs.
 //!
 //! Protocolo: una línea JSON por mensaje.
 //!   interfaz → servicio  {"op":"hola","inactivo":12}
@@ -16,37 +18,46 @@
 use crate::{cli, registro, vigia, Compartido, Ctx, Senal};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::broadcast;
 
-pub const CARPETA: &str = "/var/lib/ladme-faro";
-pub const SOCKET: &str = "/run/ladme-faro/faro.sock";
-/// Donde el instalador deja el programa (el servicio lo reemplaza al actualizarse).
-pub const PROGRAMA: &str = "/opt/ladme-faro/ladme-faro.AppImage";
+#[cfg(unix)]
+#[path = "servicio_linux.rs"]
+mod sistema;
+#[cfg(windows)]
+#[path = "servicio_windows.rs"]
+mod sistema;
 
-/// ¿Está instalado el servicio del sistema en este equipo?
-pub fn instalado() -> bool {
-    Path::new("/etc/systemd/system/ladme-faro-servicio.service").is_file()
-}
+pub use sistema::{carpeta, instalado, programa};
 
-/// Quién está del otro lado de cada conexión (uid) y cuántos segundos lleva sin tocar el equipo.
+/// Una conexión con el servicio (socket de Unix o tubería con nombre).
+pub trait Flujo: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> Flujo for T {}
+
+/// Quién está del otro lado de cada conexión (uid en Linux, sesión en Windows) y cuántos segundos lleva
+/// sin tocar el equipo.
 type Sesiones = Arc<Mutex<HashMap<u32, (Instant, Option<u64>)>>>;
 
-pub fn correr() {
-    let carpeta = PathBuf::from(CARPETA);
+/// `ladme-faro --servicio`: en Windows, primero se presenta al administrador de servicios.
+pub fn entrada() {
+    sistema::entrada()
+}
+
+/// La interfaz se conecta al servicio.
+pub async fn conectar() -> std::io::Result<Box<dyn Flujo>> {
+    sistema::conectar().await
+}
+
+pub(crate) fn correr() {
+    let carpeta = carpeta();
     let _ = std::fs::create_dir_all(&carpeta);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&carpeta, std::fs::Permissions::from_mode(0o700));
-    }
+    sistema::proteger_carpeta(&carpeta);
     registro::iniciar(&carpeta);
     registro::info(format!("Servicio de Faro {} arrancó", env!("CARGO_PKG_VERSION")));
     vigia::escribir_pid(&carpeta, "faro.pid");
+    sistema::limpiar_anterior();
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio");
     rt.block_on(async move {
@@ -72,50 +83,39 @@ pub fn correr() {
         tokio::spawn(actualizar(ctx.clone(), compartido.clone()));
         tokio::spawn(guardian(compartido.clone(), sesiones.clone()));
 
-        // Al reiniciar o detener, el servicio sale (systemd lo vuelve a abrir, o no si se detuvo).
+        // Al reiniciar, el servicio sale y el sistema lo vuelve a abrir; al detener, se detiene.
         let mut rx = tx.subscribe();
         tokio::spawn(async move {
             while let Ok(s) = rx.recv().await {
                 match s {
                     Senal::Reiniciar => {
                         tokio::time::sleep(Duration::from_millis(800)).await;
-                        std::process::exit(0);
+                        sistema::reiniciar();
                     }
                     Senal::Detener => {
                         tokio::time::sleep(Duration::from_millis(800)).await;
-                        let _ = std::process::Command::new("systemctl").args(["stop", "ladme-faro-servicio.service"]).spawn();
+                        sistema::detener();
                     }
                     _ => {}
                 }
             }
         });
 
-        let _ = std::fs::create_dir_all("/run/ladme-faro");
-        let _ = std::fs::remove_file(SOCKET);
-        let oyente = match UnixListener::bind(SOCKET) {
-            Ok(o) => o,
-            Err(e) => {
-                registro::error(format!("No se pudo abrir el socket {SOCKET}: {e}"));
-                return;
-            }
-        };
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            // Cualquier cuenta conecta su interfaz; lo que cambia algo pide clave o lo decide el servidor.
-            let _ = std::fs::set_permissions(SOCKET, std::fs::Permissions::from_mode(0o666));
-        }
-        loop {
-            if let Ok((con, _)) = oyente.accept().await {
-                tokio::spawn(atender(con, ctx.clone(), compartido.clone(), tx.subscribe(), sesiones.clone()));
-            }
+        let (ctx2, c2) = (ctx.clone(), compartido.clone());
+        let r = sistema::escuchar(move |con, quien| {
+            tokio::spawn(atender(con, quien, ctx2.clone(), c2.clone(), tx.subscribe(), sesiones.clone()));
+        })
+        .await;
+        if let Err(e) = r {
+            registro::error(format!("El servicio no pudo abrir su conexión local: {e}"));
         }
     });
 }
 
-async fn atender(con: UnixStream, ctx: Ctx, c: Compartido, mut rx: broadcast::Receiver<Senal>, sesiones: Sesiones) {
-    let uid = con.peer_cred().map(|p| p.uid()).unwrap_or(u32::MAX);
-    let (lector, mut escritor) = con.into_split();
+async fn atender(con: Box<dyn Flujo>, uid: u32, ctx: Ctx, c: Compartido, mut rx: broadcast::Receiver<Senal>, sesiones: Sesiones) {
+    let (lector, mut escritor) = tokio::io::split(con);
+    // Solo la interfaz dice «hola»; la línea de comandos de la misma cuenta no la borra al irse.
+    let mut interfaz = false;
     let (tx, mut cola) = tokio::sync::mpsc::unbounded_channel::<String>();
     // Al conectar, el paquete actual.
     let _ = tx.send(json!({ "senal": "paquete", "datos": serde_json::to_value(crate::paquete(&c.lock().unwrap())).unwrap_or(Value::Null) }).to_string());
@@ -140,6 +140,7 @@ async fn atender(con: UnixStream, ctx: Ctx, c: Compartido, mut rx: broadcast::Re
         let id = m["id"].clone();
         match m["op"].as_str() {
             Some("hola") => {
+                interfaz = true;
                 sesiones.lock().unwrap().insert(uid, (Instant::now(), m["inactivo"].as_u64()));
             }
             Some("pedir") => {
@@ -175,7 +176,9 @@ async fn atender(con: UnixStream, ctx: Ctx, c: Compartido, mut rx: broadcast::Re
             _ => {}
         }
     }
-    sesiones.lock().unwrap().remove(&uid);
+    if interfaz {
+        sesiones.lock().unwrap().remove(&uid);
+    }
 }
 
 fn respuesta(id: &Value, r: Result<Value, String>) -> String {
@@ -209,43 +212,36 @@ fn resumen(c: &Compartido) -> Value {
 /// La línea de comandos le habla al servicio: una petición, una respuesta (se saltan las señales).
 pub fn preguntar(op: Value, espera: Duration) -> Result<Value, String> {
     use std::io::{BufRead, Write};
-    let mut con = std::os::unix::net::UnixStream::connect(SOCKET).map_err(|_| "The Faro service is not running (sudo systemctl start ladme-faro-servicio).".to_string())?;
-    con.set_read_timeout(Some(espera)).ok();
+    let (lector, mut escritor) = sistema::conectar_bloqueante().map_err(|_| format!("The Faro service is not running ({}).", sistema::COMO_INICIAR))?;
     let mut op = op;
     op["id"] = json!(1);
-    con.write_all(format!("{op}\n").as_bytes()).map_err(|e| e.to_string())?;
-    for l in std::io::BufReader::new(con).lines() {
-        let l = l.map_err(|_| "The Faro service did not answer in time.".to_string())?;
-        let Ok(m) = serde_json::from_str::<Value>(&l) else { continue };
-        if m["id"] == json!(1) {
-            return if m["ok"].as_bool().unwrap_or(false) { Ok(m["valor"].clone()) } else { Err(m["error"].as_str().unwrap_or("error").to_string()) };
+    escritor.write_all(format!("{op}\n").as_bytes()).map_err(|e| e.to_string())?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for l in std::io::BufReader::new(lector).lines() {
+            let Ok(l) = l else { break };
+            let Ok(m) = serde_json::from_str::<Value>(&l) else { continue };
+            if m["id"] == json!(1) {
+                let _ = tx.send(m);
+                return;
+            }
         }
+    });
+    let m = rx.recv_timeout(espera).map_err(|_| "The Faro service did not answer in time.".to_string())?;
+    drop(escritor);
+    if m["ok"].as_bool().unwrap_or(false) {
+        Ok(m["valor"].clone())
+    } else {
+        Err(m["error"].as_str().unwrap_or("error").to_string())
     }
-    Err("The Faro service closed the connection.".into())
 }
 
 /// ¿Responde el servicio?
 pub fn vivo() -> bool {
-    std::os::unix::net::UnixStream::connect(SOCKET).is_ok()
+    sistema::conectar_bloqueante().is_ok()
 }
 
 // ------------------------------------------------------------------ la interfaz de la sesión activa
-
-/// Usuario y uid de la sesión gráfica activa del puesto (loginctl).
-fn sesion_activa() -> Option<(String, u32)> {
-    let salida = |args: &[&str]| std::process::Command::new("loginctl").args(args).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    let id = salida(&["show-seat", "seat0", "-p", "ActiveSession", "--value"])?;
-    if id.is_empty() {
-        return None;
-    }
-    let info = salida(&["show-session", &id, "-p", "Name", "-p", "User", "-p", "Type", "-p", "Class"])?;
-    let campo = |k: &str| info.lines().find_map(|l| l.strip_prefix(&format!("{k}=")).map(String::from));
-    let tipo = campo("Type")?;
-    if !(tipo == "x11" || tipo == "wayland") || campo("Class").as_deref() != Some("user") {
-        return None;
-    }
-    Some((campo("Name")?, campo("User")?.parse().ok()?))
-}
 
 /// Si la interfaz de la sesión activa deja de hablar, se vuelve a abrir. Si estaba viva y desapareció
 /// (alguien la cerró), queda anotado y el panel lo ve; si nunca llegó a abrir, solo se reintenta.
@@ -255,34 +251,37 @@ async fn guardian(c: Compartido, sesiones: Sesiones) {
     let mut vistas: std::collections::HashSet<u32> = Default::default();
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
-        if arranque.elapsed() < Duration::from_secs(40) || c.lock().unwrap().config.token.is_none() {
+        // (también sin vínculo: la interfaz es la que muestra la ventana para vincular)
+        if arranque.elapsed() < sistema::ESPERA_GUARDIAN {
             continue;
         }
-        let Some((usuario, uid)) = tokio::task::spawn_blocking(sesion_activa).await.ok().flatten() else { continue };
-        let viva = sesiones.lock().unwrap().get(&uid).is_some_and(|(t, _)| t.elapsed() < Duration::from_secs(20));
+        let Some((usuario, quien)) = tokio::task::spawn_blocking(sistema::sesion_activa).await.ok().flatten() else { continue };
+        let viva = sesiones.lock().unwrap().get(&quien).is_some_and(|(t, _)| t.elapsed() < Duration::from_secs(20));
         if viva {
-            vistas.insert(uid);
+            vistas.insert(quien);
             continue;
         }
-        if vistas.remove(&uid) {
+        if vistas.remove(&quien) {
             registro::aviso(format!("La interfaz de Faro se cerró en la sesión de {usuario}: se vuelve a abrir"));
             c.lock().unwrap().pendientes.push(("cierre_forzado".into(), json!({ "detalle": format!("La interfaz de Faro se cerró en la sesión de {usuario} y el servicio la volvió a abrir") })));
         } else if ultimo_intento.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
             continue;
         }
         ultimo_intento = Some(Instant::now());
-        let _ = std::process::Command::new("systemctl").args(["--user", "-M", &format!("{usuario}@"), "start", "ladme-faro.service"]).status();
+        if let Err(e) = tokio::task::spawn_blocking(move || sistema::abrir_interfaz(&usuario, quien)).await.unwrap_or(Ok(())) {
+            registro::aviso(format!("No se pudo abrir la interfaz de Faro: {e}"));
+        }
     }
 }
 
 // ------------------------------------------------------------------ actualizaciones
 
 /// Busca versiones nuevas (las mismas releases firmadas que usa Faro por cuenta), verifica la firma y
-/// reemplaza el programa en /opt cuando nadie usa el equipo con una reserva. Luego sale: systemd abre el
+/// reemplaza el programa cuando nadie usa el equipo con una reserva. Luego sale: el sistema abre el
 /// servicio nuevo y las interfaces se reinician.
 async fn actualizar(ctx: Ctx, c: Compartido) {
     let (Some(clave), Some(url)) = (option_env!("FARO_UPDATER_PUBKEY"), option_env!("FARO_UPDATER_URL")) else { return };
-    if clave.is_empty() || url.is_empty() || !Path::new(PROGRAMA).is_file() {
+    if clave.is_empty() || url.is_empty() || !programa().is_file() {
         return;
     }
     let pruebas = url.replace("/releases/latest/download/latest.json", "/releases/download/faro-pruebas/latest.json");
@@ -303,7 +302,7 @@ async fn actualizar(ctx: Ctx, c: Compartido) {
                     }
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
-                match instalar(&programa) {
+                match sistema::instalar(&programa) {
                     Ok(()) => {
                         registro::info(format!("Instalada la versión {version}: el servicio y las interfaces se reinician"));
                         let (cfg, token) = {
@@ -338,9 +337,9 @@ async fn buscar(url: &str, clave: &str) -> Result<Option<(String, Vec<u8>)>, Str
         return Ok(None);
     }
     let p = &m["platforms"];
-    let plataforma = if p["linux-x86_64-appimage"].is_object() { &p["linux-x86_64-appimage"] } else { &p["linux-x86_64"] };
+    let plataforma = sistema::PLATAFORMAS.iter().map(|k| &p[*k]).find(|v| v.is_object()).unwrap_or(&Value::Null);
     let (Some(descarga), Some(firma)) = (plataforma["url"].as_str(), plataforma["signature"].as_str()) else {
-        return Err("el manifiesto no trae la AppImage de Linux".into());
+        return Err(format!("el manifiesto no trae {}", sistema::PLATAFORMAS[0]));
     };
     let datos = cliente.get(descarga).send().await.map_err(|e| e.to_string())?.bytes().await.map_err(|e| e.to_string())?.to_vec();
     verificar(&datos, firma, clave)?;
@@ -362,16 +361,6 @@ fn verificar(datos: &[u8], firma: &str, clave: &str) -> Result<(), String> {
 pub(crate) fn mas_nueva(a: &str, b: &str) -> bool {
     let n = |v: &str| v.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
     n(a) > n(b)
-}
-
-/// Reemplaza el programa sin dejarlo a medias: archivo nuevo al lado y rename.
-fn instalar(datos: &[u8]) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let nuevo = PathBuf::from(format!("{PROGRAMA}.nuevo"));
-    std::fs::write(&nuevo, datos).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&nuevo, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-    std::fs::rename(&nuevo, PROGRAMA).map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 #[cfg(test)]

@@ -17,9 +17,6 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Where the system service keeps its state and log (Linux, readable only by root).
-const SERVICIO_CARPETA: &str = "/var/lib/ladme-faro";
-
 /// First arguments that mean «run the command line» instead of opening Faro.
 pub const COMANDOS: &[&str] = &[
     "status", "doctor", "logs", "inventory", "version", "link", "update", "unlock", "unlink", "start", "stop", "restart", "help",
@@ -193,18 +190,18 @@ pub fn responder(c: &Path, id: &str, ok: bool, texto: &str) {
     let _ = escribir_privado(&archivo_respuesta(c), &serde_json::to_vec(&r).unwrap_or_default());
 }
 
-/// Linux con el servicio del sistema instalado: el estado vive en el servicio y se le pregunta por su
-/// socket (sin secretos); las órdenes con clave también van por ahí.
+/// Con el servicio del sistema instalado (Linux o Windows), el estado vive en el servicio y se le pregunta
+/// por su socket o tubería (sin secretos); las órdenes con clave también van por ahí.
 fn modo_servicio() -> bool {
-    #[cfg(target_os = "linux")]
-    return crate::servicio::instalado();
-    #[allow(unreachable_code)]
-    false
+    crate::servicio::instalado()
 }
+
+/// Cómo abrir una terminal con permisos de administrador, para los mensajes.
+const COMO_ADMIN: &str = if cfg!(windows) { "open a terminal as administrator and run" } else { "run" };
+const FARO_ADMIN: &str = if cfg!(windows) { "faro" } else { "sudo /usr/local/bin/faro" };
 
 /// Configuración y estado de Faro: del servicio, si está instalado, o de la carpeta de esta cuenta.
 fn fuente(c: &Path) -> (Config, Copia) {
-    #[cfg(target_os = "linux")]
     if modo_servicio() {
         if let Ok(v) = crate::servicio::preguntar(json!({ "op": "resumen" }), Duration::from_secs(5)) {
             return (serde_json::from_value(v["cfg"].clone()).unwrap_or_default(), serde_json::from_value(v["copia"].clone()).unwrap_or_default());
@@ -214,7 +211,6 @@ fn fuente(c: &Path) -> (Config, Copia) {
 }
 
 fn faro_abierto(c: &Path) -> bool {
-    #[cfg(target_os = "linux")]
     if modo_servicio() {
         return crate::servicio::vivo();
     }
@@ -242,7 +238,6 @@ fn en_ingles(t: &str) -> String {
 fn enviar_orden(c: &Path, orden: &str, clave: Option<String>, codigo: Option<String>, espera: Duration) -> Result<String, String> {
     let id = format!("{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
     let o = OrdenCli { id: id.clone(), orden: orden.into(), clave, codigo };
-    #[cfg(target_os = "linux")]
     if modo_servicio() {
         return crate::servicio::preguntar(json!({ "op": "orden", "orden": o }), espera)
             .map(|v| en_ingles(v.as_str().unwrap_or_default()))
@@ -326,7 +321,7 @@ pub fn ejecutar(args: &[String]) -> i32 {
         }
     };
     let s = Salida { json: cli.json, color: !cli.json && !cli.no_color && std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal() };
-    let c = if modo_servicio() { PathBuf::from(SERVICIO_CARPETA) } else { carpeta() };
+    let c = if modo_servicio() { crate::servicio::carpeta() } else { carpeta() };
     match cli.command {
         Comando::Status => estado(&s, &c),
         Comando::Doctor { fix, verbose } => {
@@ -507,6 +502,15 @@ fn abrir(c: &Path) {
         let _ = std::process::Command::new("systemctl").args(["--user", "start", "ladme-faro.service"]).status();
         return;
     }
+    // Windows: arrancar el servicio pide una terminal de administrador; la interfaz la abre el servicio.
+    #[cfg(windows)]
+    if modo_servicio() {
+        let ok = std::process::Command::new("sc").args(["start", "ladme-faro"]).output().map(|o| o.status.success()).unwrap_or(false);
+        if !ok {
+            eprintln!("Could not start the Faro service: open a terminal as administrator and run «faro start».");
+        }
+        return;
+    }
     crate::vigia::quitar_pausa(c);
     #[cfg(target_os = "linux")]
     if servicio_instalado() {
@@ -567,6 +571,9 @@ fn activar_arranque() -> Result<String, String> {
 fn activar_arranque() -> Result<String, String> {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
+    if modo_servicio() {
+        return Err("the Faro service is not set to start with Windows: run instalar-windows.ps1 as administrator again".into());
+    }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let (k, _) = RegKey::predef(HKEY_CURRENT_USER)
         .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
@@ -790,6 +797,14 @@ fn arranque_automatico() -> Option<String> {
 fn arranque_automatico() -> Option<String> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
     use winreg::RegKey;
+    if modo_servicio() {
+        // Start = 2: automático.
+        let inicio: u32 = RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey_with_flags(r"SYSTEM\CurrentControlSet\Services\ladme-faro", KEY_READ)
+            .and_then(|k| k.get_value("Start"))
+            .unwrap_or(0);
+        return (inicio == 2).then(|| "system service".into());
+    }
     let ruta = r"Software\Microsoft\Windows\CurrentVersion\Run";
     for raiz in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
         if let Ok(k) = RegKey::predef(raiz).open_subkey_with_flags(ruta, KEY_READ) {
@@ -834,7 +849,7 @@ fn imprimir_linea(s: &Salida, l: &registro::Linea) {
 fn logs(s: &Salida, c: &Path, n: usize, seguir: bool, desde: Option<chrono::Duration>, minimo: Nivel) -> i32 {
     let desde = desde.map(|d| (chrono::Local::now() - d).fixed_offset());
     if modo_servicio() && std::fs::File::open(registro::ruta(c)).is_err() {
-        eprintln!("The Faro service log needs admin rights: sudo /usr/local/bin/faro logs");
+        eprintln!("The Faro service log needs admin rights: {COMO_ADMIN} «{FARO_ADMIN} logs».");
         return 1;
     }
     let lineas = registro::leer(c, n, desde, minimo);
@@ -944,7 +959,7 @@ fn vincular(c: &Path, codigo: &str) -> i32 {
         return 1;
     }
     if modo_servicio() {
-        eprintln!("The Faro service is not running. Start it with: sudo systemctl start ladme-faro-servicio");
+        eprintln!("The Faro service is not running. Start it with «faro start» ({COMO_ADMIN} it as administrator).");
         return 1;
     }
     // Faro closed: the code is saved and used when it opens.
