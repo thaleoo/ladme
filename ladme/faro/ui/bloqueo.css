@@ -83,3 +83,4 @@ main { display: grid; place-items: center; padding: 0 32px; }
 .codigo-reserva .nota { margin-top: 2px; }
 body[data-estado="suspendido"] .punto { background: #fbbf24; box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.18); }
 .anuncio.grande + .detalle { margin-top: 12px; }
+body[data-motivo="titular"] .punto { background: var(--verde); box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.18); }

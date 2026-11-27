@@ -55,6 +55,11 @@ pub struct Suspension {
     /// Código de un solo uso del QR de la pantalla (cambia cada minuto).
     #[serde(default)]
     pub qr: Option<String>,
+    /// Desde la 0027, «Salir un rato» del titular: su mensaje y la hora a la que vuelve.
+    #[serde(default)]
+    pub mensaje: Option<String>,
+    #[serde(default)]
+    pub vuelvo: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -261,6 +266,10 @@ pub struct Vista {
     pub confirmar_anuncio: Option<i64>,
     /// La suspensión se puede quitar con el código de la reserva vigente.
     pub con_codigo: bool,
+    /// «Salir un rato»: la hora a la que el titular dijo que vuelve.
+    pub vuelvo: Option<DateTime<Utc>>,
+    /// Por qué está suspendida: «bloqueo» (personal), «anuncio» o «titular» («Salir un rato»).
+    pub motivo_suspension: Option<String>,
 }
 
 /// «Windows Windows 11 Pro» → «Windows 11 Pro»: el tipo de sistema y la versión a veces traen la misma palabra.
@@ -320,6 +329,8 @@ pub fn decidir(e: &Entrada) -> Vista {
             espera: 0,
             confirmar_anuncio: None,
             con_codigo: false,
+            vuelvo: None,
+            motivo_suspension: None,
         };
     };
 
@@ -359,6 +370,8 @@ pub fn decidir(e: &Entrada) -> Vista {
             .filter(|a| a.hasta > ahora && a.obligatorio && !a.leido && e.memoria.anuncio_leido != Some(a.id))
             .map(|a| a.id),
         con_codigo: false,
+        vuelvo: None,
+        motivo_suspension: None,
     };
 
     // La ocupación vigente según la copia (sin conexión, una reserva vale hasta su fin).
@@ -371,12 +384,14 @@ pub fn decidir(e: &Entrada) -> Vista {
         v.pantalla = Pantalla::Suspension;
         v.con_codigo = actual.is_some_and(|o| es_reserva(o) && o.desbloqueo.is_some());
         v.titulo = "Pantalla suspendida".into();
-        v.detalle = if s.motivo == "anuncio" {
-            "Hay un aviso del laboratorio sin confirmar. Tus programas siguen abiertos.".into()
-        } else {
-            "El laboratorio suspendió la pantalla. Tus programas siguen abiertos.".into()
+        v.detalle = match s.motivo.as_str() {
+            "anuncio" => "Hay un aviso del laboratorio sin confirmar. Tus programas siguen abiertos.".into(),
+            "titular" => "En uso: su titular salió un rato. Nada se cerró.".into(),
+            _ => "El laboratorio suspendió la pantalla. Tus programas siguen abiertos.".into(),
         };
-        v.mensaje = s.texto.clone().or_else(|| v.anuncio.clone());
+        v.mensaje = if s.motivo == "titular" { s.mensaje.clone() } else { s.texto.clone().or_else(|| v.anuncio.clone()) };
+        v.vuelvo = s.vuelvo.filter(|h| *h > ahora);
+        v.motivo_suspension = Some(s.motivo.clone());
         v.titular = actual.filter(|o| es_reserva(o)).and_then(|o| o.titular.clone());
         v.cuenta_hasta = actual.filter(|o| es_reserva(o)).map(|o| o.fin);
         v.ruta_qr = match &s.qr {
@@ -745,7 +760,7 @@ mod pruebas {
         let mut o = reserva(-10, 60);
         o.desbloqueo = Some(Clave { sal: "r1".into(), hash: "h".into(), iteraciones: 2000 });
         let mut r = remoto(Modo::Observar, Some(o));
-        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(30)), motivo: "bloqueo".into(), texto: None, qr: Some("abc".into()) });
+        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(30)), motivo: "bloqueo".into(), texto: None, qr: Some("abc".into()), mensaje: None, vuelvo: None });
         let mut m = Memoria::default();
         let v = ver(&r, 0, Some(5), &m);
         assert_eq!((v.pantalla.clone(), v.estado.clone(), v.con_codigo), (Pantalla::Suspension, Estado::Suspendido, true), "«bloquear ya» vale aun en observar");
@@ -757,7 +772,7 @@ mod pruebas {
         // Anuncio obligatorio: no suspende en observar ni si ya se confirmó aquí.
         let mut m = Memoria::default();
         r.anuncio = Some(Anuncio { id: 7, texto: "Simulacro".into(), hasta: t(60), obligatorio: true, leido: false });
-        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(60)), motivo: "anuncio".into(), texto: Some("Simulacro".into()), qr: None });
+        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(60)), motivo: "anuncio".into(), texto: Some("Simulacro".into()), qr: None, mensaje: None, vuelvo: None });
         assert_eq!(ver(&r, 0, Some(5), &m).pantalla, Pantalla::Ninguna);
         r.modo = Modo::Avisar;
         let v = ver(&r, 0, Some(5), &m);
@@ -774,5 +789,18 @@ mod pruebas {
         assert_eq!(ver(&r, 0, None, &Memoria::default()).confirmar_anuncio, Some(3));
         r.anuncio.as_mut().unwrap().leido = true;
         assert_eq!(ver(&r, 0, None, &Memoria::default()).confirmar_anuncio, None);
+    }
+
+    #[test]
+    fn salir_un_rato_del_titular() {
+        let mut o = reserva(-10, 60);
+        o.desbloqueo = Some(Clave { sal: "r1".into(), hash: "h".into(), iteraciones: 2000 });
+        let mut r = remoto(Modo::Observar, Some(o));
+        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(60)), motivo: "titular".into(), texto: None, qr: Some("q".into()),
+                                         mensaje: Some("Entrenando, no apagar".into()), vuelvo: Some(t(20)) });
+        let v = ver(&r, 0, Some(5), &Memoria::default());
+        assert_eq!((v.pantalla.clone(), v.con_codigo, v.mensaje.as_deref(), v.vuelvo, v.titular.as_deref()),
+                   (Pantalla::Suspension, true, Some("Entrenando, no apagar"), Some(t(20)), Some("Ana")));
+        assert_eq!(ver(&r, 25, Some(5), &Memoria::default()).vuelvo, None, "la hora de regreso pasada no se muestra");
     }
 }

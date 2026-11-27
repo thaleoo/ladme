@@ -49,13 +49,16 @@ muestran la ayuda. Los nombres en español de Faro 0.6 siguen funcionando como a
 | Comando | Qué hace |
 | --- | --- |
 | `faro status` | Vínculo, si Faro está abierto, último contacto con el servidor, modo de la sala, reserva actual y suspensión. |
-| `faro doctor` | Revisa vínculo, Faro abierto, servidor y su demora, reloj, carpeta, arranque automático, sesión gráfica, herramientas del inventario (Linux), disco y versión publicada. Cada problema trae cómo arreglarlo. Sale con 1 si hay problemas. |
+| `faro doctor` | Revisa vínculo, Faro abierto, servidor y su demora, reloj, carpeta, arranque automático, sesión gráfica, herramientas del inventario (Linux), disco y versión publicada. Cada problema trae cómo arreglarlo. Sale con 1 si hay problemas. `--fix` arregla lo que se puede sin permisos (abrir Faro, arranque automático, reiniciar si no habla con el servidor); `-v` muestra rutas y detalles. |
 | `faro logs` | Registro de Faro (`faro.log` en su carpeta). `-n 100`, `-f` para seguirlo, `--since 30m`/`2h`/`1d`, `--level warn|error`. |
 | `faro inventory` | Lo que Faro envía: procesador, RAM, gráfica, cámaras, disco, sistema, cuenta y programas. |
 | `faro version` | Versión, canal (stable o testing) e instalación. `faro -V` solo da el número. |
 | `faro link ABCD-EFGH` | Vincula el equipo con un código del panel (si Faro está cerrado, se usa al abrirlo). |
 | `faro update`, `faro unlink` | Piden la **clave de emergencia** (sin mostrarla) y se la pasan al Faro abierto, que la verifica como en la pantalla (5 intentos y una pausa). |
 | `faro unlock` | Igual, y acepta también una **clave temporal** del personal (hasta que vence). |
+| `faro start` | Abre Faro si está cerrado (en Linux, con el servicio `ladme-faro`). |
+| `faro restart` | Reinicia Faro. |
+| `faro stop` | Detiene Faro **y su vigía** hasta `faro start` o el próximo inicio de sesión. Pide clave del personal (sin Faro no hay bloqueo). |
 
 Todos aceptan `--json` (para scripts o para pegar en un reporte) y `--no-color` (también `NO_COLOR`). Códigos
 de salida: 0 bien, 1 hay un problema, 2 uso incorrecto. Una palabra mal escrita (`faro stauts`) da la sugerencia
