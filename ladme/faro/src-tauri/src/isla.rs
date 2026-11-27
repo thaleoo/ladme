@@ -187,7 +187,7 @@ fn repintar(w: &WebviewWindow) {
             g.invalidate_rect(None, true);
         }
         let v2 = v.clone();
-        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(30), move || {
             v2.resize(ancho, alto);
             v2.set_resizable(false);
             if let Some(g) = v2.window() {

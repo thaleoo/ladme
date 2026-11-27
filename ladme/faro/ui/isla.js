@@ -3,17 +3,11 @@ import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoRelo
 // ------------------------------------------------------------------ estado
 const isla = document.getElementById('isla');
 
-// Linux: al terminar cada cambio de tamaño de la isla, Faro rehace la ventana para que no queden rastros
-// (ver isla_repintar). Una vez por animación, cuando ya se quedó quieta.
-if (document.documentElement.classList.contains('linux')) {
-  let repintado = 0;
-  isla.addEventListener('transitionend', (e) => {
-    // Solo la isla misma (la barra de progreso también anima su ancho cada segundo).
-    if (e.target !== isla || !['width', 'height', 'opacity', 'translate', 'scale'].includes(e.propertyName)) return;
-    clearTimeout(repintado);
-    repintado = setTimeout(() => invocar('isla_repintar'), 120);
-  });
-}
+// Linux (WebKitGTK): una ventana transparente no siempre borra lo que la isla deja de cubrir. Crecer no deja
+// rastro (cada cuadro cubre más), encogerse o desaparecer sí. Así que en Linux la isla crece con animación y se
+// encoge de golpe, y justo después Faro rehace la ventana (isla_repintar) para borrar el único cuadro viejo.
+const LINUX = document.documentElement.classList.contains('linux');
+let antes = null; // { w, h, oculta, sombra } del último dibujo
 const capas = Object.fromEntries([...isla.querySelectorAll('.capa')].map((c) => [c.dataset.capa, c]));
 
 let paquete = null;
@@ -283,9 +277,21 @@ function dibujar() {
   const activa = capas[ui];
   const w = Math.ceil(activa.offsetWidth);
   const h = Math.ceil(activa.offsetHeight);
+  const ahora = { w, h, oculta: oculta(), sombra: urgente(v) && ui !== 'abierta' };
+  const encoge = LINUX && antes && (w < antes.w || h < antes.h || (ahora.oculta && !antes.oculta) || (antes.sombra && !ahora.sombra));
+  if (encoge) isla.classList.add('de-golpe');
   isla.style.setProperty('--w', `${w}px`);
   isla.style.setProperty('--h', `${h}px`);
   isla.style.setProperty('--r', ui === 'abierta' ? '28px' : `${Math.round(h / 2)}px`);
+  if (encoge) {
+    void isla.offsetWidth; // aplica el tamaño nuevo sin transición
+    // Cuando ese cuadro ya está en pantalla, se vuelven a permitir las transiciones y se limpia la ventana.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      isla.classList.remove('de-golpe');
+      invocar('isla_repintar');
+    }));
+  }
+  antes = ahora;
 
   // Solo la isla recibe clics: se informa su rectángulo (con un margen pequeño) a la ventana.
   const m = 4;

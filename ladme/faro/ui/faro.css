@@ -146,6 +146,12 @@ button { font: inherit; color: inherit; }
 html.linux .capa,
 html.linux .capa.activa { filter: none; }
 html.linux .isla { --muelle: ease-out; }
+/* Encogerse o esconderse es de golpe (isla.js); y nada de escalas que achican la isla al soltar el mouse. */
+html.linux .isla.de-golpe,
+html.linux .isla.de-golpe .capa { transition: none !important; }
+html.linux .isla[data-ui]:hover,
+html.linux .isla[data-ui]:active,
+html.linux .isla.arrastrando { scale: 1; }
 html.linux .tarjeta { backdrop-filter: none; background: rgba(15, 15, 20, 0.92); }
 
 /* Texto que escriben las personas (mensaje del proceso, programas protegidos, nombre, anuncios). El servidor ya
