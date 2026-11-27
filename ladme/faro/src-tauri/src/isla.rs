@@ -80,11 +80,34 @@ pub fn crear(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .focused(false)
         .visible(false)
         .build()?;
+    #[cfg(target_os = "linux")]
+    sin_aceleracion(&w);
     if let Some(e) = app.try_state::<Compartida>() {
         let p = e.lock().unwrap().posicion;
         ubicar(&w, p);
     }
     Ok(w)
+}
+
+/// En Linux la isla se dibuja sin aceleración por GPU. Con la aceleración, WebKitGTK no borra lo que la
+/// ventana transparente dejó de cubrir: al encogerse quedan rastros negros que tardan en irse (UNAL-07 en
+/// Ubuntu, Fedora con Faro 0.7). Sin ella cada cuadro se pinta entero; para una ventana de este tamaño el
+/// costo es mínimo. Solo la isla: las pantallas de bloqueo no son transparentes y conservan la GPU.
+/// `FARO_ISLA_GPU=1` la deja con GPU (para comparar).
+#[cfg(target_os = "linux")]
+fn sin_aceleracion(w: &WebviewWindow) {
+    if std::env::var_os("FARO_ISLA_GPU").is_some() {
+        return;
+    }
+    let r = w.with_webview(|wv| {
+        use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
+        if let Some(s) = wv.inner().settings() {
+            s.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
+        }
+    });
+    if let Err(e) = r {
+        crate::registro::aviso(format!("No se pudo quitar la aceleración de la isla: {e}"));
+    }
 }
 
 /// x física de la ventana para cada lugar del borde superior del monitor principal.

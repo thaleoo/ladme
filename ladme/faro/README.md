@@ -43,18 +43,24 @@ El mismo Faro responde en una terminal. Al arrancar deja el comando disponible s
 en Linux un enlace `~/.local/bin/faro` al AppImage; en Windows un `faro.cmd` en
 `%LOCALAPPDATA%\Microsoft\WindowsApps` (ya está en el PATH; funciona en cmd y PowerShell).
 
+La línea de comandos está en inglés (con [clap](https://docs.rs/clap)); `faro --help` y `faro <comando> --help`
+muestran la ayuda. Los nombres en español de Faro 0.6 siguen funcionando como alias ocultos.
+
 | Comando | Qué hace |
 | --- | --- |
-| `faro estado` | Vínculo, si Faro está abierto, último contacto con el servidor, modo de la sala y reserva actual. |
+| `faro status` | Vínculo, si Faro está abierto, último contacto con el servidor, modo de la sala, reserva actual y suspensión. |
 | `faro doctor` | Revisa vínculo, Faro abierto, servidor y su demora, reloj, carpeta, arranque automático, sesión gráfica, herramientas del inventario (Linux), disco y versión publicada. Cada problema trae cómo arreglarlo. Sale con 1 si hay problemas. |
-| `faro logs` | Registro de Faro (`faro.log` en su carpeta). `-n 100`, `-f` para seguirlo, `--desde 30m`/`2h`/`1d`, `--nivel aviso|error`. |
-| `faro inventario` | Lo que Faro envía: procesador, RAM, gráfica, cámaras, disco, sistema, cuenta y programas. |
-| `faro version` | Versión, canal (estable o pruebas) e instalación. |
-| `faro vincular ABCD-EFGH` | Vincula el equipo con un código del panel (si Faro está cerrado, se usa al abrirlo). |
-| `faro actualizar`, `faro desbloquear`, `faro desvincular` | Piden la **clave de emergencia** (sin mostrarla) y se las pasan al Faro abierto, que la verifica como en la isla (5 intentos y una pausa). |
+| `faro logs` | Registro de Faro (`faro.log` en su carpeta). `-n 100`, `-f` para seguirlo, `--since 30m`/`2h`/`1d`, `--level warn|error`. |
+| `faro inventory` | Lo que Faro envía: procesador, RAM, gráfica, cámaras, disco, sistema, cuenta y programas. |
+| `faro version` | Versión, canal (stable o testing) e instalación. `faro -V` solo da el número. |
+| `faro link ABCD-EFGH` | Vincula el equipo con un código del panel (si Faro está cerrado, se usa al abrirlo). |
+| `faro update`, `faro unlink` | Piden la **clave de emergencia** (sin mostrarla) y se la pasan al Faro abierto, que la verifica como en la pantalla (5 intentos y una pausa). |
+| `faro unlock` | Igual, y acepta también una **clave temporal** del personal (hasta que vence). |
 
-Todos aceptan `--json` (para scripts o para pegar en un reporte) y `--sin-color`. Lo que solo lee funciona
-aunque Faro esté cerrado; las órdenes con clave necesitan a Faro abierto.
+Todos aceptan `--json` (para scripts o para pegar en un reporte) y `--no-color` (también `NO_COLOR`). Códigos
+de salida: 0 bien, 1 hay un problema, 2 uso incorrecto. Una palabra mal escrita (`faro stauts`) da la sugerencia
+de clap en vez de abrir Faro. Lo que solo lee funciona aunque Faro esté cerrado; las órdenes con clave
+necesitan a Faro abierto.
 
 Según el **modo** que elija el laboratorio para cada equipo (Administración → Faro):
 

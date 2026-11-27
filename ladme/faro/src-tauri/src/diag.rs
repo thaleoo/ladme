@@ -1,5 +1,5 @@
 //! Diagnóstico rápido del equipo: lo que se adjunta a un reporte de falla hecho desde la isla y lo que
-//! muestra `faro estado`. Solo cifras del equipo (memoria, disco, procesador, red, sesión), nada de la persona.
+//! muestra `faro status`. Solo cifras del equipo (memoria, disco, procesador, red, sesión), nada de la persona.
 
 use serde_json::{json, Value};
 use sysinfo::{Disks, MemoryRefreshKind, RefreshKind, System};

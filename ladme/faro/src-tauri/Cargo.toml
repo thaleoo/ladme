@@ -1,6 +1,6 @@
 [package]
 name = "ladme-faro"
-version = "0.7.0"
+version = "0.7.1"
 description = "Faro: agente de los computadores de la sala LADME"
 authors = ["Laboratorio de Datos y Modelamiento Estadístico, UNAL Sede La Paz"]
 edition = "2021"
@@ -31,6 +31,7 @@ os_info = { version = "3", default-features = false }
 sysinfo = { version = "0.33", default-features = false, features = ["system", "disk", "network"] }
 dirs = "5"
 if-addrs = "0.13"
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "color"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
@@ -39,6 +40,7 @@ windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse",
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2"
 gtk = "0.18"
+webkit2gtk = "2.0"
 
 [profile.release]
 codegen-units = 1

@@ -409,7 +409,7 @@ async fn ciclo(app: AppHandle, compartido: Compartido) {
     let mut estaba_en_linea: Option<bool> = None;
     loop {
         if revisar_orden_cli(&app, &compartido) {
-            ultimo_intento_vinculo = None; // `faro vincular`: se intenta ya
+            ultimo_intento_vinculo = None; // `faro link`: se intenta ya
         }
         let inactivo = inactividad::segundos();
         let (vinculado, carpeta) = {
@@ -852,7 +852,7 @@ async fn accion_isla(estado: tauri::State<'_, Compartido>, accion: String, categ
     }
 }
 
-/// Órdenes de la línea de comandos (`faro desbloquear`, `faro vincular`…), que llegan como un archivo en la
+/// Órdenes de la línea de comandos (`faro unlock`, `faro link`…), que llegan como un archivo en la
 /// carpeta de Faro. Devuelve true si hay que intentar vincular ya.
 fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
     let carpeta = compartido.lock().unwrap().carpeta.clone();
@@ -865,11 +865,11 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
         "vincular" => {
             let mut n = compartido.lock().unwrap();
             if n.config.token.is_some() {
-                Err("Este equipo ya está vinculado.".into())
+                Err("This computer is already linked.".into())
             } else {
                 n.config.codigo_vinculo = o.codigo.clone();
                 vincular_ya = true;
-                Ok("Vinculando…".into())
+                Ok("Linking…".into())
             }
         }
         "desbloquear" | "actualizar" | "desvincular" => {
@@ -880,24 +880,24 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
                 Ok(llave) => match o.orden.as_str() {
                     "desbloquear" => {
                         desbloquear_emergencia(&mut n, llave);
-                        Ok(format!("Equipo desbloqueado por {EMERGENCIA_HORAS} horas."))
+                        Ok(format!("Unlocked for staff (up to {EMERGENCIA_HORAS} h)."))
                     }
                     "actualizar" => {
                         drop(n);
                         if let Some(a) = app.try_state::<ActualizarYa>() {
                             a.0.notify_one();
                         }
-                        Ok("Buscando una versión nueva: si la hay, se instala cuando nadie use el equipo.".into())
+                        Ok("Checking for a new version: if there is one, it installs when nobody is using the computer.".into())
                     }
                     _ => {
                         registro::info("Desvinculado desde la línea de comandos");
                         quedar_desvinculado(app, &mut n);
-                        Ok("Equipo desvinculado. Vincúlelo de nuevo con «faro vincular CÓDIGO».".into())
+                        Ok("Computer unlinked. Link it again with «faro link CODE».".into())
                     }
                 },
             }
         }
-        otra => Err(format!("Orden desconocida: {otra}")),
+        otra => Err(format!("Unknown order: {otra}")),
     };
     match &r {
         Ok(t) => registro::info(format!("Orden de la línea de comandos «{}»: {t}", o.orden)),
