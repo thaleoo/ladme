@@ -6,29 +6,40 @@
   <title>Faro · Vincular este equipo</title>
   <link rel="stylesheet" href="faro.css" />
   <style>
-    html, body { background: radial-gradient(120% 80% at 50% 0%, #1a1530 0%, var(--negro) 60%); }
-    main { display: flex; flex-direction: column; min-height: 100vh; padding: 34px 34px 28px; }
-    .logo { width: 56px; height: 56px; border-radius: 16px; background: url('icono.png') center / cover; box-shadow: 0 12px 30px -10px rgba(124,77,255,.6); }
-    h1 { margin: 22px 0 6px; font-size: 24px; letter-spacing: -0.015em; }
+    /* Misma imagen que la pantalla de bloqueo: negro, una luz violeta quieta y la cuadrícula tenue. */
+    html, body { background: var(--negro); overflow: hidden; }
+    .fondo { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+    .fondo::before { content: ''; position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 32px 32px; mask-image: radial-gradient(ellipse at 30% 0%, #000 10%, transparent 70%); }
+    .fondo i { position: absolute; left: -45%; top: -55%; width: 130%; aspect-ratio: 1; border-radius: 50%; opacity: 0.5;
+      background: radial-gradient(closest-side, #6d28d9 0%, color-mix(in srgb, #6d28d9 55%, transparent) 40%, color-mix(in srgb, #6d28d9 15%, transparent) 70%, transparent 100%); }
+    main { position: relative; display: flex; flex-direction: column; min-height: 100vh; padding: 30px 32px 26px; }
+    .marca { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 13px; letter-spacing: 0.06em; }
+    .marca .logo-ladme { width: 30px; height: 30px; border-radius: 9px; box-shadow: 0 0 0 1px rgba(255,255,255,0.1); }
+    .marca span { color: var(--texto-3); font-weight: 500; letter-spacing: 0.01em; }
+    h1 { margin: 34px 0 8px; font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
     p { margin: 0; color: var(--texto-2); font-size: 14px; line-height: 1.55; }
-    ol { margin: 18px 0 22px; padding: 0; list-style: none; counter-reset: paso; display: grid; gap: 10px; }
+    ol { margin: 22px 0 24px; padding: 0; list-style: none; counter-reset: paso; display: grid; gap: 12px; }
     li { counter-increment: paso; display: flex; gap: 12px; color: var(--texto-2); font-size: 13.5px; line-height: 1.45; }
     li::before { content: counter(paso); flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
-                 background: rgba(139,92,246,.18); color: var(--violeta-claro); font-size: 12px; font-weight: 700; }
+                 background: var(--superficie); border: 1px solid var(--borde-fuerte); color: var(--texto); font-size: 12px; font-weight: 650; }
     li b { color: var(--texto); font-weight: 600; }
     form { display: grid; gap: 12px; }
     .boton { height: 44px; font-size: 14px; }
     .listo { margin: auto 0; text-align: center; animation: aparecer .4s ease both; }
-    .listo .ok { width: 72px; height: 72px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center; background: rgba(52,211,153,.15); color: var(--verde); }
+    .listo .ok { width: 72px; height: 72px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center; background: rgba(52,211,153,.14); color: var(--verde); }
     .listo .ok svg { width: 34px; height: 34px; }
+    .listo h1 { margin-top: 0; }
     .pie { margin-top: auto; padding-top: 18px; color: var(--texto-3); font-size: 12px; }
     @keyframes aparecer { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
   </style>
   <script type="module" src="vincular.js"></script>
 </head>
 <body>
+  <div class="fondo" aria-hidden="true"><i></i></div>
   <main>
-    <div class="logo"></div>
+    <div class="marca" id="marca">LADME <span>· Faro</span></div>
     <h1>Vincular este equipo</h1>
     <p>Faro muestra en la pantalla la reserva vigente de este PC. Solo el personal del laboratorio puede vincularlo.</p>
     <ol>
@@ -41,7 +52,7 @@
       <button class="boton principal" type="submit">Vincular</button>
       <div class="error" id="error"></div>
     </form>
-    <div class="pie">LADME · Laboratorio de Datos y Modelamiento Estadístico · UNAL Sede La Paz</div>
+    <div class="pie">Laboratorio de Datos y Modelamiento Estadístico · UNAL&nbsp;Sede&nbsp;La&nbsp;Paz</div>
   </main>
 </body>
 </html>

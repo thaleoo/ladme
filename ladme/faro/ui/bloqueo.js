@@ -1,4 +1,4 @@
-import { invocar, escuchar, fijarDesfase, cuenta, cuando, conPunto, textoReloj, textoFecha, esc, ICONOS, DIBUJO_NFC } from './comun.js';
+import { invocar, escuchar, fijarDesfase, cuenta, cuando, textoHora, conPunto, textoReloj, textoFecha, esc, ICONOS, DIBUJO_NFC } from './comun.js';
 
 const principal = new URLSearchParams(location.search).has('principal');
 const main = document.getElementById('principal');
@@ -29,6 +29,7 @@ function pintar() {
   const v = paquete?.vista;
   if (!v) return;
   document.body.dataset.estado = v.estado;
+  document.body.dataset.motivo = v.motivo_suspension ?? '';
   const desatendido = v.pantalla === 'desatendido';
   const suspendido = v.pantalla === 'suspension';
   if (!principal) {
@@ -77,26 +78,36 @@ function pintar() {
 // Pantalla suspendida: los programas siguen abiertos detrás. Se quita con el código de la reserva, el QR de un
 // solo uso (con la cuenta de la reserva) o una clave del personal.
 function pintarSuspension(v) {
-  const reserva = v.titular
-    ? `La reserva de ${esc(v.titular)} sigue${v.cuenta_hasta ? ` hasta ${cuando(v.cuenta_hasta)}` : ''}: nada se cerró.`
-    : 'Nada se cerró: al desbloquear todo sigue como estaba.';
+  const titular = v.motivo_suspension === 'titular';
+  let izquierda;
+  if (titular) {
+    // «Salir un rato»: el titular dejó la pantalla tapada; quien llega sabe que está en uso y hasta cuándo.
+    izquierda = `<div class="estado"><span class="punto"></span>${esc(v.equipo)} · En uso${v.titular ? ` por ${esc(v.titular)}` : ''}</div>
+      <h1 class="titulo">${v.vuelvo ? `Vuelvo a las ${textoHora(v.vuelvo)}` : 'Salí un momento'}</h1>
+      ${v.mensaje ? `<div class="mensaje">«${esc(v.mensaje)}»</div>` : ''}
+      <p class="detalle">Nada se cerró.${v.cuenta_hasta ? ` ${conPunto(`Reserva hasta ${cuando(v.cuenta_hasta)}`)}` : ''}</p>`;
+  } else {
+    const reserva = v.titular
+      ? `La reserva de ${esc(v.titular)} sigue${v.cuenta_hasta ? ` hasta ${cuando(v.cuenta_hasta)}` : ''}: nada se cerró.`
+      : 'Nada se cerró: al desbloquear todo sigue como estaba.';
+    izquierda = `<div class="estado"><span class="punto"></span>${esc(v.equipo)} · Pantalla suspendida</div>
+      <h1 class="titulo">${v.mensaje ? 'Aviso del laboratorio' : 'El laboratorio suspendió esta pantalla'}</h1>
+      ${v.mensaje ? `<div class="anuncio grande">${ICONOS.megafono}<span>${esc(v.mensaje)}</span></div>` : ''}
+      <p class="detalle">${reserva}</p>`;
+  }
+  const quien = titular && v.titular ? `¿Eres ${esc(v.titular)}? Desbloquéalo` : v.con_codigo ? 'Desbloquéalo con tu reserva' : 'Desbloquéalo con tu celular';
   main.innerHTML = `<div class="centro">
-      <div>${reloj()}
-        <div class="estado"><span class="punto"></span>${esc(v.equipo)} · Pantalla suspendida</div>
-        <h1 class="titulo">${v.mensaje ? 'Aviso del laboratorio' : 'El laboratorio suspendió esta pantalla'}</h1>
-        ${v.mensaje ? `<div class="anuncio grande">${ICONOS.megafono}<span>${esc(v.mensaje)}</span></div>` : ''}
-        <p class="detalle">${reserva}</p>
-      </div>
+      <div>${reloj()}${izquierda}</div>
       <div class="tarjeta">
-        <div class="que">${v.con_codigo ? 'Desbloquéalo con tu reserva' : 'Desbloquéalo con tu celular'}</div>
+        <div class="que">${quien}</div>
         ${paquete.qr ? `<div class="qr">${paquete.qr}</div>
-          <p class="nota">Escanéalo con ${v.titular ? 'la cuenta de la reserva' : 'tu cuenta de LADME'}. El código cambia cada minuto.</p>` : ''}
+          <p class="nota">Escanéalo con ${v.titular ? 'la cuenta de la reserva' : 'tu cuenta de LADME'}. Cambia cada minuto.</p>` : ''}
         ${v.con_codigo ? `<form class="codigo-reserva" id="form-codigo">
             <label for="codigo">O escribe el código de tu reserva</label>
             <div class="fila"><input class="campo num" id="codigo" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="9" />
             <button class="boton principal" type="submit">Desbloquear</button></div>
             <span class="error" id="error-codigo"></span>
-            <p class="nota">Está en «Tu reserva», en la app.</p>
+            <p class="nota">Está en Mis reservas, en la app.</p>
           </form>` : ''}
       </div>
     </div>`;

@@ -958,10 +958,15 @@ export async function claveTemporalFaro(equipo: string | null, minutos: number):
 }
 
 /** Quita la suspensión de un equipo con el QR de un solo uso de su pantalla. */
-export async function desbloquearConQr(equipo: string, codigo: string): Promise<string> {
-  const { data, error } = await supabase.rpc('desbloquear_con_qr', { p_equipo: equipo, p_codigo: codigo })
+export type DesbloqueoQr =
+  | { ok: true; texto: string }
+  | { ok: false; confirmar: true; equipo: string; titular: string; hasta: string }
+
+/** Quita la suspensión con el QR de un solo uso. El personal, sobre la reserva de otra persona, confirma primero. */
+export async function desbloquearConQr(equipo: string, codigo: string, confirmar = false): Promise<DesbloqueoQr> {
+  const { data, error } = await supabase.rpc('desbloquear_con_qr', { p_equipo: equipo, p_codigo: codigo, p_confirmar: confirmar })
   if (error) fail('No se pudo desbloquear', error)
-  return (data as { texto: string }).texto
+  return data as DesbloqueoQr
 }
 
 export async function quitarAnuncioFaro(id: number): Promise<void> {

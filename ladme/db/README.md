@@ -356,3 +356,12 @@ Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha 
   - con una **clave temporal del personal** (`faro_clave_temporal(equipo | null, minutos)`, 5 min a 8 h) o la clave de emergencia.
 - Las claves temporales también desbloquean como la de emergencia (hasta que vencen), pero no sirven para retirar ni desvincular Faro.
 - `faro_estado` agrega `suspension`, `claves_temporales`, `actual.desbloqueo` y en `anuncio` los campos `obligatorio` y `leido`. `faro_panel` agrega `suspendido_hasta` por equipo y `confirmados` por anuncio.
+
+## Migración 0027 — «Salir un rato» y avisos al titular (Faro 0.7.5)
+
+`migrations/0027_faro_salir.sql`, después de 0026.
+
+- `faro_accion(..., 'salir')`: quien tiene la reserva (con la llegada confirmada) tapa la pantalla sin cerrar nada, con mensaje opcional (máx. 120, pasa por la lista de palabras) y hora de regreso opcional. Dura lo que la reserva (si se extiende, sigue; si termina o se libera, se quita). Se quita con el código de la reserva o el QR.
+- `desbloquear_con_qr(equipo, código, p_confirmar)`: el personal, sobre la reserva de otra persona, recibe primero `{confirmar: true, titular}`; al confirmar, desbloquea con `via = 'qr_personal'` y el titular recibe un aviso.
+- Avisos al titular (`cola_notificaciones`): `faro_suspendida` («bloquear ya»), `faro_desbloqueada` (lo desbloqueó otra persona: personal, clave temporal o de emergencia) y `faro_codigos` (Faro reporta el evento `codigos_fallidos` tras 3 códigos equivocados; uno cada 10 min).
+- Wrappers: `_faro_reanudar_0026`, `_faro_suspender_0026`, `_faro_evento_0026`, `_faro_accion_0026`, `_faro_estado_0026`.

@@ -662,6 +662,11 @@ fn verificar_llave(n: &mut Nucleo, ingresada: &str, temporal: bool, reserva: boo
         }
         None => {
             n.intentos_fallidos += 1;
+            // En la pantalla de una reserva, al tercer código equivocado se avisa al titular.
+            if reserva && n.intentos_fallidos == 3 {
+                n.pendientes.push(("codigos_fallidos".into(), json!({ "intentos": 3 })));
+                n.forzar = true;
+            }
             if n.intentos_fallidos >= 5 {
                 n.intentos_fallidos = 0;
                 n.espera_hasta = Some(Instant::now() + Duration::from_secs(60));
@@ -818,8 +823,15 @@ fn actualizar_ya(estado: tauri::State<Compartido>) {
 /// Una acción en la isla: extender (+30 o +60 min), liberar, reportar una falla (con diagnóstico) o pedir
 /// ayuda. Las reglas las aplica el servidor (las mismas que en la app).
 #[tauri::command]
-async fn accion_isla(estado: tauri::State<'_, Compartido>, accion: String, categoria: Option<String>, minutos: Option<u32>) -> Result<String, String> {
-    if !["extender", "liberar", "reportar", "ayuda"].contains(&accion.as_str()) {
+async fn accion_isla(
+    estado: tauri::State<'_, Compartido>,
+    accion: String,
+    categoria: Option<String>,
+    minutos: Option<u32>,
+    mensaje: Option<String>,
+    vuelvo_min: Option<u32>,
+) -> Result<String, String> {
+    if !["extender", "liberar", "reportar", "ayuda", "salir"].contains(&accion.as_str()) {
         return Err("Acción no válida.".into());
     }
     let estado: Compartido = estado.inner().clone();
@@ -832,6 +844,10 @@ async fn accion_isla(estado: tauri::State<'_, Compartido>, accion: String, categ
     let mut datos = json!({});
     if let Some(m) = minutos {
         datos["minutos"] = json!(m);
+    }
+    if accion == "salir" {
+        datos["mensaje"] = json!(mensaje.map(|m| m.trim().chars().take(120).collect::<String>()).filter(|m| !m.is_empty()));
+        datos["vuelvo_min"] = json!(vuelvo_min);
     }
     if accion == "reportar" {
         datos["categoria"] = json!(categoria.unwrap_or_default());
@@ -861,7 +877,20 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
     let _ = std::fs::remove_file(&ruta);
     let Ok(o) = serde_json::from_str::<cli::OrdenCli>(&texto) else { return false };
     let mut vincular_ya = false;
+    let mut despues: Option<&'static str> = None;
     let r: Result<String, String> = match o.orden.as_str() {
+        // `faro restart`: sin clave (no deja nada abierto) y `faro stop`: con clave (sin Faro no hay bloqueo).
+        "reiniciar" => {
+            despues = Some("reiniciar");
+            Ok("Restarting Faro…".into())
+        }
+        "detener" => {
+            let mut n = compartido.lock().unwrap();
+            verificar_llave(&mut n, o.clave.as_deref().unwrap_or(""), true, false).map(|_| {
+                despues = Some("detener");
+                "Faro stopped. Start it again with «faro start» (it also starts at the next login).".to_string()
+            })
+        }
         "vincular" => {
             let mut n = compartido.lock().unwrap();
             if n.config.token.is_some() {
@@ -908,6 +937,28 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
         Err(e) => (false, e),
     };
     cli::responder(&carpeta, &o.id, ok, &texto);
+    match despues {
+        Some("reiniciar") => {
+            registro::info("Reinicio pedido desde la línea de comandos");
+            vigia::pausar(&carpeta, 30);
+            std::thread::sleep(Duration::from_millis(400));
+            app.restart();
+        }
+        Some("detener") => {
+            registro::aviso("Faro detenido desde la línea de comandos");
+            // El vigía no lo vuelve a abrir hasta «faro start» o el próximo inicio de sesión.
+            vigia::pausar(&carpeta, 30 * 24 * 3600);
+            std::thread::sleep(Duration::from_millis(400));
+            #[cfg(target_os = "linux")]
+            if cli::servicio_activo() {
+                // Con systemd (Restart=always) hay que detener el servicio, o vuelve a arrancar.
+                let _ = std::process::Command::new("systemctl").args(["--user", "stop", "ladme-faro.service"]).spawn();
+                return vincular_ya;
+            }
+            app.exit(0);
+        }
+        _ => {}
+    }
     vincular_ya
 }
 

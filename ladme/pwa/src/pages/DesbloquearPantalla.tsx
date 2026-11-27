@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { hora } from '../lib/format'
 import { Link, useSearchParams } from 'react-router-dom'
-import { desbloquearConQr } from '../lib/api'
+import { desbloquearConQr, type DesbloqueoQr } from '../lib/api'
 import PageHeader from '../components/PageHeader'
 import Icon from '../components/Icon'
 
@@ -12,9 +13,19 @@ export default function DesbloquearPantalla() {
   const [params] = useSearchParams()
   const equipo = (params.get('equipo') ?? '').toUpperCase()
   const codigo = params.get('c') ?? ''
-  const [estado, setEstado] = useState<'enviando' | 'listo' | 'error'>('enviando')
+  const [estado, setEstado] = useState<'enviando' | 'listo' | 'error' | 'confirmar'>('enviando')
   const [texto, setTexto] = useState('')
+  const [pregunta, setPregunta] = useState<Extract<DesbloqueoQr, { confirmar: true }> | null>(null)
   const hecho = useRef(false)
+
+  function resultado(r: DesbloqueoQr) {
+    if (r.ok) { setTexto(r.texto); setEstado('listo'); navigator.vibrate?.(40) }
+    else { setPregunta(r); setEstado('confirmar') }
+  }
+  function fallo(e: unknown) {
+    setEstado('error')
+    setTexto((e instanceof Error ? e.message : 'No se pudo desbloquear.').replace(/^No se pudo desbloquear: /, ''))
+  }
 
   useEffect(() => {
     if (hecho.current) return
@@ -24,12 +35,7 @@ export default function DesbloquearPantalla() {
       setTexto('Este enlace no está completo. Escanee de nuevo el QR que muestra la pantalla del equipo.')
       return
     }
-    desbloquearConQr(equipo, codigo)
-      .then((t) => { setTexto(t); setEstado('listo'); navigator.vibrate?.(40) })
-      .catch((e: unknown) => {
-        setEstado('error')
-        setTexto((e instanceof Error ? e.message : 'No se pudo desbloquear.').replace(/^No se pudo desbloquear: /, ''))
-      })
+    desbloquearConQr(equipo, codigo).then(resultado).catch(fallo)
   }, [equipo, codigo])
 
   return (
@@ -39,6 +45,19 @@ export default function DesbloquearPantalla() {
         <section className="card asistencia-ok">
           <span className="spinner" aria-hidden="true" />
           <p className="small muted" style={{ margin: 0 }}>Desbloqueando…</p>
+        </section>
+      ) : estado === 'confirmar' && pregunta ? (
+        <section className="card stack">
+          <h2 style={{ margin: 0 }}>Este equipo es de {pregunta.titular}</h2>
+          <p className="small muted" style={{ margin: 0 }}>
+            Su reserva sigue hasta las {hora(pregunta.hasta)}. Si lo desbloquea como personal, {pregunta.titular} recibe un aviso y queda en la actividad de Faro.
+          </p>
+          <div className="row tight">
+            <button className="btn" type="button" onClick={() => { setEstado('enviando'); desbloquearConQr(equipo, codigo, true).then(resultado).catch(fallo) }}>
+              Desbloquear como personal
+            </button>
+            <Link className="btn ghost" to="/admin?tab=faro">Cancelar</Link>
+          </div>
         </section>
       ) : estado === 'listo' ? (
         <section className="card asistencia-ok">

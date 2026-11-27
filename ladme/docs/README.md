@@ -5,6 +5,7 @@
 | `ROADMAP.md` | Hoja de ruta completa: auditoría, decisiones, fases, políticas, alertas, mantenimiento, PWA y migración |
 | `Contexto.md` | Encargo original y visión de la PWA |
 | `AUDITORIA_DATOS.md` | Radiografía anonimizada de las hojas reales (131 reservas, 16 equipos, duraciones, problemas de calidad) |
+| `FLUJO.md` | Ramas (`dev` → `main`), cómo aplicar una entrega, canal de pruebas de Faro y releases |
 
 ## Documentos previstos
 

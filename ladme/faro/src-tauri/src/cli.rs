@@ -19,7 +19,7 @@ use std::time::Duration;
 
 /// First arguments that mean «run the command line» instead of opening Faro.
 pub const COMANDOS: &[&str] = &[
-    "status", "doctor", "logs", "inventory", "version", "link", "update", "unlock", "unlink", "help",
+    "status", "doctor", "logs", "inventory", "version", "link", "update", "unlock", "unlink", "start", "stop", "restart", "help",
     // Faro 0.6 names
     "estado", "inventario", "vincular", "actualizar", "desbloquear", "desvincular", "ayuda",
     "--help", "-h", "--version", "-V", "--json", "--no-color",
@@ -59,7 +59,14 @@ enum Comando {
     #[command(alias = "estado")]
     Status,
     /// Check this computer and suggest fixes
-    Doctor,
+    Doctor {
+        /// Fix what can be fixed without admin rights (start Faro, autostart, restart if stuck)
+        #[arg(long, alias = "reparar")]
+        fix: bool,
+        /// Also show paths and connection details
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Show Faro's log
     Logs {
         /// Number of lines to show
@@ -95,6 +102,15 @@ enum Comando {
     /// Unlink this computer (asks for the emergency key)
     #[command(alias = "desvincular")]
     Unlink,
+    /// Start Faro if it is not running
+    #[command(alias = "iniciar")]
+    Start,
+    /// Stop Faro and its watchdog until «faro start» or the next login (asks for a staff key)
+    #[command(alias = "detener")]
+    Stop,
+    /// Restart Faro
+    #[command(alias = "reiniciar")]
+    Restart,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -280,7 +296,12 @@ pub fn ejecutar(args: &[String]) -> i32 {
     let c = carpeta();
     match cli.command {
         Comando::Status => estado(&s, &c),
-        Comando::Doctor => doctor(&s, &c),
+        Comando::Doctor { fix, verbose } => {
+            if fix {
+                arreglar(&c);
+            }
+            doctor(&s, &c, verbose)
+        }
         Comando::Logs { lines, follow, since, level } => logs(&s, &c, lines, follow, since, level.into()),
         Comando::Inventory => inventario(&s),
         Comando::Version => version(&s, &c),
@@ -288,6 +309,16 @@ pub fn ejecutar(args: &[String]) -> i32 {
         Comando::Update => con_clave(&c, "actualizar", "Emergency key"),
         Comando::Unlock => con_clave(&c, "desbloquear", "Emergency or temporary key"),
         Comando::Unlink => con_clave(&c, "desvincular", "Emergency key"),
+        Comando::Start => iniciar(&c),
+        Comando::Stop => {
+            let r = con_clave(&c, "detener", "Emergency or temporary key");
+            if r == 0 && !esperar(|| !faro_abierto(&c), 10) {
+                eprintln!("Faro is still running. Check «faro logs».");
+                return 1;
+            }
+            r
+        }
+        Comando::Restart => reiniciar(&c),
     }
 }
 
@@ -394,7 +425,133 @@ fn instalar_paquete(paquete_apt: &str, paquete_dnf: &str) -> String {
     }
 }
 
-fn doctor(s: &Salida, c: &Path) -> i32 {
+// ------------------------------------------------------------------ start, stop, restart, fix
+
+fn esperar(mut listo: impl FnMut() -> bool, segundos: u64) -> bool {
+    let hasta = std::time::Instant::now() + Duration::from_secs(segundos);
+    while std::time::Instant::now() < hasta {
+        if listo() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    listo()
+}
+
+fn leer_pid(c: &Path) -> Option<u32> {
+    std::fs::read_to_string(c.join("faro.pid")).ok()?.trim().parse().ok()
+}
+
+/// Linux: ¿Faro está instalado como servicio de usuario (instalar-linux.sh)?
+#[cfg(target_os = "linux")]
+fn servicio_instalado() -> bool {
+    dirs::config_dir().map(|d| d.join("systemd/user/ladme-faro.service").is_file()).unwrap_or(false)
+}
+
+/// Linux: ¿el servicio está corriendo? (para detener Faro hay que detener el servicio).
+#[cfg(target_os = "linux")]
+pub fn servicio_activo() -> bool {
+    std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "ladme-faro.service"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
+        .unwrap_or(false)
+}
+
+fn abrir(c: &Path) {
+    crate::vigia::quitar_pausa(c);
+    #[cfg(target_os = "linux")]
+    if servicio_instalado() {
+        let _ = std::process::Command::new("systemctl").args(["--user", "start", "ladme-faro.service"]).status();
+        return;
+    }
+    crate::vigia::abrir_faro();
+}
+
+fn iniciar(c: &Path) -> i32 {
+    if faro_abierto(c) {
+        println!("Faro is already running.");
+        return 0;
+    }
+    abrir(c);
+    if esperar(|| faro_abierto(c), 15) {
+        println!("Faro started.");
+        0
+    } else {
+        eprintln!("Faro did not start. Check «faro logs».");
+        1
+    }
+}
+
+fn reiniciar(c: &Path) -> i32 {
+    if !faro_abierto(c) {
+        return iniciar(c);
+    }
+    let antes = leer_pid(c);
+    if let Err(e) = enviar_orden(c, "reiniciar", None, None, Duration::from_secs(10)) {
+        eprintln!("{e}");
+        return 1;
+    }
+    if esperar(|| faro_abierto(c) && leer_pid(c) != antes, 20) {
+        println!("Faro restarted.");
+        0
+    } else {
+        eprintln!("Faro did not come back. Run «faro start».");
+        1
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn activar_arranque() -> Result<String, String> {
+    if !servicio_instalado() {
+        return Err("no ladme-faro service: run instalar-linux.sh again".into());
+    }
+    let ok = std::process::Command::new("systemctl").args(["--user", "enable", "ladme-faro.service"]).status().map(|s| s.success()).unwrap_or(false);
+    if ok { Ok("enabled the ladme-faro service".into()) } else { Err("systemctl --user enable failed".into()) }
+}
+
+#[cfg(windows)]
+fn activar_arranque() -> Result<String, String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let (k, _) = RegKey::predef(HKEY_CURRENT_USER)
+        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .map_err(|e| e.to_string())?;
+    k.set_value("LADME Faro", &format!("\"{}\"", exe.display())).map_err(|e| e.to_string())?;
+    Ok("added Faro to login startup".into())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn activar_arranque() -> Result<String, String> {
+    Err("not supported on this system".into())
+}
+
+/// `faro doctor --fix`: lo que se arregla sin permisos de administrador.
+fn arreglar(c: &Path) {
+    let mut hecho = false;
+    if arranque_automatico().is_none() {
+        hecho = true;
+        match activar_arranque() {
+            Ok(t) => println!("→ Autostart: {t}"),
+            Err(e) => println!("→ Autostart: could not fix ({e})"),
+        }
+    }
+    if !faro_abierto(c) {
+        hecho = true;
+        abrir(c);
+        println!("→ Faro was not running: {}", if esperar(|| faro_abierto(c), 15) { "started" } else { "could not start it" });
+    } else if config::cargar_copia(c).recibido_en.is_some_and(|d| (chrono::Utc::now() - d).num_seconds() > 300) {
+        hecho = true;
+        println!("→ Faro was not talking to the server: {}", if reiniciar(c) == 0 { "restarted" } else { "restart failed" });
+    }
+    if !hecho {
+        println!("→ Nothing to fix automatically.");
+    }
+    println!();
+}
+
+fn doctor(s: &Salida, c: &Path, verbose: bool) -> i32 {
     let cfg = config::cargar(c);
     let copia = config::cargar_copia(c);
     let mut v: Vec<Chequeo> = Vec::new();
@@ -410,9 +567,9 @@ fn doctor(s: &Salida, c: &Path) -> i32 {
     if faro_abierto(c) {
         v.push(chequeo(Marca::Ok, "Faro is running", None));
     } else if cfg!(target_os = "linux") {
-        v.push(chequeo(Marca::Falla, "Faro is not running", Some("systemctl --user start ladme-faro   (or log out and back in)")));
+        v.push(chequeo(Marca::Falla, "Faro is not running", Some("faro start   (or faro doctor --fix)")));
     } else {
-        v.push(chequeo(Marca::Falla, "Faro is not running", Some("Open «LADME Faro» from the Start menu, or log out and back in")));
+        v.push(chequeo(Marca::Falla, "Faro is not running", Some("faro start   (or faro doctor --fix)")));
     }
 
     // Server and clock (one request that does not count as a heartbeat).
@@ -445,7 +602,7 @@ fn doctor(s: &Salida, c: &Path) -> i32 {
     }
     if let Some(d) = copia.recibido_en {
         if faro_abierto(c) && (chrono::Utc::now() - d).num_seconds() > 300 {
-            v.push(chequeo(Marca::Aviso, format!("Faro has not talked to the server since {}", hace(d)), Some("Check «faro logs --level warn»")));
+            v.push(chequeo(Marca::Aviso, format!("Faro has not talked to the server since {}", hace(d)), Some("Run «faro doctor --fix» or check «faro logs --level warn»")));
         }
     }
 
@@ -519,6 +676,18 @@ fn doctor(s: &Salida, c: &Path) -> i32 {
             if let Some(a) = &x.fix {
                 println!("   {} {a}", s.tenue("→"));
             }
+        }
+        if verbose {
+            let copia = config::cargar_copia(c);
+            println!();
+            println!("{}", s.tenue("Details"));
+            println!("  Folder       {}", c.display());
+            println!("  Log          {}", registro::ruta(c).display());
+            println!("  Program      {}", std::env::var_os("APPIMAGE").map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default().display());
+            println!("  Session      {}", crate::diag::sesion_grafica().unwrap_or_else(|| "—".into()));
+            println!("  Last contact {}", copia.recibido_en.map(|d| format!("{} ({})", hora_local(d), hace(d))).unwrap_or_else(|| "never".into()));
+            println!("  Clock offset {} s", copia.desfase_ms / 1000);
+            println!("  Channel      {}", if copia.remoto.as_ref().and_then(|r| r.canal.as_deref()) == Some("pruebas") { "testing" } else { "stable" });
         }
         println!(
             "{}",
@@ -877,6 +1046,8 @@ mod pruebas {
         }
         assert!(matches!(p(&["logs", "--desde", "2h", "--nivel", "aviso"]).unwrap().command, Comando::Logs { level: NivelArg::Warn, .. }));
         assert!(matches!(p(&["vincular", "ABCD-EFGH"]).unwrap().command, Comando::Link { .. }));
+        assert!(matches!(p(&["doctor", "--fix", "-v"]).unwrap().command, Comando::Doctor { fix: true, verbose: true }));
+        assert!(matches!(p(&["stop"]).unwrap().command, Comando::Stop) && matches!(p(&["restart"]).unwrap().command, Comando::Restart));
         assert_eq!(p(&["logs", "--since", "ayer"]).unwrap_err().exit_code(), 2);
         assert_eq!(p(&["--help"]).unwrap_err().exit_code(), 0);
         assert_eq!(p(&["frobnicate"]).unwrap_err().exit_code(), 2);

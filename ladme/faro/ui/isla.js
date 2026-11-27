@@ -1,4 +1,4 @@
-import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoReloj, esc, ICONOS, DIBUJO_NFC } from './comun.js';
+import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoReloj, esc, ICONOS, DIBUJO_NFC, LOGO } from './comun.js';
 
 // ------------------------------------------------------------------ estado
 const isla = document.getElementById('isla');
@@ -17,6 +17,7 @@ let resultado = null;         // { ok, texto } de la última acción hecha en la
 let haciendo = false;         // una acción en curso (botones deshabilitados)
 let aviso = '';               // mensaje bajo el panel (error o confirmación)
 let confirmar = '';           // botón que pide un segundo clic ('retirar' | 'limpiar')
+const salir = { proceso: false, mensaje: '', vuelvo: 30 }; // panel «Salir un rato»
 let qrLlegada = null;         // { svg, cambia_en } del QR de llegada (cambia cada 30 s)
 let anuncioVisto = '';
 let obligatorioVisto = null;
@@ -46,6 +47,7 @@ const ACCIONES = {
   liberar:  { texto: 'Liberar', icono: ICONOS.salir },
   reportar: { texto: 'Reportar falla', icono: ICONOS.falla },
   ayuda:    { texto: 'Pedir ayuda', icono: ICONOS.ayuda },
+  salir:    { texto: 'Salir un rato', icono: ICONOS.candado },
 };
 // Tipos de falla que se reportan con un toque (el equipo está encendido: «No enciende» no aplica).
 const CATEGORIAS = ['Lento o se congela', 'Software', 'Pantalla o periféricos', 'Red o internet', 'Otro'];
@@ -64,33 +66,71 @@ const vista = () => paquete?.vista ?? { estado: 'conectando', titulo: 'Conectand
 const urgente = (v = vista()) => !!v.insistir || ['por_terminar', 'gracia', 'libre_en_uso'].includes(v.estado);
 
 function accionesDe(estado, v = vista()) {
-  if (estado === 'reservado' || estado === 'por_terminar') return [...(v.llegada_pendiente ? ['llegada'] : []), 'extender', 'liberar', 'reportar', 'ayuda'];
+  if (estado === 'reservado' || estado === 'por_terminar') {
+    // Liberar y salir un rato piden la llegada confirmada (lo exige el servidor).
+    return v.llegada_pendiente ? ['llegada', 'extender', 'reportar', 'ayuda'] : ['extender', 'salir', 'liberar', 'reportar', 'ayuda'];
+  }
   if (estado === 'libre' || estado === 'libre_en_uso' || estado === 'gracia' || estado === 'compartido') return ['reservar', 'reportar', 'ayuda'];
   return ['reportar', 'ayuda'];
 }
 
+/** Cabecera de los paneles: volver, título y el tiempo con su aro. */
+function cabeceraPanel(v, titulo) {
+  const resto = restante(v);
+  return `<div class="cab-panel">
+      <button class="redondo chico" data-volver aria-label="Volver" ${haciendo ? 'disabled' : ''}>${ICONOS.volver}</button>
+      <span class="cab-panel__titulo">${titulo}</span>
+      ${v.cuenta_hasta ? `<span class="cab-panel__tiempo">${aro(resto, 18)}<span class="num" data-vivo="valor">${valorCorto(v)}</span></span>` : ''}
+    </div>`;
+}
+
+const masMinutos = (v, m) => (v.cuenta_hasta ? textoHora(new Date(new Date(v.cuenta_hasta).getTime() + m * 60_000).toISOString()) : '');
+
 /** Paneles de las acciones que se hacen en la isla. */
 function htmlPanel(v) {
-  const volver = `<button class="boton" data-volver title="Volver" ${haciendo ? 'disabled' : ''}>${ICONOS.volver} Volver</button>`;
   const dis = haciendo ? 'disabled' : '';
   switch (accion) {
     case 'extender':
-      return `<div class="panel-accion"><p><strong>¿Cuánto tiempo más?</strong>Se agrega a tu reserva si el equipo sigue libre después.</p>
-        <div class="acciones"><button class="boton principal" data-hacer="extender" data-minutos="30" ${dis}>+30 min</button>
-        <button class="boton principal" data-hacer="extender" data-minutos="60" ${dis}>+1 hora</button>${volver}</div></div>`;
+      return `${cabeceraPanel(v, 'Extender')}
+        <div class="dos">
+          <button class="opcion-grande" data-hacer="extender" data-minutos="30" ${dis}><b>+30 min</b><span>hasta ${masMinutos(v, 30)}</span></button>
+          <button class="opcion-grande" data-hacer="extender" data-minutos="60" ${dis}><b>+1 h</b><span>hasta ${masMinutos(v, 60)}</span></button>
+        </div>
+        <p class="nota">Solo si nadie más reservó después. Te llega el aviso al celular.</p>`;
     case 'liberar':
-      return `<div class="panel-accion"><p><strong>¿Terminaste?</strong>Tu reserva termina ahora y el equipo queda libre para otra persona. Guarda tu trabajo antes.</p>
-        <div class="acciones"><button class="boton peligro" data-hacer="liberar" ${dis}>${ICONOS.salir} Sí, liberar el equipo</button>${volver}</div></div>`;
+      return `${cabeceraPanel(v, '¿Terminaste?')}
+        <p class="nota">El equipo queda libre para otra persona. Guarda tu trabajo antes.</p>
+        <div class="fila-botones">
+          <button class="boton grande peligro" data-hacer="liberar" ${dis}>${ICONOS.salir} Liberar ahora</button>
+          <button class="boton grande" data-volver ${dis}>Cancelar</button>
+        </div>`;
     case 'reportar':
-      return `<div class="panel-accion"><p><strong>¿Qué le pasa al equipo?</strong>El laboratorio recibe el aviso con un diagnóstico del equipo.</p>
-        <div class="acciones categorias">${CATEGORIAS.map((c) => `<button class="boton" data-hacer="reportar" data-categoria="${esc(c)}" ${dis}>${esc(c)}</button>`).join('')}</div>
-        <div class="acciones">${volver}</div></div>`;
+      return `${cabeceraPanel(v, '¿Qué le pasa?')}
+        <div class="chips">${CATEGORIAS.map((c) => `<button class="boton chip" data-hacer="reportar" data-categoria="${esc(c)}" ${dis}>${esc(c)}</button>`).join('')}</div>
+        <p class="nota">Va al personal con un diagnóstico del equipo (red, disco, procesador).</p>`;
     case 'ayuda':
-      return `<div class="panel-accion"><p><strong>¿Necesitas ayuda?</strong>Avisamos al personal del laboratorio que en ${esc(v.equipo ?? 'este equipo')} necesitan ayuda.</p>
-        <div class="acciones"><button class="boton principal" data-hacer="ayuda" ${dis}>${ICONOS.ayuda} Avisar al personal</button>${volver}</div></div>`;
+      return `${cabeceraPanel(v, '¿Necesitas ayuda?')}
+        <p class="nota">Avisamos al personal que en ${esc(v.equipo ?? 'este equipo')} necesitan ayuda.</p>
+        <button class="boton grande principal ancho" data-hacer="ayuda" ${dis}>${ICONOS.ayuda} Avisar al personal</button>`;
+    case 'salir':
+      return `${cabeceraPanel(v, 'Salir un rato')}
+        <p class="nota">La pantalla se tapa y nada se cierra. La quitas con el código de tu reserva o el QR.</p>
+        <label class="interruptor">
+          <span><b>Dejo un proceso corriendo</b><small>Se muestra tu mensaje en la pantalla</small></span>
+          <input type="checkbox" data-salir-proceso ${salir.proceso ? 'checked' : ''} />
+          <i aria-hidden="true"></i>
+        </label>
+        ${salir.proceso ? `<input class="texto" data-campo="salir-mensaje" maxlength="120" placeholder="Ej.: entrenando un modelo, no apagar" value="${esc(salir.mensaje)}" aria-label="Mensaje en la pantalla" />` : ''}
+        <div class="vuelvo"><span>Vuelvo en</span>${[[0, '—'], [30, '30 min'], [60, '1 h'], [120, '2 h']].map(([m, t]) =>
+          `<button class="boton chip ${salir.vuelvo === m ? 'activo' : ''}" data-vuelvo="${m}">${t}</button>`).join('')}</div>
+        ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
+        <button class="boton grande principal ancho" data-hacer="salir" ${dis}>${ICONOS.candado} Bloquear pantalla</button>`;
     case 'hecho':
-      return `<div class="panel-accion ${resultado?.ok ? 'ok' : 'error'}"><p><strong>${resultado?.ok ? 'Listo' : 'No se pudo'}</strong>${esc(resultado?.texto ?? '')}</p>
-        <div class="acciones">${volver}</div></div>`;
+      return `<div class="resultado ${resultado?.ok ? 'ok' : 'error'}">
+          <span class="resultado__icono">${resultado?.ok ? ICONOS.check : ICONOS.falla}</span>
+          <p><b>${resultado?.ok ? 'Listo' : 'No se pudo'}</b>${esc(resultado?.texto ?? '')}</p>
+          <button class="boton" data-volver>Volver</button>
+        </div>`;
     default:
       return '';
   }
@@ -143,103 +183,150 @@ function queCuenta(v) {
 const valorCorto = (v) => (v.cuenta_hasta && v.estado !== 'libre' ? cuenta(v.cuenta_hasta) : textoReloj());
 
 // ------------------------------------------------------------------ contenido de cada capa
+/** Fracción que queda (1 = todo, 0 = nada) de la ocupación o del rato libre. */
+function restante(v) {
+  const p = progreso(v.desde, v.cuenta_hasta);
+  return p === null ? 1 : 1 - p;
+}
+
+/** Aro de progreso: lo que queda, en el color del estado. */
+function aro(fraccion, tam, px = tam > 40 ? 6 : 2.4) {
+  const grosor = (px * 18) / tam; // el grosor en píxeles, pasado a la escala del dibujo (18)
+  const r = 9 - grosor / 2;
+  const c = 2 * Math.PI * r;
+  return `<svg class="aro" width="${tam}" height="${tam}" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="${r}" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="${grosor}"/>
+      <circle data-vivo="aro" data-c="${c.toFixed(3)}" cx="9" cy="9" r="${r}" fill="none" stroke="var(--c)" stroke-width="${grosor}" stroke-linecap="round"
+        stroke-dasharray="${c.toFixed(3)}" stroke-dashoffset="${(c * (1 - fraccion)).toFixed(3)}"/>
+    </svg>`;
+}
+
 function htmlMini(v) {
-  return `<div class="mini"><span class="punto"></span><span class="valor num" data-vivo="valor">${valorCorto(v)}</span></div>`;
+  return `<div class="mini">${aro(restante(v), 14)}<span class="valor num" data-vivo="valor">${valorCorto(v)}</span></div>`;
 }
 
 function htmlCompacta(v) {
+  const extra = v.llegada_pendiente ? `<span class="marca-compacta ambar">Confirma asistencia</span>`
+    : v.anuncio ? `<span class="marca-compacta">${ICONOS.megafono}</span>` : '';
   return `<div class="compacta">
-      <span class="punto"></span>
+      ${aro(restante(v), 18)}
       <span class="codigo">${esc(v.equipo ?? 'Faro')}</span>
-      <span class="sep"></span>
-      <span class="etiqueta">${v.anuncio ? `<span class="megafono">${ICONOS.megafono}</span>` : ''}${v.llegada_pendiente ? (v.llegada_hasta ? `Confirma tu asistencia · hasta ${textoHora(v.llegada_hasta)}` : 'Confirma tu asistencia') : etiqueta(v)}</span>
-      ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
+      ${extra}
+      ${v.en_linea ? '' : `<span class="marca-compacta" title="Sin conexión">${ICONOS.sinRed}</span>`}
       <span class="valor num" data-vivo="valor">${valorCorto(v)}</span>
     </div>`;
 }
 
+/** Lo que va arriba a la derecha del aro: quién, hasta cuándo y una línea. */
+function encabezado(v) {
+  const hasta = v.cuenta_hasta ? textoHora(v.cuenta_hasta) : '';
+  switch (v.estado) {
+    case 'reservado':
+      return { kicker: v.titular ? `Reserva de ${esc(v.titular)}` : 'Reservado', titulo: `Hasta las ${hasta}`,
+               linea: v.llegada_pendiente ? (v.llegada_hasta ? `Confirma tu asistencia antes de las ${textoHora(v.llegada_hasta)}` : 'Confirma tu asistencia') : 'Llegada confirmada' };
+    case 'por_terminar':
+      return { kicker: 'Termina pronto', titulo: `Hasta las ${hasta}`, linea: 'Guarda tu trabajo o extiende' };
+    case 'libre':
+      return { kicker: 'Libre', titulo: v.siguiente ? `Libre hasta las ${textoHora(v.siguiente)}` : 'Disponible',
+               linea: paquete?.nfc ? 'Acerca tu celular a la base del monitor' : 'Resérvalo desde tu celular' };
+    case 'libre_en_uso':
+      return { kicker: 'Sin reserva', titulo: 'Resérvalo para usarlo', linea: paquete?.nfc ? 'O acerca tu celular a la base del monitor' : '' };
+    default:
+      return { kicker: etiqueta(v), titulo: esc(v.titulo), linea: esc(v.detalle ?? '') };
+  }
+}
+
 function htmlAbierta(v) {
   const codigo = v.equipo ?? '';
-  const p = progreso(v.desde, v.cuenta_hasta);
   let cuerpo;
   if (accion === 'personal') {
-    cuerpo = `<div class="panel-personal">
-        <p><strong>Personal del laboratorio</strong>Con la clave de emergencia puedes desbloquear este equipo 2 horas o quitar Faro de este PC.</p>
-        <input class="campo" data-clave type="password" autocomplete="off" placeholder="Clave de emergencia" aria-label="Clave de emergencia" />
-        ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
-        <div class="acciones">
-          <button class="boton principal" data-desbloquear>${ICONOS.candado} Desbloquear 2 h</button>
-          <button class="boton ${confirmar === 'retirar' ? 'peligro' : ''}" data-retirar>${ICONOS.papelera} ${confirmar === 'retirar' ? '¿Seguro? Quitar Faro' : 'Quitar Faro de este PC'}</button>
-          <button class="boton" data-volver title="Volver">${ICONOS.volver}</button>
-        </div>
+    cuerpo = `${cabeceraPanel(v, 'Personal del laboratorio')}
+      <p class="nota">Clave de emergencia o temporal: desbloquea este equipo. Solo la de emergencia quita Faro.</p>
+      <input class="campo" data-clave type="password" autocomplete="off" placeholder="Clave" aria-label="Clave del personal" />
+      ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
+      <div class="fila-botones">
+        <button class="boton grande principal" data-desbloquear>${ICONOS.candado} Desbloquear</button>
+        <button class="boton grande ${confirmar === 'retirar' ? 'peligro' : ''}" data-retirar>${ICONOS.papelera} ${confirmar === 'retirar' ? '¿Seguro?' : 'Quitar Faro'}</button>
       </div>`;
   } else if (accion && !ACCIONES[accion]?.qr) {
     cuerpo = htmlPanel(v);
   } else if (accion) {
-    const a = ACCIONES[accion];
     const r = ruta(accion, codigo);
     const svg = accion === 'llegada' ? qrLlegada?.svg : qrCache[r];
     const corto = accion === 'llegada' ? '' : enlaceCorto(codigo);
-    cuerpo = `<div class="panel-qr">
+    cuerpo = `${cabeceraPanel(v, accion === 'llegada' ? 'Confirma tu asistencia' : 'Reservar')}
+      <div class="panel-qr">
         <div class="qr">${svg ?? ''}</div>
-        <div>
-          <p><strong>${a.titulo}</strong>${a.cuerpo}</p>
-          ${accion === 'llegada' && qrLlegada?.numero ? `<div class="codigo-llegada num" aria-label="Código ${esc(qrLlegada.numero)}">${esc(qrLlegada.numero.slice(0, 3))}<span></span>${esc(qrLlegada.numero.slice(3))}</div>` : ''}
-          ${accion === 'llegada' && v.llegada_hasta ? `<p class="corto">Hazlo antes de las ${textoHora(v.llegada_hasta)}: si no, cuenta como inasistencia.</p>` : ''}
-          ${accion === 'reservar' && paquete?.nfc ? `<p class="corto">O acerca tu celular a la tarjeta de la base del monitor.</p>` : ''}
-          ${corto ? `<p class="corto">¿Sin cámara? Entra a <span class="num">${esc(corto)}</span></p>` : ''}
-          ${accion === 'llegada' ? `<div class="barra fina"><i data-vivo="qr-llegada"></i></div>` : ''}
+        <div class="panel-qr__lado">
+          ${accion === 'llegada' ? `<span class="nota">Escanea, o escribe en tu celular</span>
+            ${qrLlegada?.numero ? `<div class="codigo-llegada num" aria-label="Código ${esc(qrLlegada.numero)}">${esc(qrLlegada.numero.slice(0, 3))}<span></span>${esc(qrLlegada.numero.slice(3))}</div>` : ''}
+            <div class="barra fina"><i data-vivo="qr-llegada"></i></div>
+            ${v.llegada_hasta ? `<span class="nota chica">Antes de las ${textoHora(v.llegada_hasta)}</span>` : ''}`
+          : `<span class="nota">Escanea y elige hasta qué hora</span>
+            ${paquete?.nfc ? `<span class="nota chica">${ICONOS.nfc ?? ''} O acerca tu celular a la base del monitor</span>` : ''}
+            ${corto ? `<span class="nota chica">Sin cámara: <span class="num seleccionable">${esc(corto)}</span></span>` : ''}`}
           ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
-          <div class="acciones" style="margin-top:0">
-            <button class="boton" data-volver title="Volver">${ICONOS.volver} Volver</button>
-          </div>
         </div>
       </div>`;
   } else {
+    const e = encabezado(v);
+    const acciones = accionesDe(v.estado, v);
+    const primera = ACCIONES[acciones[0]]?.principal ? acciones[0] : null;
+    const resto = primera ? acciones.slice(1) : acciones;
     cuerpo = `
-      <h2 class="titulo">${esc(v.titulo)}</h2>
-      ${v.detalle ? `<p class="detalle">${esc(v.detalle)}</p>` : ''}
+      <div class="heroe">
+        <div class="heroe__aro">${aro(restante(v), 104)}
+          <div class="heroe__centro">${v.cuenta_hasta && v.estado !== 'libre'
+            ? `<span class="num" data-vivo="corto">${cuentaCorta(v.cuenta_hasta)}</span><small>quedan</small>`
+            : `<span class="heroe__icono">${v.estado === 'libre' && paquete?.nfc ? (ICONOS.nfc ?? '') : LOGO}</span>`}</div>
+        </div>
+        <div class="heroe__texto">
+          <span class="kicker">${e.kicker} · ${esc(codigo)}</span>
+          <h2 class="titulo">${e.titulo}</h2>
+          ${e.linea ? `<span class="linea">${e.linea}</span>` : ''}
+        </div>
+      </div>
       ${v.mensaje ? `<div class="mensaje">«${esc(v.mensaje)}»</div>` : ''}
-      ${v.limpieza_desde && limpiezaDescartada !== v.limpieza_desde ? `<div class="limpieza">
-          <p><strong>¿Borrar tus archivos?</strong>Se borrarán los archivos que se guardaron en Descargas y Escritorio durante la reserva, para que el siguiente no los vea.</p>
+      ${v.limpieza_desde && limpiezaDescartada !== v.limpieza_desde ? `<div class="tarjeta-aviso">
+          <p><b>¿Borrar tus archivos?</b>Los de Descargas y Escritorio de esta reserva, para que el siguiente no los vea.</p>
           ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
-          <div class="acciones">
-            <button class="boton ${confirmar === 'limpiar' ? 'peligro' : 'principal'}" data-limpiar>${ICONOS.papelera} ${confirmar === 'limpiar' ? '¿Seguro? No se puede deshacer' : 'Borrar mis archivos'}</button>
+          <div class="fila-botones">
+            <button class="boton ${confirmar === 'limpiar' ? 'peligro' : 'principal'}" data-limpiar>${ICONOS.papelera} ${confirmar === 'limpiar' ? '¿Seguro? No se deshace' : 'Borrar'}</button>
             <button class="boton" data-no-limpiar>No, gracias</button>
           </div>
         </div>` : ''}
-      ${v.cuenta_hasta ? `<div class="reloj"><span class="grande num" data-vivo="grande">${cuenta(v.cuenta_hasta)}</span>
-          <span class="que">${queCuenta(v)}<br>${textoHora(v.cuenta_hasta)}</span></div>` : ''}
-      ${p !== null ? `<div class="barra"><i data-vivo="barra" style="width:${(p * 100).toFixed(1)}%"></i></div>` : ''}
-      ${v.estado === 'por_terminar' ? `<div class="salida"><strong>Antes de irte</strong><ul>
-          <li>Guarda tu trabajo en tu memoria o en la nube.</li>
-          <li>Cierra tu correo y tus cuentas personales.</li>
-          <li>Si ya terminaste, libera el equipo.</li></ul></div>` : ''}
-      ${paquete?.nfc && (v.estado === 'libre' || v.estado === 'libre_en_uso') ? `<div class="nfc">${DIBUJO_NFC}<p><strong>¿Quieres usarlo?</strong>Acerca tu celular a la tarjeta de la base del monitor, o toca «Reservar este equipo».</p></div>` : ''}
-      <div class="acciones">${accionesDe(v.estado, v).map((k) => {
-        const a = ACCIONES[k];
-        return `<button class="boton ${a.principal ? 'principal' : ''}" data-accion="${k}">${a.icono} ${a.texto}</button>`;
-      }).join('')}</div>`;
+      ${v.estado === 'por_terminar' ? `<div class="tarjeta-aviso"><p><b>Antes de irte</b>Guarda tu trabajo, cierra tu correo y tus cuentas, y libera el equipo si ya terminaste.</p></div>` : ''}
+      <div class="barra-acciones">
+        ${primera ? `<button class="boton grande principal" data-accion="${primera}">${ACCIONES[primera].icono} ${ACCIONES[primera].texto === 'Reservar este equipo' ? 'Reservar' : ACCIONES[primera].texto}</button>` : ''}
+        ${resto.map((k) => `<button class="redondo" data-accion="${k}" aria-label="${ACCIONES[k].texto}" title="${ACCIONES[k].texto}">${ACCIONES[k].icono}</button>`).join('')}
+      </div>`;
   }
   return `<div class="abierta">
-      <div class="cabeza">
-        <span class="punto"></span>
-        <span class="codigo">${esc(codigo)}</span>
-        ${v.sistema ? `<span class="sistema">${esc(v.sistema)}</span>` : ''}
-        ${v.en_linea ? '' : '<span class="sin-red">sin red</span>'}
-        <button class="cerrar" data-cerrar title="Cerrar">${ICONOS.cerrar}</button>
-      </div>
+      ${accion ? '' : `<button class="cerrar" data-cerrar aria-label="Cerrar">${ICONOS.cerrar}</button>`}
       ${htmlAvisosFaro()}
-      ${v.anuncio ? `<div class="anuncio${v.confirmar_anuncio ? ' obligatorio' : ''}">${ICONOS.megafono}<span>${esc(v.anuncio)}${v.confirmar_anuncio
-        ? `<button class="boton principal" data-entendido="${v.confirmar_anuncio}">Entendido</button><small>Confírmalo para que la pantalla no se suspenda.</small>` : ''}</span></div>` : ''}
-      ${v.compartido ? `<div class="protegido">${ICONOS.candado}<span><strong>Uso compartido${v.compartido.titular ? ` de ${esc(v.compartido.titular)}` : ''}.</strong>
+      ${v.anuncio ? `<div class="anuncio${v.confirmar_anuncio ? ' obligatorio' : ''}">
+          <span class="anuncio__de">${ICONOS.megafono} Aviso del laboratorio</span>
+          <span class="anuncio__texto">${esc(v.anuncio)}</span>
+          ${v.confirmar_anuncio ? `<button class="boton grande principal ancho" data-entendido="${v.confirmar_anuncio}">Entendido</button>
+          <small>Si nadie lo confirma, la pantalla se suspende</small>` : ''}
+        </div>` : ''}
+      ${v.compartido ? `<div class="protegido">${ICONOS.candado}<span><b>Uso compartido${v.compartido.titular ? ` de ${esc(v.compartido.titular)}` : ''}.</b>
         ${v.compartido.protegidos?.length ? `No cierres ${esc(v.compartido.protegidos.join(', '))}.` : 'No cierres los programas abiertos.'}
-        No reinicies, apagues ni cierres la sesión.${v.compartido.nota ? ` «${esc(v.compartido.nota)}»` : ''}</span></div>` : ''}
-      ${v.espera > 0 && (v.estado === 'por_terminar' || v.estado === 'reservado') ? `<div class="espera">${ICONOS.reloj}<span>${v.espera === 1 ? 'Hay 1 persona esperando' : `Hay ${v.espera} personas esperando`} un equipo. Si ya terminaste, libéralo.</span></div>` : ''}
+        No reinicies ni cierres la sesión.${v.compartido.nota ? ` «${esc(v.compartido.nota)}»` : ''}</span></div>` : ''}
+      ${v.espera > 0 && (v.estado === 'por_terminar' || v.estado === 'reservado') ? `<div class="espera">${ICONOS.reloj}<span>${v.espera === 1 ? '1 persona espera' : `${v.espera} personas esperan`} un equipo. Si terminaste, libéralo.</span></div>` : ''}
       ${cuerpo}
-      <div class="pie"><span>Faro · LADME ${esc(paquete?.version ?? '')}${paquete?.clave_disponible && accion !== 'personal'
-        ? ` · <button class="link-pie" data-personal title="Personal del laboratorio">${ICONOS.llave} Personal</button>` : ''}</span><span class="num" data-vivo="hora">--</span></div>
+      <div class="pie"><span class="pie__marca">${LOGO}Faro</span>
+        <span class="pie__der"><span class="num" data-vivo="hora">--</span>${paquete?.clave_disponible && accion !== 'personal'
+          ? `<button class="link-pie" data-personal aria-label="Personal del laboratorio" title="Personal del laboratorio">${ICONOS.llave}</button>` : ''}</span></div>
     </div>`;
+}
+
+/** «1:13» (horas:minutos) o «12 min» dentro del aro. */
+function cuentaCorta(hasta) {
+  const s = Math.max(0, Math.round((new Date(hasta).getTime() - Date.now()) / 1000));
+  if (s < 3600) return `${Math.ceil(s / 60)} min`;
+  const h = Math.floor(s / 3600);
+  return `${h}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
 }
 
 // ------------------------------------------------------------------ dibujo
@@ -369,6 +456,9 @@ setInterval(() => {
   if (!v) return;
   for (const el of isla.querySelectorAll('[data-vivo="valor"]')) el.textContent = valorCorto(v);
   for (const el of isla.querySelectorAll('[data-vivo="grande"]')) if (v.cuenta_hasta) el.textContent = cuenta(v.cuenta_hasta);
+  for (const el of isla.querySelectorAll('[data-vivo="corto"]')) if (v.cuenta_hasta) el.textContent = cuentaCorta(v.cuenta_hasta);
+  const queda = restante(v);
+  for (const el of isla.querySelectorAll('[data-vivo="aro"]')) el.setAttribute('stroke-dashoffset', (Number(el.dataset.c) * (1 - queda)).toFixed(3));
   for (const el of isla.querySelectorAll('[data-vivo="hora"]')) el.textContent = textoReloj();
   const p = progreso(v.desde, v.cuenta_hasta);
   for (const el of isla.querySelectorAll('[data-vivo="barra"]')) if (p !== null) el.style.width = `${(p * 100).toFixed(1)}%`;
@@ -446,12 +536,15 @@ isla.addEventListener('click', async (e) => {
   else if (d.accion) {
     accion = d.accion; aviso = '';
     if (accion === 'llegada') { await refrescarLlegada(); programar(); return; }
+    if (accion === 'salir') invocar('isla_foco');
     if (ACCIONES[accion]?.qr) {
       const r = ruta(accion, codigo);
       if (!(r in qrCache)) qrCache[r] = await invocar('qr', { ruta: r });
     }
+  } else if (d.vuelvo !== undefined) {
+    salir.vuelvo = Number(d.vuelvo);
   } else if (d.hacer) {
-    // Extender, liberar, reportar o pedir ayuda: lo resuelve el servidor y se muestra el resultado.
+    // Extender, liberar, reportar, pedir ayuda o salir un rato: lo resuelve el servidor y se muestra el resultado.
     haciendo = true;
     dibujar();
     try {
@@ -459,6 +552,8 @@ isla.addEventListener('click', async (e) => {
         accion: d.hacer,
         categoria: d.categoria ?? null,
         minutos: d.minutos ? Number(d.minutos) : null,
+        mensaje: d.hacer === 'salir' && salir.proceso ? salir.mensaje : null,
+        vuelvoMin: d.hacer === 'salir' && salir.vuelvo ? salir.vuelvo : null,
       });
       resultado = { ok: true, texto };
     } catch (err) {
@@ -511,6 +606,18 @@ function mostrarBreve(texto) {
   dibujar();
   setTimeout(() => { if (paquete?.vista === v) { v.detalle = antes; dibujar(); } }, 4000);
 }
+
+// Lo que se escribe en los paneles se guarda en el estado (sobrevive a que se redibuje la isla).
+isla.addEventListener('input', (e) => {
+  if (e.target.matches('[data-campo="salir-mensaje"]')) salir.mensaje = e.target.value;
+});
+isla.addEventListener('change', (e) => {
+  if (e.target.matches('[data-salir-proceso]')) {
+    salir.proceso = e.target.checked;
+    dibujar();
+    if (salir.proceso) isla.querySelector('[data-campo="salir-mensaje"]')?.focus();
+  }
+});
 
 // Al escribir la clave, Enter desbloquea.
 isla.addEventListener('keydown', (e) => {

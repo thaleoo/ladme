@@ -96,6 +96,11 @@ fn lanzar(args: &[&std::ffi::OsStr]) {
     let _ = c.spawn();
 }
 
+/// Abre Faro (lo usa `faro start`).
+pub fn abrir_faro() {
+    lanzar(&[]);
+}
+
 /// Lanza al vigía si no hay uno vivo. Lo llama Faro cada pocos segundos.
 pub fn asegurar(carpeta: &Path) {
     if leer_pid(carpeta, "vigia.pid").map(vivo) == Some(true) {

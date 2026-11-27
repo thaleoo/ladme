@@ -12,7 +12,7 @@ name: Faro
 # Secretos (pestaña Secrets): TAURI_SIGNING_PRIVATE_KEY y TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["faro-v*", "faro-pruebas-v*"]
     paths:
       - "ladme/faro/**"

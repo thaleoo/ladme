@@ -33,10 +33,11 @@ const EVENTOS: Record<string, string> = {
   modo: 'Cambio de modo',
   suspension: 'Pantalla suspendida',
   reanudado: 'Suspensión quitada',
-  accion: 'Acción desde la isla'
+  accion: 'Acción desde la isla',
+  codigos_fallidos: 'Códigos equivocados en la pantalla'
 }
 
-const VIA: Record<string, string> = { codigo: 'con el código de la reserva', qr: 'con el QR', clave_temporal: 'con una clave temporal', emergencia: 'con la clave de emergencia', panel: 'desde el panel' }
+const VIA: Record<string, string> = { codigo: 'con el código de la reserva', qr: 'con el QR', qr_personal: 'con el QR, como personal', clave_temporal: 'con una clave temporal', emergencia: 'con la clave de emergencia', panel: 'desde el panel' }
 const duracion = (m: number) => (m < 60 ? `${m} min` : m === 1440 ? 'Todo el día' : `${m / 60} h`)
 
 type Filtro = 'todos' | 'linea' | 'sin_senal' | 'sin_vincular' | 'sin_reserva'
@@ -415,6 +416,7 @@ export default function Faro() {
                 <strong>{ev.equipo}</strong> · {EVENTOS[ev.tipo] ?? ev.tipo}
                 {ev.tipo === 'modo' && typeof ev.detalle.modo === 'string' ? ` → ${ev.detalle.modo}` : ''}
                 {ev.tipo === 'reanudado' && typeof ev.detalle.via === 'string' ? ` ${VIA[ev.detalle.via] ?? ''}` : ''}
+                {ev.tipo === 'suspension' && ev.detalle.motivo === 'titular' ? ' por su titular («Salir un rato»)' : ''}
                 {ev.actor ? ` · ${ev.actor}` : ''}
                 <span className="muted"> · {fecha(ev.creado_en)}</span>
               </li>

@@ -1288,3 +1288,65 @@ begin
   perform faro_quitar_anuncio(v_id);
   update reservas set estado = 'cancelada' where id = r.id;
 end $$;
+
+-- 0027: «Salir un rato», QR del personal con confirmación y avisos al titular.
+do $$
+declare t text; j jsonb; v_ana uuid; v_eq uuid; r reservas; v_qr text;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  t := faro_vincular(faro_codigo_vinculo('UNAL-06') ->> 'codigo', 'PC-06', 'Linux', '0.7.5') ->> 'token';
+  select id into v_ana from perfiles where correo = 'ana@unal.edu.co';
+  select id into v_eq from equipos where codigo = 'UNAL-06';
+  update reservas set estado = 'cancelada' where equipo_id = v_eq and estado = 'activa' and fin > now();
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  values (v_eq, v_ana, now() - interval '5 minutes', now() + interval '1 hour', 'Docencia') returning * into r;
+  perform set_config('request.jwt.claim.sub', '', false);
+
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'salir', '{}')$q$, t), 'confirme su asistencia');
+  update reservas set llegada_en = now() where id = r.id;
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'salir', '{"mensaje": "no tocar, gonorrea"}')$q$, t), 'no se permiten');
+  perform faro_accion(t, 'salir', '{"mensaje": "Entrenando un modelo, no apagar", "vuelvo_min": 30}');
+  j := faro_estado(t);
+  perform pg_temp.ok(j -> 'suspension' ->> 'motivo' = 'titular' and j -> 'suspension' ->> 'mensaje' = 'Entrenando un modelo, no apagar'
+                     and (j -> 'suspension' ->> 'vuelvo') is not null, 'el titular bloquea su pantalla con mensaje y hora de regreso');
+
+  -- Si la reserva se extiende, el bloqueo sigue hasta el nuevo fin.
+  update reservas set fin = fin + interval '30 minutes' where id = r.id;
+  j := faro_estado(t);
+  perform pg_temp.ok((j -> 'suspension' ->> 'hasta')::timestamptz > now() + interval '80 minutes', 'el bloqueo del titular sigue la reserva extendida');
+
+  -- Varios códigos equivocados: el titular recibe un aviso.
+  perform faro_evento(t, 'codigos_fallidos', '{"intentos": 3}');
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_codigos'), 'el titular se entera de los códigos equivocados');
+
+  -- El personal con el QR: primero pide confirmación; al confirmar, desbloquea y avisa al titular.
+  v_qr := j -> 'suspension' ->> 'qr';
+  perform pg_temp.como('lab@unal.edu.co');
+  j := desbloquear_con_qr('UNAL-06', v_qr);
+  perform pg_temp.ok((j ->> 'confirmar')::boolean and j ->> 'titular' is not null, 'el personal debe confirmar antes de desbloquear el equipo de otra persona');
+  j := desbloquear_con_qr('UNAL-06', v_qr, true);
+  perform pg_temp.ok((j ->> 'ok')::boolean and exists (select 1 from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_desbloqueada'),
+                     'al confirmar se desbloquea y el titular recibe un aviso');
+  perform pg_temp.ok(exists (select 1 from agente_eventos where equipo_id = v_eq and tipo = 'reanudado' and detalle ->> 'via' = 'qr_personal'),
+                     'queda en la actividad como desbloqueo del personal');
+
+  -- «Bloquear ya»: el titular recibe un aviso.
+  perform faro_suspender(array['UNAL-06'], 30);
+  perform pg_temp.ok(exists (select 1 from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_suspendida'), 'el titular se entera de la suspensión');
+  perform faro_reanudar(array['UNAL-06']);
+
+  -- El titular con su código: sin aviso (fue él).
+  delete from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_desbloqueada';
+  perform set_config('request.jwt.claim.sub', '', false);
+  perform faro_accion(t, 'salir', '{}');
+  perform faro_accion(t, 'reanudar', jsonb_build_object('codigo', r.codigo_desbloqueo, 'via', 'codigo'));
+  perform pg_temp.ok(faro_estado(t) -> 'suspension' is null and not exists (select 1 from cola_notificaciones where usuario_id = v_ana and tipo = 'faro_desbloqueada'),
+                     'el titular quita su propio bloqueo con el código, sin avisos');
+
+  -- Al terminar la reserva, el bloqueo del titular se quita solo.
+  perform faro_accion(t, 'salir', '{}');
+  update reservas set liberada_en = now() where id = r.id;
+  perform pg_temp.ok(faro_estado(t) -> 'suspension' is null, 'el bloqueo del titular termina con la reserva');
+  perform pg_temp.como('lab@unal.edu.co');
+  update reservas set estado = 'cancelada' where id = r.id;
+end $$;
