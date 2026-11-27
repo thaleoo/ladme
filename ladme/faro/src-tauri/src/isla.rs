@@ -89,14 +89,11 @@ pub fn crear(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     Ok(w)
 }
 
-/// En Linux la isla se dibuja sin aceleración por GPU. Con la aceleración, WebKitGTK no borra lo que la
-/// ventana transparente dejó de cubrir: al encogerse quedan rastros negros que tardan en irse (UNAL-07 en
-/// Ubuntu, Fedora con Faro 0.7). Sin ella cada cuadro se pinta entero; para una ventana de este tamaño el
-/// costo es mínimo. Solo la isla: las pantallas de bloqueo no son transparentes y conservan la GPU.
-/// `FARO_ISLA_GPU=1` la deja con GPU (para comparar).
+/// Linux, solo para diagnóstico: con `FARO_ISLA_SIN_GPU=1` la isla se dibuja sin aceleración por GPU.
+/// En Faro 0.7.1 era lo normal, pero no quitaba los rastros en Fedora (los quita `isla_repintar`).
 #[cfg(target_os = "linux")]
 fn sin_aceleracion(w: &WebviewWindow) {
-    if std::env::var_os("FARO_ISLA_GPU").is_some() {
+    if std::env::var_os("FARO_ISLA_SIN_GPU").is_none() {
         return;
     }
     let r = w.with_webview(|wv| {
@@ -157,6 +154,47 @@ pub fn isla_zona(app: AppHandle, estado: tauri::State<Compartida>, x: f64, y: f6
     }
     #[cfg(not(target_os = "linux"))]
     let _ = app;
+}
+
+/// Linux: la isla terminó de cambiar de tamaño. En algunos escritorios (Fedora 43 con GNOME, con o sin
+/// XWayland, con o sin GPU) la ventana transparente conserva los cuadros anteriores y quedan rastros negros
+/// que tardan en irse. Estirar la ventana 1 px y devolverla obliga a GTK, a WebKit y al escritorio a
+/// rehacer sus búferes desde cero: los rastros desaparecen. El tamaño para la persona no cambia (el píxel
+/// extra es transparente y dura un cuadro) y la zona que recibe el mouse tampoco.
+#[tauri::command]
+pub fn isla_repintar(app: AppHandle) {
+    #[cfg(target_os = "linux")]
+    if let Some(w) = app.get_webview_window(ETIQUETA) {
+        repintar(&w);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+}
+
+#[cfg(target_os = "linux")]
+fn repintar(w: &WebviewWindow) {
+    let w2 = w.clone();
+    let _ = w.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let Ok(v) = w2.gtk_window() else { return };
+        if !v.is_visible() {
+            return;
+        }
+        let (ancho, alto) = v.size();
+        v.set_resizable(true);
+        v.resize(ancho, alto + 1);
+        if let Some(g) = v.window() {
+            g.invalidate_rect(None, true);
+        }
+        let v2 = v.clone();
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+            v2.resize(ancho, alto);
+            v2.set_resizable(false);
+            if let Some(g) = v2.window() {
+                g.invalidate_rect(None, true);
+            }
+        });
+    });
 }
 
 /// Linux: solo el rectángulo de la isla recibe el mouse (vacío = la ventana no recibe nada).

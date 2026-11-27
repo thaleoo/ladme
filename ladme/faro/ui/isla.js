@@ -2,6 +2,18 @@ import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoRelo
 
 // ------------------------------------------------------------------ estado
 const isla = document.getElementById('isla');
+
+// Linux: al terminar cada cambio de tamaño de la isla, Faro rehace la ventana para que no queden rastros
+// (ver isla_repintar). Una vez por animación, cuando ya se quedó quieta.
+if (document.documentElement.classList.contains('linux')) {
+  let repintado = 0;
+  isla.addEventListener('transitionend', (e) => {
+    // Solo la isla misma (la barra de progreso también anima su ancho cada segundo).
+    if (e.target !== isla || !['width', 'height', 'opacity', 'translate', 'scale'].includes(e.propertyName)) return;
+    clearTimeout(repintado);
+    repintado = setTimeout(() => invocar('isla_repintar'), 120);
+  });
+}
 const capas = Object.fromEntries([...isla.querySelectorAll('.capa')].map((c) => [c.dataset.capa, c]));
 
 let paquete = null;

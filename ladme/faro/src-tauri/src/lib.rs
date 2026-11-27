@@ -1011,6 +1011,7 @@ pub fn run() {
             limpiar_sesion,
             retirar,
             isla::isla_zona,
+            isla::isla_repintar,
             isla::isla_arrastre,
             isla::isla_posicion,
             actualizar_ya
