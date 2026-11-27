@@ -30,12 +30,14 @@ function pintar() {
   if (!v) return;
   document.body.dataset.estado = v.estado;
   const desatendido = v.pantalla === 'desatendido';
+  const suspendido = v.pantalla === 'suspension';
   if (!principal) {
     document.body.classList.add('secundario');
-    main.innerHTML = `<div class="centro solo">${reloj()}<div class="estado"><span class="punto"></span>${esc(v.equipo)} · ${desatendido ? 'en uso' : 'bloqueado'}</div></div>`;
+    main.innerHTML = `<div class="centro solo">${reloj()}<div class="estado"><span class="punto"></span>${esc(v.equipo)} · ${desatendido ? 'en uso' : suspendido ? 'suspendido' : 'bloqueado'}</div></div>`;
     pie.innerHTML = '';
     return;
   }
+  if (suspendido) return pintarSuspension(v);
   const conQr = paquete.qr && (v.estado === 'bloqueado' || desatendido);
   let texto;
   if (desatendido) {
@@ -72,6 +74,53 @@ function pintar() {
   pintarPie(v);
 }
 
+// Pantalla suspendida: los programas siguen abiertos detrás. Se quita con el código de la reserva, el QR de un
+// solo uso (con la cuenta de la reserva) o una clave del personal.
+function pintarSuspension(v) {
+  const reserva = v.titular
+    ? `La reserva de ${esc(v.titular)} sigue${v.cuenta_hasta ? ` hasta ${cuando(v.cuenta_hasta)}` : ''}: nada se cerró.`
+    : 'Nada se cerró: al desbloquear todo sigue como estaba.';
+  main.innerHTML = `<div class="centro">
+      <div>${reloj()}
+        <div class="estado"><span class="punto"></span>${esc(v.equipo)} · Pantalla suspendida</div>
+        <h1 class="titulo">${v.mensaje ? 'Aviso del laboratorio' : 'El laboratorio suspendió esta pantalla'}</h1>
+        ${v.mensaje ? `<div class="anuncio grande">${ICONOS.megafono}<span>${esc(v.mensaje)}</span></div>` : ''}
+        <p class="detalle">${reserva}</p>
+      </div>
+      <div class="tarjeta">
+        <div class="que">${v.con_codigo ? 'Desbloquéalo con tu reserva' : 'Desbloquéalo con tu celular'}</div>
+        ${paquete.qr ? `<div class="qr">${paquete.qr}</div>
+          <p class="nota">Escanéalo con ${v.titular ? 'la cuenta de la reserva' : 'tu cuenta de LADME'}. El código cambia cada minuto.</p>` : ''}
+        ${v.con_codigo ? `<form class="codigo-reserva" id="form-codigo">
+            <label for="codigo">O escribe el código de tu reserva</label>
+            <div class="fila"><input class="campo num" id="codigo" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="9" />
+            <button class="boton principal" type="submit">Desbloquear</button></div>
+            <span class="error" id="error-codigo"></span>
+            <p class="nota">Está en «Tu reserva», en la app.</p>
+          </form>` : ''}
+      </div>
+    </div>`;
+  pintarPie(v);
+}
+
+// XXXXXXXX → XXXX-XXXX mientras se escribe.
+main.addEventListener('input', (e) => {
+  if (e.target.id !== 'codigo') return;
+  const limpio = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  e.target.value = limpio.length > 4 ? `${limpio.slice(0, 4)}-${limpio.slice(4)}` : limpio;
+});
+main.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const campo = document.getElementById('codigo');
+  try {
+    await invocar('quitar_suspension', { codigo: campo.value });
+    campo.blur();
+  } catch (err) {
+    document.getElementById('error-codigo').textContent = String(err);
+    campo.select();
+  }
+});
+
 function pintarPie(v) {
   const izquierda = pidiendoClave
     ? `<form class="personal" id="form-clave">
@@ -95,7 +144,8 @@ pie.addEventListener('submit', async (e) => {
   e.preventDefault();
   const campo = document.getElementById('clave');
   try {
-    await invocar('emergencia', { claveIngresada: campo.value });
+    if (paquete.vista?.pantalla === 'suspension') await invocar('quitar_suspension', { codigo: campo.value });
+    else await invocar('emergencia', { claveIngresada: campo.value });
     pidiendoClave = false;
   } catch (err) {
     document.getElementById('error').textContent = String(err);
@@ -121,7 +171,8 @@ function alRecibir(p) {
   const cambio = JSON.stringify(p.vista) !== JSON.stringify(paquete?.vista) || p.qr !== paquete?.qr;
   paquete = p;
   fijarDesfase(p.desfase_ms);
-  if (cambio && !pidiendoClave) pintar();
+  // No se repinta mientras alguien escribe un código.
+  if (cambio && !pidiendoClave && document.activeElement?.id !== 'codigo') pintar();
 }
 escuchar('faro://vista', alRecibir);
 invocar('estado_inicial').then(alRecibir);

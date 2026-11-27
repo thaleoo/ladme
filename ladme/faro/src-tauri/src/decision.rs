@@ -34,6 +34,35 @@ pub struct Remoto {
     /// Desde la 0025: el equipo tiene tarjeta NFC en la base del monitor.
     #[serde(default)]
     pub nfc: bool,
+    /// Desde la 0026: pantalla suspendida («bloquear ya» o anuncio obligatorio sin confirmar) y claves
+    /// temporales del personal vigentes.
+    #[serde(default)]
+    pub suspension: Option<Suspension>,
+    #[serde(default)]
+    pub claves_temporales: Vec<ClaveTemporal>,
+}
+
+/// La pantalla se tapa sin cerrar programas hasta que la persona de la reserva (o el personal) la quite.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Suspension {
+    pub desde: DateTime<Utc>,
+    #[serde(default)]
+    pub hasta: Option<DateTime<Utc>>,
+    /// «bloqueo» (lo pidió el personal) o «anuncio» (anuncio obligatorio sin confirmar).
+    pub motivo: String,
+    #[serde(default)]
+    pub texto: Option<String>,
+    /// Código de un solo uso del QR de la pantalla (cambia cada minuto).
+    #[serde(default)]
+    pub qr: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ClaveTemporal {
+    pub sal: String,
+    pub hash: String,
+    pub iteraciones: u32,
+    pub hasta: DateTime<Utc>,
 }
 
 /// Otra persona dejó un proceso corriendo y permite usar el equipo sin cerrar estos programas.
@@ -66,6 +95,11 @@ pub struct Anuncio {
     pub id: i64,
     pub texto: String,
     pub hasta: DateTime<Utc>,
+    /// Desde la 0026: hay que confirmarlo con «Entendido».
+    #[serde(default)]
+    pub obligatorio: bool,
+    #[serde(default)]
+    pub leido: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -100,6 +134,9 @@ pub struct Ocupacion {
     /// Hasta cuándo puede registrar la llegada sin que cuente como inasistencia (desde 0014).
     #[serde(default)]
     pub llegada_hasta: Option<DateTime<Utc>>,
+    /// Desde la 0026: código de la reserva, cifrado, para quitar una suspensión sin conexión.
+    #[serde(default)]
+    pub desbloqueo: Option<Clave>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -141,6 +178,15 @@ pub struct Memoria {
     /// Inicio de la última reserva vista (para ofrecer borrar solo los archivos de esa sesión).
     #[serde(default)]
     pub inicio_reciente: Option<DateTime<Utc>>,
+    /// Suspensión (por su inicio) que ya se quitó en este equipo, aunque el servidor aún no lo sepa.
+    #[serde(default)]
+    pub suspension_quitada: Option<DateTime<Utc>>,
+    /// Anuncio obligatorio confirmado aquí (por si no había conexión al confirmarlo).
+    #[serde(default)]
+    pub anuncio_leido: Option<i64>,
+    /// Acciones que falta avisar al servidor (reanudar, leído), para cuando vuelva la conexión.
+    #[serde(default)]
+    pub acciones: Vec<(String, serde_json::Value)>,
 }
 
 pub struct Entrada<'a> {
@@ -166,6 +212,8 @@ pub enum Estado {
     Compartido,
     Mantenimiento,
     Ocupado,
+    /// Pantalla suspendida: los programas siguen abiertos detrás.
+    Suspendido,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -174,6 +222,7 @@ pub enum Pantalla {
     Ninguna,
     Bloqueo,
     Desatendido,
+    Suspension,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -208,6 +257,10 @@ pub struct Vista {
     pub compartido: Option<Compartido>,
     /// Personas esperando un equipo libre.
     pub espera: i64,
+    /// Anuncio obligatorio por confirmar (su id), para el botón «Entendido».
+    pub confirmar_anuncio: Option<i64>,
+    /// La suspensión se puede quitar con el código de la reserva vigente.
+    pub con_codigo: bool,
 }
 
 /// «Windows Windows 11 Pro» → «Windows 11 Pro»: el tipo de sistema y la versión a veces traen la misma palabra.
@@ -223,6 +276,22 @@ const USO_RECIENTE_SEG: u64 = 120;
 
 fn es_reserva(o: &Ocupacion) -> bool {
     o.tipo == "reserva"
+}
+
+/// La suspensión que vale ahora: ni vencida ni quitada ya en este equipo, y la del anuncio
+/// no aplica en modo observar ni si el anuncio ya se confirmó aquí.
+pub fn vigente<'a>(r: &'a Remoto, m: &Memoria, ahora: DateTime<Utc>) -> Option<&'a Suspension> {
+    let s = r.suspension.as_ref()?;
+    if s.hasta.is_some_and(|h| h <= ahora) || m.suspension_quitada == Some(s.desde) {
+        return None;
+    }
+    if s.motivo == "anuncio" {
+        let leido = r.anuncio.as_ref().is_some_and(|a| a.leido || m.anuncio_leido == Some(a.id));
+        if r.modo == Modo::Observar || leido {
+            return None;
+        }
+    }
+    Some(s)
 }
 
 pub fn decidir(e: &Entrada) -> Vista {
@@ -249,6 +318,8 @@ pub fn decidir(e: &Entrada) -> Vista {
             limpieza_desde: None,
             compartido: None,
             espera: 0,
+            confirmar_anuncio: None,
+            con_codigo: false,
         };
     };
 
@@ -282,10 +353,39 @@ pub fn decidir(e: &Entrada) -> Vista {
         limpieza_desde: None,
         compartido: r.compartido.clone().filter(|c| c.hasta > ahora),
         espera: r.espera.max(0),
+        confirmar_anuncio: r
+            .anuncio
+            .as_ref()
+            .filter(|a| a.hasta > ahora && a.obligatorio && !a.leido && e.memoria.anuncio_leido != Some(a.id))
+            .map(|a| a.id),
+        con_codigo: false,
     };
 
     // La ocupación vigente según la copia (sin conexión, una reserva vale hasta su fin).
     let actual = r.actual.as_ref().filter(|o| o.inicio <= ahora && o.fin > ahora);
+
+    // 0) Pantalla suspendida: «bloquear ya» del personal (en todo modo) o anuncio obligatorio sin
+    //    confirmar (salvo en modo observar). Los programas siguen abiertos detrás.
+    if let Some(s) = vigente(r, e.memoria, ahora) {
+        v.estado = Estado::Suspendido;
+        v.pantalla = Pantalla::Suspension;
+        v.con_codigo = actual.is_some_and(|o| es_reserva(o) && o.desbloqueo.is_some());
+        v.titulo = "Pantalla suspendida".into();
+        v.detalle = if s.motivo == "anuncio" {
+            "Hay un aviso del laboratorio sin confirmar. Tus programas siguen abiertos.".into()
+        } else {
+            "El laboratorio suspendió la pantalla. Tus programas siguen abiertos.".into()
+        };
+        v.mensaje = s.texto.clone().or_else(|| v.anuncio.clone());
+        v.titular = actual.filter(|o| es_reserva(o)).and_then(|o| o.titular.clone());
+        v.cuenta_hasta = actual.filter(|o| es_reserva(o)).map(|o| o.fin);
+        v.ruta_qr = match &s.qr {
+            Some(q) => format!("/desbloquear?equipo={codigo}&c={q}"),
+            None => format!("/equipo/{codigo}"),
+        };
+        v.confirmar_anuncio = None;
+        return v;
+    }
 
     // 1) Desbloqueo del personal (PWA) o con la clave de emergencia: manda sobre todo.
     let desbloqueo = [r.desbloqueo_hasta, e.memoria.emergencia_hasta]
@@ -480,12 +580,14 @@ mod pruebas {
             compartido: None,
             espera: 0,
             nfc: false,
+            suspension: None,
+            claves_temporales: vec![],
         }
     }
 
     fn reserva(desde: i64, hasta: i64) -> Ocupacion {
         Ocupacion { tipo: "reserva".into(), inicio: t(desde), fin: t(hasta), titular: Some("Ana".into()),
-                    desatendido: false, mensaje: None, motivo: None, llegada: true, llegada_hasta: None }
+                    desatendido: false, mensaje: None, motivo: None, llegada: true, llegada_hasta: None, desbloqueo: None }
     }
 
     fn ver(r: &Remoto, min: i64, inactivo: Option<u64>, m: &Memoria) -> Vista {
@@ -636,5 +738,41 @@ mod pruebas {
         assert!(r.clave.is_some());
         let v = decidir(&Entrada { remoto: Some(&r), ahora: r.ahora, en_linea: true, inactivo_seg: Some(700), memoria: &Memoria::default() });
         assert_eq!((v.estado, v.pantalla), (Estado::Reservado, Pantalla::Desatendido));
+    }
+
+    #[test]
+    fn suspension_por_el_personal_y_por_anuncio() {
+        let mut o = reserva(-10, 60);
+        o.desbloqueo = Some(Clave { sal: "r1".into(), hash: "h".into(), iteraciones: 2000 });
+        let mut r = remoto(Modo::Observar, Some(o));
+        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(30)), motivo: "bloqueo".into(), texto: None, qr: Some("abc".into()) });
+        let mut m = Memoria::default();
+        let v = ver(&r, 0, Some(5), &m);
+        assert_eq!((v.pantalla.clone(), v.estado.clone(), v.con_codigo), (Pantalla::Suspension, Estado::Suspendido, true), "«bloquear ya» vale aun en observar");
+        assert_eq!(v.ruta_qr, "/desbloquear?equipo=UNAL-05&c=abc");
+        assert_eq!(ver(&r, 31, Some(5), &m).pantalla, Pantalla::Ninguna, "vence sola");
+        m.suspension_quitada = Some(t(-1));
+        assert_eq!(ver(&r, 0, Some(5), &m).pantalla, Pantalla::Ninguna, "quitada en el equipo aunque el servidor no lo sepa");
+
+        // Anuncio obligatorio: no suspende en observar ni si ya se confirmó aquí.
+        let mut m = Memoria::default();
+        r.anuncio = Some(Anuncio { id: 7, texto: "Simulacro".into(), hasta: t(60), obligatorio: true, leido: false });
+        r.suspension = Some(Suspension { desde: t(-1), hasta: Some(t(60)), motivo: "anuncio".into(), texto: Some("Simulacro".into()), qr: None });
+        assert_eq!(ver(&r, 0, Some(5), &m).pantalla, Pantalla::Ninguna);
+        r.modo = Modo::Avisar;
+        let v = ver(&r, 0, Some(5), &m);
+        assert_eq!((v.pantalla.clone(), v.mensaje.as_deref()), (Pantalla::Suspension, Some("Simulacro")));
+        m.anuncio_leido = Some(7);
+        let v = ver(&r, 0, Some(5), &m);
+        assert_eq!((v.pantalla, v.confirmar_anuncio), (Pantalla::Ninguna, None));
+    }
+
+    #[test]
+    fn anuncio_obligatorio_pide_confirmacion() {
+        let mut r = remoto(Modo::Avisar, None);
+        r.anuncio = Some(Anuncio { id: 3, texto: "Hoy cerramos a las 5".into(), hasta: t(60), obligatorio: true, leido: false });
+        assert_eq!(ver(&r, 0, None, &Memoria::default()).confirmar_anuncio, Some(3));
+        r.anuncio.as_mut().unwrap().leido = true;
+        assert_eq!(ver(&r, 0, None, &Memoria::default()).confirmar_anuncio, None);
     }
 }

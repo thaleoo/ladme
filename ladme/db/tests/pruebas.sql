@@ -1211,3 +1211,80 @@ begin
   perform pg_temp.falla(format($q$select faro_accion(%L, 'formatear')$q$, t), 'Acción no válida');
   perform pg_temp.como('lab@unal.edu.co');
 end $$;
+
+-- 0026: suspender la pantalla y desbloquearla con la reserva.
+do $$
+declare t text; j jsonb; v_ana uuid; v_beto uuid; v_eq uuid; r reservas; k jsonb; v_qr text; v_id bigint;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  t := faro_vincular(faro_codigo_vinculo('UNAL-06') ->> 'codigo', 'PC-06', 'Linux', '0.7.0') ->> 'token';
+  select id into v_ana from perfiles where correo = 'ana@unal.edu.co';
+  select id into v_beto from perfiles where correo = 'beto@unal.edu.co';
+  select id into v_eq from equipos where codigo = 'UNAL-06';
+  update reservas set estado = 'cancelada' where equipo_id = v_eq and estado = 'activa' and fin > now();
+  insert into reservas (equipo_id, usuario_id, inicio, fin, actividad)
+  values (v_eq, v_ana, now() - interval '5 minutes', now() + interval '1 hour', 'Docencia') returning * into r;
+  perform pg_temp.ok(r.codigo_desbloqueo ~ '^[A-Z2-9]{8}$', 'cada reserva tiene su código de desbloqueo');
+
+  -- Bloquear ya (personal).
+  perform pg_temp.como('beto@unal.edu.co');
+  perform pg_temp.falla($q$select faro_suspender(array['UNAL-06'], 30)$q$, 'Solo el personal');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform pg_temp.ok(faro_suspender(array['UNAL-06'], 30) = 1, 'el personal suspende un equipo');
+  perform pg_temp.ok((select x ->> 'suspendido_hasta' from jsonb_array_elements(faro_panel() -> 'equipos') x where x ->> 'codigo' = 'UNAL-06') is not null,
+                     'el panel muestra la suspensión');
+  perform set_config('request.jwt.claim.sub', '', false);
+  j := faro_estado(t);
+  perform pg_temp.ok(j -> 'suspension' ->> 'motivo' = 'bloqueo' and char_length(j -> 'suspension' ->> 'qr') = 32, 'Faro recibe la suspensión y un QR de un solo uso');
+  perform pg_temp.ok(j -> 'actual' -> 'desbloqueo' ->> 'hash' = _faro_hash_clave(r.id::text, r.codigo_desbloqueo, 2000), 'Faro recibe el código de la reserva cifrado');
+  v_qr := j -> 'suspension' ->> 'qr';
+
+  -- Con un código equivocado no se desbloquea; con el de la reserva, sí.
+  perform pg_temp.falla(format($q$select faro_accion(%L, 'reanudar', '{"codigo": "ZZZZ-ZZZZ"}')$q$, t), 'no desbloquea');
+  j := faro_accion(t, 'reanudar', jsonb_build_object('codigo', lower(substr(r.codigo_desbloqueo, 1, 4)) || '-' || substr(r.codigo_desbloqueo, 5), 'via', 'codigo'));
+  perform pg_temp.ok(faro_estado(t) -> 'suspension' is null, 'el código de la reserva quita la suspensión (sin importar mayúsculas ni guion)');
+
+  -- QR de un solo uso: solo la persona de la reserva.
+  perform pg_temp.como('lab@unal.edu.co');
+  perform faro_suspender(array['UNAL-06'], 30);
+  perform set_config('request.jwt.claim.sub', '', false);
+  v_qr := faro_estado(t) -> 'suspension' ->> 'qr';
+  perform pg_temp.como('beto@unal.edu.co');
+  perform pg_temp.falla(format($q$select desbloquear_con_qr('UNAL-06', %L)$q$, v_qr), 'Solo quien tiene la reserva');
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla($q$select desbloquear_con_qr('UNAL-06', 'qr-viejo')$q$, 'venció');
+  perform desbloquear_con_qr('UNAL-06', v_qr);
+  perform set_config('request.jwt.claim.sub', '', false);
+  perform pg_temp.ok(faro_estado(t) -> 'suspension' is null, 'quien tiene la reserva desbloquea con el QR');
+
+  -- Clave temporal del personal.
+  perform pg_temp.como('lab@unal.edu.co');
+  perform faro_suspender(array['UNAL-06'], 30);
+  k := faro_clave_temporal(null, 30);
+  perform pg_temp.ok(k ->> 'clave' ~ '^[A-Z2-9]{4}-[A-Z2-9]{4}$', 'el personal genera una clave temporal');
+  perform set_config('request.jwt.claim.sub', '', false);
+  j := faro_estado(t);
+  perform pg_temp.ok(jsonb_array_length(j -> 'claves_temporales') >= 1, 'Faro recibe las claves temporales vigentes');
+  perform faro_accion(t, 'reanudar', jsonb_build_object('codigo', k ->> 'clave', 'via', 'clave_temporal'));
+  perform pg_temp.ok(faro_estado(t) -> 'suspension' is null, 'la clave temporal quita la suspensión');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform faro_suspender(array['UNAL-06'], 30);
+  perform set_config('request.jwt.claim.sub', '', false);
+  perform faro_evento(t, 'desbloqueo_emergencia', '{"via": "emergencia"}');
+  perform pg_temp.ok(faro_estado(t) -> 'suspension' is null, 'la clave de emergencia en la pantalla también quita la suspensión');
+
+  -- Anuncio obligatorio: suspende si nadie lo confirma; «Entendido» lo evita.
+  perform pg_temp.como('lab@unal.edu.co');
+  v_id := faro_anunciar('Simulacro de evacuación a las 3 p. m.', 60, array['UNAL-06'], true);
+  update faro_anuncios set creado_en = now() - interval '11 minutes' where id = v_id;
+  perform set_config('request.jwt.claim.sub', '', false);
+  j := faro_estado(t);
+  perform pg_temp.ok((j -> 'anuncio' ->> 'obligatorio')::boolean and j -> 'suspension' ->> 'motivo' = 'anuncio', 'un anuncio obligatorio sin confirmar suspende la pantalla');
+  perform faro_accion(t, 'leido', jsonb_build_object('anuncio', v_id));
+  j := faro_estado(t);
+  perform pg_temp.ok(j -> 'suspension' is null and exists (select 1 from faro_anuncio_lecturas where anuncio_id = v_id and equipo_id = v_eq),
+                     '«Entendido» confirma el anuncio y quita la suspensión');
+  perform pg_temp.como('lab@unal.edu.co');
+  perform faro_quitar_anuncio(v_id);
+  update reservas set estado = 'cancelada' where id = r.id;
+end $$;

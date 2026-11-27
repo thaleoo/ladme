@@ -70,6 +70,9 @@ struct Nucleo {
     inventario_pendiente: Option<Value>,
     /// El panel pidió «Actualizar datos»: el inventario se recolecta en la próxima vuelta.
     inventario_ya: bool,
+    /// Acciones hechas en la pantalla sin respuesta del servidor (reanudar, anuncio leído); se envían en el
+    /// próximo latido. Solo en memoria: pueden llevar un código y no se escriben en disco.
+    acciones: Vec<(String, Value)>,
 }
 
 /// Despierta al ciclo de actualizaciones cuando el panel ordena «Actualizar ahora».
@@ -233,11 +236,13 @@ fn aplicar(app: &AppHandle, n: &mut Nucleo, mut nueva: Vista) {
         }
         match (antes, &nueva.pantalla) {
             (_, Pantalla::Bloqueo) => n.pendientes.push(("bloqueo".into(), json!({ "estado": format!("{:?}", nueva.estado) }))),
+            (_, Pantalla::Suspension) => registro::info("Pantalla suspendida"),
+            (Some(Pantalla::Suspension), _) => registro::info("Suspensión quitada"),
             (Some(Pantalla::Bloqueo), _) => n.pendientes.push(("desbloqueo".into(), json!({}))),
             _ => {}
         }
     }
-    n.copia.bloqueado = nueva.pantalla == Pantalla::Bloqueo;
+    n.copia.bloqueado = matches!(nueva.pantalla, Pantalla::Bloqueo | Pantalla::Suspension);
     let cambio = n.vista.as_ref() != Some(&nueva);
     n.vista = Some(nueva);
     if cambio {
@@ -288,6 +293,18 @@ async fn latir(app: &AppHandle, api: &Api, compartido: &Compartido, inactivo: Op
                 if let Err(Fallo::Red(_)) = api.evento(&cfg, &token, tipo, detalle.clone()).await {
                     compartido.lock().unwrap().pendientes.extend(pendientes[i..].iter().cloned());
                     break;
+                }
+            }
+            let acciones = std::mem::take(&mut compartido.lock().unwrap().acciones);
+            for (i, (accion, datos)) in acciones.iter().enumerate() {
+                match api.accion(&cfg, &token, accion, datos.clone()).await {
+                    Ok(_) => registro::info(format!("El servidor recibió «{accion}»")),
+                    Err(Fallo::Red(_)) => {
+                        compartido.lock().unwrap().acciones.extend(acciones[i..].iter().cloned());
+                        break;
+                    }
+                    Err(Fallo::Mensaje(m)) => registro::aviso(format!("El servidor no aceptó «{accion}»: {m}")),
+                    Err(Fallo::NoVinculado) => break,
                 }
             }
             for c in comandos {
@@ -590,41 +607,143 @@ fn cerrar_vincular(app: AppHandle) {
     }
 }
 
-/// Verifica la clave de emergencia, con pausa de un minuto tras 5 intentos fallidos.
-fn verificar_clave(n: &mut Nucleo, clave_ingresada: &str) -> Result<(), String> {
+/// Con qué se desbloqueó: la clave de emergencia, una clave temporal del personal (vence) o el código de
+/// la reserva vigente (solo quita una suspensión).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Llave {
+    Emergencia,
+    Temporal(chrono::DateTime<Utc>),
+    Reserva,
+}
+
+impl Llave {
+    fn via(self) -> &'static str {
+        match self {
+            Llave::Emergencia => "emergencia",
+            Llave::Temporal(_) => "clave_temporal",
+            Llave::Reserva => "codigo",
+        }
+    }
+}
+
+/// Verifica lo que se escribió en la pantalla contra las llaves permitidas, sin conexión, con pausa de un
+/// minuto tras 5 intentos fallidos (cuentan juntos todos los tipos).
+fn verificar_llave(n: &mut Nucleo, ingresada: &str, temporal: bool, reserva: bool) -> Result<Llave, String> {
     if let Some(h) = n.espera_hasta {
         if Instant::now() < h {
             return Err("Demasiados intentos. Espere un minuto.".into());
         }
     }
-    let Some(c) = n.copia.remoto.as_ref().and_then(|r| r.clave.clone()) else {
-        return Err("El laboratorio aún no ha creado una clave de emergencia.".into());
+    let ahora = Utc::now() + Dur::milliseconds(n.copia.desfase_ms);
+    let Some(r) = n.copia.remoto.as_ref() else {
+        return Err("Faro aún no ha recibido datos del laboratorio.".into());
     };
-    if clave::huella(&c.sal, clave_ingresada, c.iteraciones) != c.hash {
-        n.intentos_fallidos += 1;
-        if n.intentos_fallidos >= 5 {
-            n.intentos_fallidos = 0;
-            n.espera_hasta = Some(Instant::now() + Duration::from_secs(60));
-        }
-        return Err("Clave incorrecta.".into());
+    let mut candidatas: Vec<(Llave, decision::Clave)> = r.clave.iter().map(|c| (Llave::Emergencia, c.clone())).collect();
+    if temporal {
+        candidatas.extend(r.claves_temporales.iter().filter(|k| k.hasta > ahora).map(|k| {
+            (Llave::Temporal(k.hasta), decision::Clave { sal: k.sal.clone(), hash: k.hash.clone(), iteraciones: k.iteraciones })
+        }));
     }
-    n.intentos_fallidos = 0;
-    Ok(())
+    if reserva {
+        if let Some(c) = r.actual.as_ref().filter(|o| o.tipo == "reserva" && o.inicio <= ahora && o.fin > ahora).and_then(|o| o.desbloqueo.clone()) {
+            candidatas.push((Llave::Reserva, c));
+        }
+    }
+    if candidatas.is_empty() {
+        return Err("El laboratorio aún no ha creado una clave de emergencia.".into());
+    }
+    if clave::normalizar(ingresada).is_empty() {
+        return Err("Escriba el código.".into());
+    }
+    match candidatas.into_iter().find(|(_, c)| clave::huella(&c.sal, ingresada, c.iteraciones) == c.hash) {
+        Some((llave, _)) => {
+            n.intentos_fallidos = 0;
+            Ok(llave)
+        }
+        None => {
+            n.intentos_fallidos += 1;
+            if n.intentos_fallidos >= 5 {
+                n.intentos_fallidos = 0;
+                n.espera_hasta = Some(Instant::now() + Duration::from_secs(60));
+            }
+            Err(if reserva { "Ese código no desbloquea este equipo." } else { "Clave incorrecta." }.into())
+        }
+    }
+}
+
+/// Solo la clave de emergencia (retirar Faro, desvincular, actualizar desde la línea de comandos).
+fn verificar_clave(n: &mut Nucleo, clave_ingresada: &str) -> Result<(), String> {
+    verificar_llave(n, clave_ingresada, false, false).map(|_| ())
 }
 
 #[tauri::command]
 fn emergencia(estado: tauri::State<Compartido>, clave_ingresada: String) -> Result<(), String> {
     let mut n = estado.lock().unwrap();
-    verificar_clave(&mut n, &clave_ingresada)?;
-    desbloquear_emergencia(&mut n);
+    let llave = verificar_llave(&mut n, &clave_ingresada, true, false)?;
+    desbloquear_emergencia(&mut n, llave);
     Ok(())
 }
 
-fn desbloquear_emergencia(n: &mut Nucleo) {
-    registro::info(format!("Desbloqueo con la clave de emergencia por {EMERGENCIA_HORAS} h"));
-    let hasta = Utc::now() + Dur::milliseconds(n.copia.desfase_ms) + Dur::hours(EMERGENCIA_HORAS);
+/// Desbloqueo del personal: con la clave de emergencia por unas horas; con una clave temporal, hasta que
+/// esta venza (como mucho las mismas horas). También quita una suspensión.
+fn desbloquear_emergencia(n: &mut Nucleo, llave: Llave) {
+    let ahora = Utc::now() + Dur::milliseconds(n.copia.desfase_ms);
+    let mut hasta = ahora + Dur::hours(EMERGENCIA_HORAS);
+    if let Llave::Temporal(h) = llave {
+        hasta = hasta.min(h);
+    }
+    registro::info(format!("Desbloqueo del personal ({}) hasta {}", llave.via(), hasta.with_timezone(&chrono::Local).format("%H:%M")));
     n.copia.memoria.emergencia_hasta = Some(hasta);
-    n.pendientes.push(("desbloqueo_emergencia".into(), json!({ "horas": EMERGENCIA_HORAS.to_string() })));
+    n.pendientes.push(("desbloqueo_emergencia".into(), json!({ "horas": EMERGENCIA_HORAS.to_string(), "via": llave.via() })));
+    quitar_suspension_local(n, None);
+    n.forzar = true;
+    config::guardar_copia(&n.carpeta, &n.copia);
+}
+
+/// Marca la suspensión vigente como quitada en este equipo (vale sin conexión) y deja el aviso al servidor
+/// para el próximo latido. Devuelve el equipo si había una suspensión.
+fn quitar_suspension_local(n: &mut Nucleo, codigo: Option<(&str, Llave)>) -> Option<String> {
+    let ahora = Utc::now() + Dur::milliseconds(n.copia.desfase_ms);
+    let r = n.copia.remoto.as_ref()?;
+    let s = decision::vigente(r, &n.copia.memoria, ahora)?.clone();
+    let equipo = r.equipo.codigo.clone();
+    let anuncio = r.anuncio.as_ref().map(|a| a.id);
+    n.copia.memoria.suspension_quitada = Some(s.desde);
+    if s.motivo == "anuncio" {
+        n.copia.memoria.anuncio_leido = anuncio;
+    }
+    // La clave de emergencia no viaja: el servidor se entera por el evento de desbloqueo.
+    if let Some((c, llave)) = codigo.filter(|(_, l)| *l != Llave::Emergencia) {
+        n.acciones.push(("reanudar".into(), json!({ "codigo": clave::normalizar(c), "via": llave.via() })));
+    } else if let Some(id) = anuncio.filter(|_| s.motivo == "anuncio") {
+        n.acciones.push(("leido".into(), json!({ "anuncio": id })));
+    }
+    Some(equipo)
+}
+
+/// Quita la pantalla suspendida con el código de la reserva, una clave temporal o la clave de emergencia.
+/// Funciona sin conexión: la verificación es local y el servidor se entera después.
+#[tauri::command]
+fn quitar_suspension(estado: tauri::State<Compartido>, codigo: String) -> Result<String, String> {
+    let mut n = estado.lock().unwrap();
+    let llave = verificar_llave(&mut n, &codigo, true, true)?;
+    if llave == Llave::Emergencia {
+        desbloquear_emergencia(&mut n, llave);
+        return Ok("Desbloqueado por el personal.".into());
+    }
+    let equipo = quitar_suspension_local(&mut n, Some((&codigo, llave))).ok_or("La pantalla ya no está suspendida.")?;
+    registro::info(format!("Suspensión quitada en la pantalla ({})", llave.via()));
+    n.forzar = true;
+    config::guardar_copia(&n.carpeta, &n.copia);
+    Ok(format!("{equipo} quedó desbloqueado."))
+}
+
+/// «Entendido» en un anuncio obligatorio.
+#[tauri::command]
+fn confirmar_anuncio(estado: tauri::State<Compartido>, id: i64) {
+    let mut n = estado.lock().unwrap();
+    n.copia.memoria.anuncio_leido = Some(id);
+    n.acciones.push(("leido".into(), json!({ "anuncio": id })));
     n.forzar = true;
     config::guardar_copia(&n.carpeta, &n.copia);
 }
@@ -755,11 +874,12 @@ fn revisar_orden_cli(app: &AppHandle, compartido: &Compartido) -> bool {
         }
         "desbloquear" | "actualizar" | "desvincular" => {
             let mut n = compartido.lock().unwrap();
-            match verificar_clave(&mut n, o.clave.as_deref().unwrap_or("")) {
+            let temporal = o.orden == "desbloquear";
+            match verificar_llave(&mut n, o.clave.as_deref().unwrap_or(""), temporal, false) {
                 Err(e) => Err(e),
-                Ok(()) => match o.orden.as_str() {
+                Ok(llave) => match o.orden.as_str() {
                     "desbloquear" => {
-                        desbloquear_emergencia(&mut n);
+                        desbloquear_emergencia(&mut n, llave);
                         Ok(format!("Equipo desbloqueado por {EMERGENCIA_HORAS} horas."))
                     }
                     "actualizar" => {
@@ -834,6 +954,7 @@ pub fn run() {
                 aviso_local: None,
                 inventario_pendiente: None,
                 inventario_ya: false,
+                acciones: Vec::new(),
             }));
             app.manage(ActualizarYa(Arc::new(tokio::sync::Notify::new())));
             app.manage(compartido.clone());
@@ -878,6 +999,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             accion_isla,
+            quitar_suspension,
+            confirmar_anuncio,
             estado_inicial,
             vincular,
             cerrar_vincular,

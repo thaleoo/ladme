@@ -13,6 +13,7 @@ let aviso = '';               // mensaje bajo el panel (error o confirmación)
 let confirmar = '';           // botón que pide un segundo clic ('retirar' | 'limpiar')
 let qrLlegada = null;         // { svg, cambia_en } del QR de llegada (cambia cada 30 s)
 let anuncioVisto = '';
+let obligatorioVisto = null;
 let limpiezaDescartada = '';
 let fijaHasta = 0;            // la isla abierta no se cierra sola antes de este momento
 let dentro = false;           // el cursor está sobre la isla (lo informa isla.rs)
@@ -223,7 +224,8 @@ function htmlAbierta(v) {
         <button class="cerrar" data-cerrar title="Cerrar">${ICONOS.cerrar}</button>
       </div>
       ${htmlAvisosFaro()}
-      ${v.anuncio ? `<div class="anuncio">${ICONOS.megafono}<span>${esc(v.anuncio)}</span></div>` : ''}
+      ${v.anuncio ? `<div class="anuncio${v.confirmar_anuncio ? ' obligatorio' : ''}">${ICONOS.megafono}<span>${esc(v.anuncio)}${v.confirmar_anuncio
+        ? `<button class="boton principal" data-entendido="${v.confirmar_anuncio}">Entendido</button><small>Confírmalo para que la pantalla no se suspenda.</small>` : ''}</span></div>` : ''}
       ${v.compartido ? `<div class="protegido">${ICONOS.candado}<span><strong>Uso compartido${v.compartido.titular ? ` de ${esc(v.compartido.titular)}` : ''}.</strong>
         ${v.compartido.protegidos?.length ? `No cierres ${esc(v.compartido.protegidos.join(', '))}.` : 'No cierres los programas abiertos.'}
         No reinicies, apagues ni cierres la sesión.${v.compartido.nota ? ` «${esc(v.compartido.nota)}»` : ''}</span></div>` : ''}
@@ -315,10 +317,17 @@ async function alRecibir(p) {
   const anuncioNuevo = v.anuncio && v.anuncio !== anuncioVisto;
   const limpiezaNueva = v.limpieza_desde && v.limpieza_desde !== limpiezaDescartada && html.abierta.indexOf('data-limpiar') < 0;
   if (v.anuncio) anuncioVisto = v.anuncio;
+  // Anuncio obligatorio: la isla queda abierta hasta que alguien lo confirme.
+  const obligatorioNuevo = v.confirmar_anuncio && v.confirmar_anuncio !== obligatorioVisto;
+  obligatorioVisto = v.confirmar_anuncio ?? null;
   if (v.insistir && (!insistiaAntes || Date.now() - ultimaInsistencia > 5 * 60_000)) {
     ultimaInsistencia = Date.now();
     accion = null;
     ui = 'abierta';
+  } else if (obligatorioNuevo && accion !== 'personal') {
+    accion = null;
+    ui = 'abierta';
+    fijaHasta = Date.now() + 60 * 60_000;
   } else if ((anuncioNuevo || limpiezaNueva) && accion !== 'personal') {
     // Un anuncio del laboratorio o la oferta de borrar archivos: se muestra abierta un rato.
     accion = null;
@@ -407,6 +416,12 @@ isla.addEventListener('click', async (e) => {
   const codigo = vista().equipo ?? '';
   const d = b.dataset;
   if (d.cerrar !== undefined) { cambiar(urgente() ? 'compacta' : 'mini'); return; }
+  if (d.entendido) {
+    await invocar('confirmar_anuncio', { id: Number(d.entendido) });
+    fijaHasta = 0;
+    cambiar('compacta');
+    return;
+  }
   const otroConfirmar = confirmar;
   confirmar = '';
   if (d.volver !== undefined) { accion = null; aviso = ''; resultado = null; }

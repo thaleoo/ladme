@@ -182,7 +182,7 @@ Uso: faro <comando> [opciones]
   version       Versión, canal e instalación
   vincular CÓDIGO   Vincula el equipo con el código de LADME → Administración → Faro
   actualizar    Instala ya la última versión          (pide la clave de emergencia)
-  desbloquear   Desbloqueo de emergencia por {h} horas  (pide la clave de emergencia)
+  desbloquear   Desbloqueo del personal por {h} horas   (clave de emergencia o temporal)
   desvincular   Quita el vínculo de este equipo        (pide la clave de emergencia)
 
 Opciones: --json  --sin-color  --ayuda",

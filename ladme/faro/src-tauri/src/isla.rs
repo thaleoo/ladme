@@ -23,7 +23,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWi
 pub const ETIQUETA: &str = "isla";
 /// Tamaño lógico fijo de la ventana: el panel abierto más su sombra.
 pub const ANCHO: f64 = 460.0;
-pub const ALTO: f64 = 620.0;
+pub const ALTO: f64 = 700.0;
 const MARGEN: f64 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

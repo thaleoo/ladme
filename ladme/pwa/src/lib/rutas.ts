@@ -60,6 +60,7 @@ export const Paginas = {
   AprobarClase: perezosa(() => import('../pages/admin/AprobarClase')),
   ReservaDetalle: perezosa(() => import('../pages/admin/ReservaDetalle')),
   ConfirmarAsistencia: perezosa(() => import('../pages/ConfirmarAsistencia')),
+  DesbloquearPantalla: perezosa(() => import('../pages/DesbloquearPantalla')),
   Admin: perezosa(cargadores['/admin']),
   Mantenimiento: perezosa(cargadores['/mantenimiento']),
   Usuarios: perezosa(cargadores['/usuarios'])

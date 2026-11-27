@@ -323,6 +323,13 @@ export default function MisReservas() {
         {r.llegada_en && vigente && (
           <p className="reserva-card__nota"><Icon nombre="check" width={14} height={14} /> Llegada registrada {hace(r.llegada_en)}.</p>
         )}
+        {vigente && r.codigo_desbloqueo && (
+          <details className="reserva-card__nota codigo-desbloqueo">
+            <summary><Icon nombre="clave" width={14} height={14} /> Código para desbloquear la pantalla</summary>
+            <span className="num">{r.codigo_desbloqueo.slice(0, 4)}-{r.codigo_desbloqueo.slice(4)}</span>
+            <span className="tiny muted">Si el laboratorio suspende la pantalla del equipo, escríbalo ahí. Solo sirve en {r.equipos?.codigo ?? 'este equipo'} durante esta reserva.</span>
+          </details>
+        )}
         {r.desatendido && r.mensaje_llegada && vigente && (
           <p className="reserva-card__nota">Aviso en el equipo: «{r.mensaje_llegada}»</p>
         )}

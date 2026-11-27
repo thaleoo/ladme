@@ -723,6 +723,8 @@ export interface EquipoFaro {
   inactivo_seg: number | null
   bloqueado: boolean
   desbloqueo_hasta: string | null
+  /** Pantalla suspendida por el personal hasta este momento (Faro 0.7). */
+  suspendido_hasta?: string | null
   usos_sin_reserva_7d: number
   canal: 'estable' | 'pruebas'
   cpu_pct: number | null
@@ -766,7 +768,7 @@ export interface EventoFaro {
 export interface PanelFaro {
   ahora: string
   clave_creada_en: string | null
-  anuncios: Array<{ id: number; texto: string; equipos: string[] | null; hasta: string }>
+  anuncios: Array<{ id: number; texto: string; equipos: string[] | null; hasta: string; obligatorio?: boolean; confirmados?: number }>
   equipos: EquipoFaro[]
   eventos: EventoFaro[]
 }
@@ -930,9 +932,36 @@ export async function telegramDesvincular(): Promise<void> {
   if (error) fail('No se pudo desvincular', error)
 }
 
-export async function anunciarFaro(texto: string, minutos: number, equipos: string[] | null = null): Promise<void> {
-  const { error } = await supabase.rpc('faro_anunciar', { p_texto: texto, p_minutos: minutos, p_equipos: equipos })
+export async function anunciarFaro(texto: string, minutos: number, equipos: string[] | null = null, obligatorio = false): Promise<void> {
+  const { error } = await supabase.rpc('faro_anunciar', { p_texto: texto, p_minutos: minutos, p_equipos: equipos, p_obligatorio: obligatorio })
   if (error) fail('No se pudo publicar el anuncio', error)
+}
+
+/** «Bloquear ya»: tapa la pantalla sin cerrar programas. Devuelve cuántos equipos se suspendieron. */
+export async function suspenderFaro(equipos: string[] | null, minutos: number): Promise<number> {
+  const { data, error } = await supabase.rpc('faro_suspender', { p_equipos: equipos, p_minutos: minutos })
+  if (error) fail('No se pudo suspender la pantalla', error)
+  return Number(data ?? 0)
+}
+
+export async function reanudarFaro(equipos: string[] | null): Promise<number> {
+  const { data, error } = await supabase.rpc('faro_reanudar', { p_equipos: equipos })
+  if (error) fail('No se pudo quitar la suspensión', error)
+  return Number(data ?? 0)
+}
+
+/** Clave temporal del personal: desbloquea un equipo (o toda la sala) por unos minutos, también sin internet. */
+export async function claveTemporalFaro(equipo: string | null, minutos: number): Promise<{ clave: string; hasta: string }> {
+  const { data, error } = await supabase.rpc('faro_clave_temporal', { p_equipo: equipo, p_minutos: minutos })
+  if (error) fail('No se pudo crear la clave temporal', error)
+  return data as { clave: string; hasta: string }
+}
+
+/** Quita la suspensión de un equipo con el QR de un solo uso de su pantalla. */
+export async function desbloquearConQr(equipo: string, codigo: string): Promise<string> {
+  const { data, error } = await supabase.rpc('desbloquear_con_qr', { p_equipo: equipo, p_codigo: codigo })
+  if (error) fail('No se pudo desbloquear', error)
+  return (data as { texto: string }).texto
 }
 
 export async function quitarAnuncioFaro(id: number): Promise<void> {

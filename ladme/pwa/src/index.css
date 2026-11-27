@@ -5043,3 +5043,9 @@ body { overflow-wrap: break-word; }
 .moderacion__fila:first-child { border-top: 0; }
 .moderacion__fila { flex-wrap: wrap; }
 .moderacion__acciones { display: flex; gap: var(--s2); flex: none; }
+
+/* Código de desbloqueo de la reserva (Faro 0.7) */
+.codigo-desbloqueo summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.codigo-desbloqueo[open] { display: grid; gap: 4px; }
+.codigo-desbloqueo { display: block; }
+.codigo-desbloqueo .num { font-size: 1.35rem; font-weight: 650; letter-spacing: 0.14em; color: var(--text); }

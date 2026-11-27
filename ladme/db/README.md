@@ -343,3 +343,16 @@ Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha 
 - Pedir ayuda: un aviso al chat del personal, como máximo uno por equipo cada 10 minutos.
 - Freno general: 20 acciones por equipo y por hora. Cada acción queda en `agente_eventos` (tipo `accion`).
 - `faro_estado` devuelve `nfc` (política `faro_nfc`, encendida por defecto): Faro invita a acercar el celular a la tarjeta de la base del monitor.
+
+## Migración 0026 — Suspender la pantalla y desbloquearla con la reserva (Faro 0.7)
+
+`migrations/0026_faro_suspension.sql`, después de 0025.
+
+- **Bloquear ya** (`faro_suspender(equipos, minutos)`, personal): Faro tapa la pantalla sin cerrar programas. Se quita sola al vencer (1 h desde el panel) o con `faro_reanudar(equipos)`.
+- **Anuncios obligatorios** (`faro_anunciar(..., p_obligatorio)`): la isla muestra «Entendido». Si ningún equipo lo confirma en `faro_suspension_min` minutos (política, 10 por defecto; 0 = no suspende), la pantalla de ese equipo se suspende. Las confirmaciones quedan en `faro_anuncio_lecturas`.
+- **Quitar la suspensión**, sin que nadie más pueda hacerlo durante una reserva ajena:
+  - con el **código de la reserva** (`reservas.codigo_desbloqueo`, 8 caracteres, en Mis reservas): Faro lo recibe cifrado y lo verifica **aunque no haya red**; el servidor lo vuelve a verificar con `faro_accion(..., 'reanudar')`;
+  - con el **QR de un solo uso** de la pantalla (cambia cada minuto, vale 2): `desbloquear_con_qr(equipo, código)` desde la página `/desbloquear` de la app. Con reserva vigente, solo su titular; sin reserva, cualquier cuenta frente al equipo (queda registrado);
+  - con una **clave temporal del personal** (`faro_clave_temporal(equipo | null, minutos)`, 5 min a 8 h) o la clave de emergencia.
+- Las claves temporales también desbloquean como la de emergencia (hasta que vencen), pero no sirven para retirar ni desvincular Faro.
+- `faro_estado` agrega `suspension`, `claves_temporales`, `actual.desbloqueo` y en `anuncio` los campos `obligatorio` y `leido`. `faro_panel` agrega `suspendido_hasta` por equipo y `confirmados` por anuncio.

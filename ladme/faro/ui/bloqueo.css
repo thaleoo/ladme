@@ -70,3 +70,16 @@ main { display: grid; place-items: center; padding: 0 32px; }
 .anuncio svg { flex: none; width: 18px; height: 18px; margin-top: 2px; color: #c4b5fd; }
 .nfc-bloqueo { display: flex; align-items: center; gap: 12px; margin-top: 12px; text-align: left; font-size: 13px; line-height: 1.4; color: var(--texto-2); }
 .nfc-bloqueo .dibujo-nfc { flex: none; width: 64px; height: 42px; color: var(--texto); }
+
+/* Pantalla suspendida */
+.anuncio.grande { font-size: 17px; line-height: 1.45; padding: 16px 18px; color: var(--texto); }
+.anuncio.grande svg { width: 20px; height: 20px; }
+.tarjeta .nota { margin: 10px 0 0; color: var(--texto-3); font-size: 12.5px; line-height: 1.4; }
+.codigo-reserva { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--borde); text-align: left; }
+.codigo-reserva label { display: block; margin-bottom: 8px; font-size: 13px; color: var(--texto-2); }
+.codigo-reserva .fila { display: flex; gap: 8px; }
+.codigo-reserva .campo { flex: 1; min-width: 0; height: 40px; font-size: 16px; letter-spacing: 0.12em; text-align: center; }
+.codigo-reserva .error { display: block; margin-top: 6px; }
+.codigo-reserva .nota { margin-top: 2px; }
+body[data-estado="suspendido"] .punto { background: #fbbf24; box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.18); }
+.anuncio.grande + .detalle { margin-top: 12px; }

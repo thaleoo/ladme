@@ -72,6 +72,8 @@ export interface Reserva {
   compartida?: boolean
   protegidos?: string[] | null
   token_credencial: string
+  /** Código de 8 caracteres para quitar una suspensión de la pantalla en el equipo (Faro 0.7). */
+  codigo_desbloqueo?: string | null
   extensiones: number
   liberada_en: string | null
   llegada_en: string | null

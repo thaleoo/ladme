@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   anunciarFaro, canalFaro, codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, ordenFaro, textoOrden,
-  panelFaro, quitarAnuncioFaro, terminarClaseFaro, type OrdenFaro,
+  panelFaro, quitarAnuncioFaro, terminarClaseFaro, suspenderFaro, reanudarFaro, claveTemporalFaro, type OrdenFaro,
   type EquipoFaro, type ModoFaro, type PanelFaro
 } from '../../lib/api'
 import { esAdmin, useAuth } from '../../context/AuthContext'
@@ -30,8 +30,14 @@ const EVENTOS: Record<string, string> = {
   desbloqueo_personal: 'Desbloqueo del personal',
   desbloqueo_emergencia: 'Clave de emergencia usada',
   cierre_intentado: 'Intentaron cerrar el bloqueo',
-  modo: 'Cambio de modo'
+  modo: 'Cambio de modo',
+  suspension: 'Pantalla suspendida',
+  reanudado: 'Suspensión quitada',
+  accion: 'Acción desde la isla'
 }
+
+const VIA: Record<string, string> = { codigo: 'con el código de la reserva', qr: 'con el QR', clave_temporal: 'con una clave temporal', emergencia: 'con la clave de emergencia', panel: 'desde el panel' }
+const duracion = (m: number) => (m < 60 ? `${m} min` : m === 1440 ? 'Todo el día' : `${m / 60} h`)
 
 type Filtro = 'todos' | 'linea' | 'sin_senal' | 'sin_vincular' | 'sin_reserva'
 
@@ -58,7 +64,8 @@ export default function Faro() {
   const [clave, setClave] = useState<string | null>(null)
   const [, setTic] = useState(0)
   const [clase, setClase] = useState<{ motivo: string; minutos: number } | null>(null)
-  const [anuncio, setAnuncio] = useState<{ texto: string; minutos: number } | null>(null)
+  const [anuncio, setAnuncio] = useState<{ texto: string; minutos: number; equipos: string[] | null; obligatorio: boolean } | null>(null)
+  const [temporal, setTemporal] = useState<{ equipo: string | null; minutos: number; clave?: string; hasta?: string } | null>(null)
   const [abiertoEquipo, setAbiertoEquipo] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
@@ -180,7 +187,7 @@ export default function Faro() {
           </div>
         </div>
         <div className="acciones-rapidas">
-          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60 })}>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setAnuncio({ texto: '', minutos: 60, equipos: null, obligatorio: false })}>
             <Icon nombre="campana" /> <span>Anuncio</span>
           </button>
           <a className="accion-rapida" href="/sala?kiosco=1" target="_blank" rel="noreferrer">
@@ -214,6 +221,9 @@ export default function Faro() {
           <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>
             <Icon nombre="actualizar" /> <span>Actualizar Faro</span>
           </button>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setTemporal({ equipo: null, minutos: 30 })}>
+            <Icon nombre="clave" /> <span>Clave temporal</span>
+          </button>
           {admin && (
             <button className="accion-rapida" type="button" disabled={ocupado}
                     title={panel.clave_creada_en ? `Clave creada ${hace(panel.clave_creada_en)}` : 'Aún no se ha creado'}
@@ -233,7 +243,8 @@ export default function Faro() {
           <ul className="small" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
             {panel.anuncios.map((a) => (
               <li key={a.id} className="row between" style={{ gap: 'var(--s2)' }}>
-                <span>«{a.texto}» <span className="muted">· {a.equipos ? a.equipos.join(', ') : 'toda la sala'} · hasta {hora(a.hasta)}</span></span>
+                <span>«{a.texto}» <span className="muted">· {a.equipos ? a.equipos.join(', ') : 'toda la sala'} · hasta {hora(a.hasta)}
+                  {a.obligatorio ? ` · obligatorio, ${a.confirmados ?? 0} ${a.confirmados === 1 ? 'equipo lo confirmó' : 'equipos lo confirmaron'}` : ''}</span></span>
                 <button className="btn ghost sm" type="button" onClick={() => void hacer(() => quitarAnuncioFaro(a.id), 'Anuncio retirado.')}>Quitar</button>
               </li>
             ))}
@@ -279,7 +290,7 @@ export default function Faro() {
               <span className="faro-tile__extra tiny">
                 {!e.vinculado ? 'Toca para vincular'
                   : [MODOS.find((m) => m.id === e.modo)?.texto, enLinea(e) && e.cpu_pct != null ? `CPU ${e.cpu_pct}%` : null,
-                     e.bloqueado && enLinea(e) ? 'bloqueado' : null, e.desbloqueo_hasta ? `libre ${hora(e.desbloqueo_hasta)}` : null,
+                     e.suspendido_hasta ? 'suspendido' : e.bloqueado && enLinea(e) ? 'bloqueado' : null, e.desbloqueo_hasta ? `libre ${hora(e.desbloqueo_hasta)}` : null,
                      desactualizado(e.version) ? `Faro ${e.version}` : null]
                      .filter(Boolean).join(' · ')}
               </span>
@@ -298,7 +309,8 @@ export default function Faro() {
             <div className="stack">
               <div className="row tight" style={{ flexWrap: 'wrap' }}>
                 <span className={`badge ${c.tono}`}>{c.texto}</span>
-                {e.vinculado && enLinea(e) && e.bloqueado && <span className="badge danger">Bloqueado ahora</span>}
+                {e.suspendido_hasta && <span className="badge warn">Suspendido hasta {hora(e.suspendido_hasta)}</span>}
+                {!e.suspendido_hasta && e.vinculado && enLinea(e) && e.bloqueado && <span className="badge danger">Bloqueado ahora</span>}
                 {e.desbloqueo_hasta && <span className="badge info">Libre hasta {hora(e.desbloqueo_hasta)}</span>}
               </div>
               <p className="small muted" style={{ margin: 0 }}>
@@ -326,6 +338,33 @@ export default function Faro() {
                         {m.texto}
                       </button>
                     ))}
+                  </div>
+                  <span className="field__label">Pantalla</span>
+                  <div className="row tight" style={{ flexWrap: 'wrap' }}>
+                    {e.suspendido_hasta ? (
+                      <button className="btn sm" type="button" disabled={ocupado}
+                              onClick={() => void hacer(() => reanudarFaro([e.codigo]), `${e.codigo}: suspensión quitada.`)}>
+                        Quitar suspensión
+                      </button>
+                    ) : (
+                      <button className="btn ghost sm" type="button" disabled={ocupado}
+                              onClick={() => setConfirmar({
+                                titulo: `Bloquear ya ${e.codigo}`,
+                                texto: 'La pantalla se tapa en segundos sin cerrar ningún programa. Quien tenga la reserva la quita con el código de su reserva o el QR de la pantalla; el personal, con una clave o desde aquí. Se quita sola en 1 hora.',
+                                confirmar: 'Bloquear ya',
+                                accion: () => hacer(() => suspenderFaro([e.codigo], 60), `${e.codigo} suspendido.`)
+                              })}>
+                        <Icon nombre="candado" /> Bloquear ya
+                      </button>
+                    )}
+                    <button className="btn ghost sm" type="button" disabled={ocupado}
+                            onClick={() => { setAbiertoEquipo(null); setAnuncio({ texto: '', minutos: 30, equipos: [e.codigo], obligatorio: false }) }}>
+                      <Icon nombre="campana" /> Mensaje
+                    </button>
+                    <button className="btn ghost sm" type="button" disabled={ocupado}
+                            onClick={() => { setAbiertoEquipo(null); setTemporal({ equipo: e.codigo, minutos: 30 }) }}>
+                      <Icon nombre="clave" /> Clave temporal
+                    </button>
                   </div>
                   <span className="field__label">Dejar libre sin reserva</span>
                   <div className="row tight" style={{ flexWrap: 'wrap' }}>
@@ -375,6 +414,7 @@ export default function Faro() {
               <li key={ev.id}>
                 <strong>{ev.equipo}</strong> · {EVENTOS[ev.tipo] ?? ev.tipo}
                 {ev.tipo === 'modo' && typeof ev.detalle.modo === 'string' ? ` → ${ev.detalle.modo}` : ''}
+                {ev.tipo === 'reanudado' && typeof ev.detalle.via === 'string' ? ` ${VIA[ev.detalle.via] ?? ''}` : ''}
                 {ev.actor ? ` · ${ev.actor}` : ''}
                 <span className="muted"> · {fecha(ev.creado_en)}</span>
               </li>
@@ -460,7 +500,7 @@ export default function Faro() {
         </div>
       </Modal>
 
-      <Modal abierto={!!anuncio} titulo="Anuncio en las islas" onCerrar={() => setAnuncio(null)}
+      <Modal abierto={!!anuncio} titulo={anuncio?.equipos ? `Mensaje a ${anuncio.equipos.join(', ')}` : 'Anuncio en las islas'} onCerrar={() => setAnuncio(null)}
              pie={
                <>
                  <button className="btn gray" type="button" onClick={() => setAnuncio(null)}>Cancelar</button>
@@ -468,7 +508,8 @@ export default function Faro() {
                          onClick={() => {
                            const a = anuncio
                            setAnuncio(null)
-                           if (a) void hacer(() => anunciarFaro(a.texto.trim(), a.minutos), 'Anuncio publicado en las islas.')
+                           if (a) void hacer(() => anunciarFaro(a.texto.trim(), a.minutos, a.equipos, a.obligatorio),
+                                             a.equipos ? `Mensaje enviado a ${a.equipos.join(', ')}.` : 'Anuncio publicado en las islas.')
                          }}>
                    Publicar
                  </button>
@@ -486,12 +527,71 @@ export default function Faro() {
               {[30, 60, 180, 480, 1440].map((m) => (
                 <button key={m} type="button" className="chip" aria-pressed={anuncio?.minutos === m}
                         onClick={() => anuncio && setAnuncio({ ...anuncio, minutos: m })}>
-                  {m < 60 ? `${m} min` : m === 1440 ? 'Todo el día' : `${m / 60} h`}
+                  {duracion(m)}
                 </button>
               ))}
             </div>
           </div>
+          <label className="check-row">
+            <input type="checkbox" checked={anuncio?.obligatorio ?? false}
+                   onChange={(ev) => anuncio && setAnuncio({ ...anuncio, obligatorio: ev.target.checked })} />
+            <span>
+              Hay que confirmarlo
+              <span className="tiny muted" style={{ display: 'block' }}>
+                La isla muestra «Entendido». Si nadie lo toca a tiempo (Políticas, 10 min por defecto), la pantalla se suspende sin cerrar programas.
+              </span>
+            </span>
+          </label>
         </div>
+      </Modal>
+
+      <Modal abierto={!!temporal} titulo={temporal?.clave ? 'Clave temporal' : `Clave temporal · ${temporal?.equipo ?? 'toda la sala'}`} onCerrar={() => setTemporal(null)}
+             pie={temporal?.clave ? (
+               <>
+                 <button className="btn gray" type="button"
+                         onClick={() => temporal.clave && void navigator.clipboard?.writeText(temporal.clave).then(() => toast.mostrar('Clave copiada.'))}>
+                   <Icon nombre="copiar" /> Copiar
+                 </button>
+                 <button className="btn" type="button" onClick={() => setTemporal(null)}>Listo</button>
+               </>
+             ) : (
+               <>
+                 <button className="btn gray" type="button" onClick={() => setTemporal(null)}>Cancelar</button>
+                 <button className="btn" type="button" disabled={ocupado}
+                         onClick={() => {
+                           const t = temporal
+                           if (t) void hacer(async () => setTemporal({ ...t, ...(await claveTemporalFaro(t.equipo, t.minutos)) }))
+                         }}>
+                   Crear clave
+                 </button>
+               </>
+             )}>
+        {temporal?.clave ? (
+          <div className="stack" style={{ textAlign: 'center' }}>
+            <div className="num" style={{ fontSize: '2.2rem', fontWeight: 800, letterSpacing: '0.12em', fontFamily: 'var(--mono)' }}>{temporal.clave}</div>
+            <p className="small muted" style={{ margin: 0 }}>
+              Sirve en {temporal.equipo ?? 'cualquier equipo de la sala'} hasta las {temporal.hasta ? hora(temporal.hasta) : ''}: en la pantalla de bloqueo,
+              «Personal del laboratorio». Los equipos la reciben en su próximo latido (unos segundos) y funciona sin internet después.
+            </p>
+          </div>
+        ) : (
+          <div className="stack">
+            <p className="small" style={{ margin: 0 }}>
+              Para dar acceso a un monitor o a otra persona del personal sin compartir la clave de emergencia. Desbloquea y quita suspensiones; no sirve para retirar Faro.
+            </p>
+            <div className="field">
+              <span className="field__label">Vence en</span>
+              <div className="chips" role="group" aria-label="Duración de la clave">
+                {[15, 30, 60, 120, 480].map((m) => (
+                  <button key={m} type="button" className="chip" aria-pressed={temporal?.minutos === m}
+                          onClick={() => temporal && setTemporal({ ...temporal, minutos: m })}>
+                    {duracion(m)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal abierto={!!confirmar} titulo={confirmar?.titulo ?? ''} onCerrar={() => setConfirmar(null)}
