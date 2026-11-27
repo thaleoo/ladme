@@ -109,8 +109,11 @@ Más detalles:
   laboratorio y ofrece «Desbloquear 2 h» o «Quitar Faro de este PC». Faro nunca pide ni guarda la
   contraseña de administrador del sistema. Con instalación `.deb` o `.rpm` no puede quitarse solo (lo hace
   TI con `dnf`/`apt`).
-- **Inventario y salud.** Al minuto de arrancar y cada 6 horas, Faro envía procesador, RAM, disco, MAC,
-  sistema y los programas de análisis instalados (R, RStudio, Python, MATLAB, SPSS, QGIS…). La PWA permite
+- **Inventario y salud.** Al minuto de arrancar y cada hora (o al pulsar «Actualizar datos»), Faro envía
+  procesador (núcleos e hilos), RAM, tarjeta gráfica y su memoria, cámaras conectadas, disco, MAC, sistema y
+  distribución, la cuenta en uso y los programas de análisis instalados (R, RStudio, Python, MATLAB, SPSS, QGIS…).
+  Con eso se llena la ficha técnica de cada equipo (migración 0023). Nunca abre la cámara: solo lee su nombre.
+  En Linux la gráfica se lee con `nvidia-smi` (NVIDIA), `lspci` (paquete `pciutils`) y `/sys` (memoria de AMD). La PWA permite
   filtrar la disponibilidad por programa y avisa al chat del personal si a un disco le queda menos del 10 %.
 - **Sesión limpia** (política `faro_sesion_limpia`). Al terminar una reserva, la isla ofrece borrar los
   archivos guardados en Descargas y Escritorio durante esa reserva, con doble confirmación. No toca

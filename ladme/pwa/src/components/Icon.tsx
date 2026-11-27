@@ -170,6 +170,7 @@ const trazos: Record<string, ReactNode> = {
     </>
   ),
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  ordenar: <path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" />,
   reproducir: <path d="M6.5 4.5 19 12 6.5 19.5V4.5Z" />,
   escudo: (
     <>

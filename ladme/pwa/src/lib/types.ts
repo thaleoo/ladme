@@ -40,6 +40,17 @@ export interface Equipo {
   plano_y?: number | null
   /** Foto del equipo (almacenamiento público «equipos»). */
   foto_url?: string | null
+  /** Ficha técnica (0023): la llena Faro en cada inventario. */
+  cpu_modelo?: string | null
+  cpu_nucleos?: number | null
+  cpu_hilos?: number | null
+  ram_gb?: number | null
+  gpu_modelo?: string | null
+  gpu_vram_gb?: number | null
+  gpu_dedicada?: boolean | null
+  camara?: boolean | null
+  disco_gb?: number | null
+  ficha_en?: string | null
 }
 
 export interface Reserva {
@@ -254,7 +265,8 @@ export function textoSO(e: Pick<Equipo, 'sistema_operativo' | 'so_version'>): st
   const v = e.so_version?.trim()
   if (!v) return e.sistema_operativo
   if (e.sistema_operativo && v.toLowerCase().startsWith(e.sistema_operativo.toLowerCase())) return v
-  return e.sistema_operativo === 'Linux' ? `Linux · ${v}` : [e.sistema_operativo, v].filter(Boolean).join(' ')
+  // En Linux la versión ya trae la distribución («Ubuntu 24.04.1 LTS»).
+  return e.sistema_operativo === 'Linux' ? v : [e.sistema_operativo, v].filter(Boolean).join(' ')
 }
 
 /** Etiqueta corta para la cuadrícula: «Win 11», «Ubuntu 24.04», «Linux». */
@@ -352,3 +364,34 @@ export interface ReglamentoVersion {
   publicado_en: string
 }
 
+
+// ---------------------------------------------------------------- Ficha técnica (0023)
+const RAM_NOMINAL = [2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512]
+/** El sistema informa un poco menos de lo instalado (31,7 GB): se muestra la del módulo (32 GB). */
+export function ramNominal(gb?: number | null): number | null {
+  if (!gb || gb <= 0) return null
+  return RAM_NOMINAL.find((n) => n >= gb - 0.05) ?? Math.round(gb)
+}
+
+/** «NVIDIA RTX A2000 12GB» → «RTX A2000 12GB»; «Intel(R) UHD Graphics 770» → «Intel UHD 770». */
+export function gpuCorta(nombre?: string | null): string | null {
+  if (!nombre) return null
+  return nombre
+    .replace(/\((R|TM)\)/gi, '')
+    .replace(/\bCorporation\b/gi, '')
+    .replace(/^NVIDIA\s+/i, '')
+    .replace(/\s+Graphics\b/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Resumen de una línea para la lista: «32 GB · RTX A2000 · 16 núcleos». */
+export function resumenFicha(e: Equipo): string | null {
+  const ram = ramNominal(e.ram_gb)
+  const partes = [
+    ram ? `${ram} GB` : null,
+    e.gpu_modelo ? (e.gpu_dedicada ? gpuCorta(e.gpu_modelo) : 'Gráfica integrada') : null,
+    e.cpu_nucleos ? `${e.cpu_nucleos} núcleos` : null
+  ].filter(Boolean)
+  return partes.length ? partes.join(' · ') : null
+}

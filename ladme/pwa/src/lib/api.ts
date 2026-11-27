@@ -745,6 +745,13 @@ export interface InventarioFaro {
   software?: string[]
   /** Estado de salud del disco que da el sistema (Faro 0.5 o superior). */
   disco_salud?: 'ok' | 'advertencia' | 'falla' | null
+  /** Faro 0.5.6 o superior. */
+  hilos?: number
+  gpus?: Array<{ nombre: string; vram_gb: number | null; dedicada: boolean }>
+  camaras?: string[]
+  so_nombre?: string | null
+  /** Cuenta del sistema en la que corre Faro (qué perfil está en uso). */
+  cuenta?: string | null
 }
 
 export interface EventoFaro {

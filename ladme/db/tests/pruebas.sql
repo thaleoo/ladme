@@ -1061,3 +1061,42 @@ begin
   perform pg_temp.ok(exists (select 1 from consola_registro where comando = 'Publicar reglamento v' || v), 'la publicación queda en el registro');
 end $$;
 
+
+-- 0023: ficha técnica llenada por Faro.
+do $$
+declare t text; e equipos;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  update equipos set sistema_operativo = 'Windows', so_version = 'Windows 10 Pro', gpu_modelo = null where codigo = 'UNAL-08';
+  t := faro_vincular(faro_codigo_vinculo('UNAL-08') ->> 'codigo', 'PC-08', 'Linux', '0.5.6') ->> 'token';
+  perform set_config('request.jwt.claim.sub', '', false);
+
+  perform faro_estado(t, $j${"inventario": {"cpu": "13th Gen Intel(R) Core(TM) i7-13700", "nucleos": 16, "hilos": 24, "ram_gb": 31.7,
+    "disco_gb": 953.9, "so_tipo": "Linux", "so_version": "Linux 24.04 Ubuntu", "so_nombre": "Ubuntu 24.04.1 LTS",
+    "gpus": [{"nombre": "Intel AlderLake-S GT1", "vram_gb": null, "dedicada": false},
+             {"nombre": "NVIDIA RTX A2000 12GB", "vram_gb": 12.0, "dedicada": true}],
+    "camaras": ["Logitech BRIO"], "software": ["R"]}}$j$);
+  select * into e from equipos where codigo = 'UNAL-08';
+  perform pg_temp.ok(e.cpu_modelo like '%i7-13700' and e.cpu_nucleos = 16 and e.cpu_hilos = 24 and e.ram_gb = 31.7 and e.disco_gb = 953.9,
+                     'Faro llena procesador, RAM y disco');
+  perform pg_temp.ok(e.gpu_modelo = 'NVIDIA RTX A2000 12GB' and e.gpu_vram_gb = 12.0 and e.gpu_dedicada, 'la tarjeta principal es la dedicada');
+  perform pg_temp.ok(e.camara, 'se detecta la cámara');
+  perform pg_temp.ok(e.sistema_operativo = 'Linux' and e.so_version = 'Ubuntu 24.04.1 LTS' and e.ficha_en is not null,
+                     'el sistema operativo se actualiza aunque ya tuviera uno (antes solo si estaba vacío)');
+
+  -- Sin la cámara, sin poder leer la tarjeta y con un dato basura: lo que Faro no sabe se conserva.
+  perform faro_estado(t, $j${"inventario": {"cpu": "13th Gen Intel(R) Core(TM) i7-13700", "ram_gb": "mucha", "gpus": [], "camaras": []}}$j$);
+  select * into e from equipos where codigo = 'UNAL-08';
+  perform pg_temp.ok(not e.camara, 'si se quita la cámara, la ficha lo refleja');
+  perform pg_temp.ok(e.gpu_modelo = 'NVIDIA RTX A2000 12GB' and e.ram_gb = 31.7, 'un dato que falta o no es válido no borra el anterior');
+
+  -- Un Faro anterior (sin «camaras» ni «gpus») no cambia esos campos; si cambia la tarjeta, cambia la ficha.
+  perform faro_estado(t, $j${"inventario": {"ram_gb": 15.6}}$j$);
+  perform pg_temp.ok((select camara from equipos where codigo = 'UNAL-08') = false and (select ram_gb from equipos where codigo = 'UNAL-08') = 15.6,
+                     'un Faro anterior no borra la cámara');
+  perform faro_estado(t, $j${"inventario": {"gpus": [{"nombre": "Intel(R) UHD Graphics 770", "dedicada": false}]}}$j$);
+  select * into e from equipos where codigo = 'UNAL-08';
+  perform pg_temp.ok(e.gpu_modelo = 'Intel(R) UHD Graphics 770' and e.gpu_vram_gb is null and not e.gpu_dedicada,
+                     'si quitan la tarjeta dedicada, la ficha queda con la integrada');
+  perform pg_temp.como('lab@unal.edu.co');
+end $$;

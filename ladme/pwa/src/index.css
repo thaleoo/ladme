@@ -5028,3 +5028,9 @@ a.ronda-fila__codigo:hover { text-decoration: underline; text-underline-offset: 
 .perfil-cabeza + .perfil-cabeza__desc { margin-top: 12px; }
 .disp-programas__pedir { margin: 2px 0 0; color: var(--ink-500); font-size: var(--text-sm); }
 .disp-programas__pedir .link-btn { font-size: inherit; font-weight: 600; }
+
+/* Ficha técnica (0023): resumen en la lista y orden por capacidad */
+.sala-fila__ficha { display: block; margin-top: 2px; font-size: var(--text-xs, 12px); color: var(--ink-400, var(--ink-500)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.disp-orden { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--ink-500); }
+.disp-orden select { appearance: none; border: 0; background: transparent; font: inherit; font-size: var(--text-sm); font-weight: 600; color: var(--ink-700, var(--ink-900)); padding: 6px 2px; cursor: pointer; max-width: 11rem; }
+.disp-orden select:focus-visible { outline: 2px solid var(--violeta, currentColor); outline-offset: 2px; border-radius: 6px; }

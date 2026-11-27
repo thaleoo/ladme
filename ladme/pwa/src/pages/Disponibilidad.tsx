@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listarEquipos, listarOcupacion, miEspera, salirEspera, unirseEspera, type Espera } from '../lib/api'
-import { etiquetaSO, fotoEquipo, textoSO, type Equipo, type Ocupacion } from '../lib/types'
+import { etiquetaSO, fotoEquipo, ramNominal, resumenFicha, textoSO, type Equipo, type Ocupacion } from '../lib/types'
+import FichaTecnica from '../components/FichaTecnica'
 import { diaCorto, fecha, hace, hora, inicioDia, sumarDias } from '../lib/format'
 import { esStaff, useAuth } from '../context/AuthContext'
 import PageHeader, { Empty, Esqueleto } from '../components/PageHeader'
@@ -12,6 +13,19 @@ import { guardarCache, leerCache } from '../lib/cacheLocal'
 
 
 type Filtro = 'TODOS' | 'LIBRES' | 'OCUPADOS'
+type Orden = 'codigo' | 'ram' | 'grafica' | 'procesador'
+const ORDENES: Array<[Orden, string]> = [['codigo', 'Código'], ['ram', 'Más memoria RAM'], ['grafica', 'Mejor tarjeta gráfica'], ['procesador', 'Más núcleos']]
+
+/** Orden por capacidad (sin datos, al final); a igual capacidad, por código. */
+function comparar(orden: Orden, a: Equipo, b: Equipo): number {
+  const n = (x?: number | null) => x ?? -1
+  const dif =
+    orden === 'ram' ? n(ramNominal(b.ram_gb)) - n(ramNominal(a.ram_gb))
+    : orden === 'grafica' ? Number(!!b.gpu_dedicada) - Number(!!a.gpu_dedicada) || n(b.gpu_vram_gb) - n(a.gpu_vram_gb)
+    : orden === 'procesador' ? n(b.cpu_hilos ?? b.cpu_nucleos) - n(a.cpu_hilos ?? a.cpu_nucleos) || n(b.cpu_nucleos) - n(a.cpu_nucleos)
+    : 0
+  return dif || a.codigo.localeCompare(b.codigo, 'es', { numeric: true })
+}
 type Situacion = 'libre' | 'ocupado' | 'bloqueado' | 'inactivo'
 
 interface Celda {
@@ -122,6 +136,11 @@ export default function Disponibilidad() {
   // Las categorías se muestran como grupos de la lista, sin pestañas.
   const categoria: string = 'TODAS'
   const [so, setSo] = useState('TODOS')
+  // Ficha técnica: RAM mínima, solo con gráfica dedicada, solo con cámara, y orden por capacidad.
+  const [ramMin, setRamMin] = useState<number | null>(null)
+  const [soloDedicada, setSoloDedicada] = useState(false)
+  const [soloCamara, setSoloCamara] = useState(false)
+  const [orden, setOrden] = useState<Orden>('codigo')
   // Programas elegidos: se muestran solo los equipos que los tienen todos.
   const [elegidos, setElegidos] = useState<string[]>([])
   const alternar = (x: string) => setElegidos((l) => (l.includes(x) ? l.filter((y) => y !== x) : [...l, x]))
@@ -214,6 +233,11 @@ export default function Disponibilidad() {
   const abrirPedido = (nombre: string) => { setPedidoInicial(nombre); setPedirSoftware(true) }
   const [masProgramas, setMasProgramas] = useState(false)
   const programas = useMemo(() => [...new Set(equipos.flatMap((e) => e.software ?? []))].sort((a, b) => a.localeCompare(b, 'es')), [equipos])
+  // Filtros de la ficha técnica: solo aparecen si separan algo (p. ej. si todos tienen 16 GB, no hay chip de RAM).
+  const tamanosRam = useMemo(() => [...new Set(equipos.map((e) => ramNominal(e.ram_gb)).filter((x): x is number => !!x))].sort((a, b) => a - b), [equipos])
+  const hayDedicada = equipos.some((e) => e.gpu_dedicada) && equipos.some((e) => e.gpu_modelo && !e.gpu_dedicada)
+  const hayCamara = equipos.some((e) => e.camara) && equipos.some((e) => e.camara === false)
+  const hayFicha = equipos.some((e) => e.ram_gb || e.gpu_modelo || e.cpu_nucleos)
   const cuenta = (s: Situacion) => celdas.filter((c) => c.situacion === s).length
   const libres = cuenta('libre')
 
@@ -221,11 +245,14 @@ export default function Disponibilidad() {
     if (categoria !== 'TODAS' && c.equipo.categoria !== categoria) return false
     if (so !== 'TODOS' && c.equipo.sistema_operativo !== so) return false
     if (elegidos.length && !elegidos.every((x) => (c.equipo.software ?? []).includes(x))) return false
+    if (ramMin && (ramNominal(c.equipo.ram_gb) ?? 0) < ramMin) return false
+    if (soloDedicada && !c.equipo.gpu_dedicada) return false
+    if (soloCamara && !c.equipo.camara) return false
     if (filtro === 'LIBRES' && c.situacion !== 'libre') return false
     if (filtro === 'OCUPADOS' && c.situacion === 'libre') return false
     const q = texto.trim().toLowerCase()
-    return !q || [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo, c.equipo.sistema_operativo, c.equipo.so_version, ...(c.equipo.software ?? [])].some((v) => v?.toLowerCase().includes(q))
-  })
+    return !q || [c.equipo.codigo, c.equipo.nombre, c.equipo.marca, c.equipo.modelo, c.equipo.sistema_operativo, c.equipo.so_version, c.equipo.gpu_modelo, c.equipo.cpu_modelo, ...(c.equipo.software ?? [])].some((v) => v?.toLowerCase().includes(q))
+  }).sort((a, b) => comparar(orden, a.equipo, b.equipo))
   const grupos = (categoria === 'TODAS' ? categorias : [categoria])
     .map((cat) => ({ cat, lista: visibles.filter((c) => c.equipo.categoria === cat) }))
     .filter((g) => g.lista.length > 0)
@@ -327,6 +354,39 @@ export default function Disponibilidad() {
           </button>
         </p>
       </div>
+      {hayFicha && (
+        <div className="disp-programas disp-capacidad">
+          <div className="disp-programas__cabeza">
+            <span className="disp-programas__t" id="disp-capacidad-t">Capacidad</span>
+            <label className="disp-orden">
+              <Icon nombre="ordenar" width={16} height={16} />
+              <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} aria-label="Ordenar los equipos por">
+                {ORDENES.map(([v, t]) => <option key={v} value={v}>{v === 'codigo' ? 'Ordenar por código' : t}</option>)}
+              </select>
+            </label>
+          </div>
+          {(tamanosRam.length > 1 || hayDedicada || hayCamara) && (
+            <div className="chips-desliza" role="group" aria-labelledby="disp-capacidad-t">
+              {tamanosRam.length > 1 &&
+                tamanosRam.slice(1).map((n) => (
+                  <button key={n} type="button" className="chip" aria-pressed={ramMin === n} onClick={() => setRamMin(ramMin === n ? null : n)}>
+                    RAM {n} GB o más
+                  </button>
+                ))}
+              {hayDedicada && (
+                <button type="button" className="chip" aria-pressed={soloDedicada} onClick={() => setSoloDedicada(!soloDedicada)}>
+                  Gráfica dedicada
+                </button>
+              )}
+              {hayCamara && (
+                <button type="button" className="chip" aria-pressed={soloCamara} onClick={() => setSoloCamara(!soloCamara)}>
+                  Con cámara
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <PedirSoftware abierto={pedirSoftware} cerrar={() => setPedirSoftware(false)} equipos={equipos} inicial={pedidoInicial} />
 
       {!staff && (espera ? (
@@ -436,6 +496,7 @@ export default function Disponibilidad() {
                       {textoEstado(c)}
                       {c.actual?.desatendido ? ', proceso desatendido' : ''}
                     </span>
+                    {resumenFicha(c.equipo) && <span className="sala-fila__ficha">{resumenFicha(c.equipo)}</span>}
                   </span>
                   <Icon nombre="flecha-der" width={18} height={18} className="sala-fila__flecha" />
                 </button>
@@ -523,6 +584,13 @@ export default function Disponibilidad() {
                   ))}
                   {(sel.equipo.software ?? []).length > 10 && <span className="programa programa--mas">y {(sel.equipo.software ?? []).length - 10} más</span>}
                 </div>
+              </div>
+            )}
+
+            {resumenFicha(sel.equipo) && (
+              <div className="equipo-hoja__bloque">
+                <h3>Ficha técnica</h3>
+                <FichaTecnica equipo={sel.equipo} />
               </div>
             )}
 

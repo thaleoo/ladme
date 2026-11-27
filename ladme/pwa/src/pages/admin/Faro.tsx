@@ -512,8 +512,13 @@ function DetalleEquipo({ e, admin, ocupado, orden, canal }: {
     <div className="faro-detalle">
       {inv ? (
         <dl className="faro-detalle__datos small">
-          {inv.cpu && <><dt>Procesador</dt><dd>{inv.cpu}{inv.nucleos ? ` · ${inv.nucleos} núcleos` : ''}</dd></>}
+          {inv.cpu && <><dt>Procesador</dt><dd>{inv.cpu}{inv.nucleos ? ` · ${inv.nucleos} núcleos` : ''}{inv.hilos ? `, ${inv.hilos} hilos` : ''}</dd></>}
           {inv.ram_gb !== undefined && <><dt>Memoria</dt><dd>{inv.ram_gb} GB</dd></>}
+          {(inv.gpus ?? []).length > 0 && (
+            <><dt>Gráfica</dt><dd>{(inv.gpus ?? []).map((g) => `${g.nombre}${g.vram_gb ? ` (${g.vram_gb} GB)` : ''}`).join(' · ')}</dd></>
+          )}
+          {inv.camaras && <><dt>Cámara</dt><dd>{inv.camaras.length ? inv.camaras.join(' · ') : 'Ninguna conectada'}</dd></>}
+          {inv.cuenta && <><dt>Cuenta en uso</dt><dd>{inv.cuenta}</dd></>}
           {inv.disco_gb !== undefined && (
             <><dt>Disco</dt><dd className={libre !== null && libre < 10 ? 'faro-detalle__alerta' : undefined}>
               {inv.disco_libre_gb} GB libres de {inv.disco_gb} GB{libre !== null ? ` (${libre} %)` : ''}

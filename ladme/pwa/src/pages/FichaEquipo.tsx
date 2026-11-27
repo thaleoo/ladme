@@ -5,7 +5,8 @@ import {
   type EstadoMantenimientoEquipo
 } from '../lib/api'
 import { esStaff, useAuth } from '../context/AuthContext'
-import { ACTIVIDADES, fotoEquipo, pideDocente, perfilCompleto, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
+import { ACTIVIDADES, fotoEquipo, pideDocente, perfilCompleto, resumenFicha, textoSO, type Equipo, type Ocupacion, type Reporte } from '../lib/types'
+import FichaTecnica from '../components/FichaTecnica'
 import ReporteFalla from '../components/ReporteFalla'
 import MiReserva from '../components/MiReserva'
 import AgendaEquipo from '../components/AgendaEquipo'
@@ -412,6 +413,13 @@ export default function FichaEquipo() {
           </ul>
         )}
       </section>
+
+      {resumenFicha(equipo) && (
+        <section className="card">
+          <h2 style={{ fontSize: 'var(--text-lg)' }}>Ficha técnica</h2>
+          <FichaTecnica equipo={equipo} conFecha />
+        </section>
+      )}
 
       {especificaciones.length > 0 && (
       <section className="card">

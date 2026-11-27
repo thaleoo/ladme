@@ -310,3 +310,13 @@ Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha 
 - Quien ya había aceptado el reglamento original queda en la versión 1. La versión 2 (el reglamento nuevo) es obligatoria: **al ejecutar la migración todas las personas verán las reglas una vez más**. Para evitarlo, cambie `true` por `false` en la fila de la versión 2 antes de ejecutarla.
 - La PWA queda con el texto nuevo como respaldo: si la migración aún no se ejecutó, se comporta como antes.
 - La página «Reglas de uso» (`/reglamento`, también en Cuenta) permite consultarlas cuando se quiera.
+
+## Migración 0023 — Ficha técnica de cada equipo, llenada por Faro
+
+`migrations/0023_ficha_tecnica.sql`, después de 0022.
+
+- Columnas nuevas en `equipos`: `cpu_modelo`, `cpu_nucleos`, `cpu_hilos`, `ram_gb`, `gpu_modelo`, `gpu_vram_gb`, `gpu_dedicada`, `camara`, `disco_gb` y `ficha_en` (última actualización). Con ellas Disponibilidad filtra y ordena por RAM, tarjeta gráfica, procesador y cámara.
+- Cada inventario de Faro actualiza la ficha (disparador `agentes_ficha` → `_ficha_desde_inventario`). La ficha es del **puesto**: si se reemplaza el computador, el nuevo se vincula con el código del puesto y la ficha se corrige sola.
+- Cuando Faro informa un dato, manda; cuando no lo sabe (p. ej. falta `lspci` en Linux, o un Faro anterior que no envía cámaras ni gráfica) se conserva lo que había. La tarjeta principal es la dedicada con más memoria.
+- El sistema operativo y su versión se actualizan en cada inventario (antes solo si estaban vacíos). En Linux la versión es la distribución, p. ej. «Ubuntu 24.04.1 LTS».
+- Al ejecutarla se llena ya la ficha con el último inventario de cada equipo (procesador, RAM, disco y sistema). La gráfica y la cámara llegan con Faro 0.5.6.

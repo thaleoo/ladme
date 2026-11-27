@@ -1,6 +1,8 @@
-//! Inventario y salud del equipo: procesador, memoria, disco, MAC (para encenderlo por la
-//! red), sistema operativo y los programas de una lista conocida (R, Python, SPSS…).
-//! Faro lo envía unas veces al día; el software se copia a la PWA para filtrar al reservar.
+//! Inventario y salud del equipo: procesador, memoria, tarjeta de video, cámaras, disco, MAC (para
+//! encenderlo por la red), sistema operativo y distribución, y los programas de una lista conocida
+//! (R, Python, SPSS…). Faro lo envía al arrancar y cada hora; la base de datos copia lo que sirve para
+//! filtrar al reservar (programas, RAM, gráfica, procesador, cámara) a la ficha del equipo.
+//! Nunca abre la cámara ni lee archivos de la persona: solo nombres de dispositivos y programas.
 
 use serde_json::{json, Value};
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
@@ -60,6 +62,11 @@ pub fn recolectar() -> Value {
     json!({
         "cpu": cpu,
         "nucleos": sys.physical_core_count(),
+        "hilos": sys.cpus().len(),
+        "gpus": graficas(),
+        "camaras": camaras(),
+        "so_nombre": nombre_sistema(),
+        "cuenta": cuenta(),
         "ram_gb": redondear(sys.total_memory() as f64 / GB),
         "disco_gb": principal.map(|d| redondear(d.total_space() as f64 / GB)),
         "disco_libre_gb": principal.map(|d| redondear(d.available_space() as f64 / GB)),
@@ -70,6 +77,202 @@ pub fn recolectar() -> Value {
         "software": software(),
         "disco_salud": salud_disco(),
     })
+}
+
+// ------------------------------------------------------------------ tarjeta de video
+
+/// ¿Tarjeta dedicada (con memoria propia) o integrada en el procesador? Por el nombre: los fabricantes
+/// usan marcas distintas para cada tipo.
+pub fn es_dedicada(nombre: &str) -> bool {
+    let n = nombre.to_lowercase();
+    ["nvidia", "geforce", "quadro", "rtx", "tesla", "radeon rx", "radeon pro", "firepro", "arc(tm) a", "arc a"]
+        .iter()
+        .any(|m| n.contains(m))
+}
+
+/// Adaptadores que no son una tarjeta real (pantallas remotas, virtuales o el controlador genérico).
+fn es_virtual(nombre: &str) -> bool {
+    let n = nombre.to_lowercase();
+    ["microsoft basic", "remote", "virtual", "parsec", "citrix", "hyper-v", "mirror", "vmware", "virtualbox", "llvmpipe"]
+        .iter()
+        .any(|m| n.contains(m))
+}
+
+fn grafica(nombre: String, vram_bytes: Option<u64>) -> Value {
+    let vram = vram_bytes.filter(|b| *b >= 256 * 1024 * 1024).map(|b| redondear(b as f64 / GB));
+    json!({ "nombre": nombre, "vram_gb": vram, "dedicada": es_dedicada(&nombre) })
+}
+
+/// Windows: el registro de la clase «Display» tiene el nombre del controlador y la memoria real de la
+/// tarjeta (WMI la corta en 4 GB). Sin PowerShell: es rápido.
+#[cfg(windows)]
+fn graficas() -> Vec<Value> {
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
+    use winreg::RegKey;
+    let ruta = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+    let Ok(clase) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(ruta, KEY_READ) else { return vec![] };
+    let mut vistas: Vec<String> = Vec::new();
+    let mut v = Vec::new();
+    for sub in clase.enum_keys().flatten().filter(|k| k.chars().all(|c| c.is_ascii_digit())) {
+        let Ok(k) = clase.open_subkey_with_flags(&sub, KEY_READ) else { continue };
+        let Ok(nombre) = k.get_value::<String, _>("DriverDesc") else { continue };
+        let nombre = nombre.trim().to_string();
+        if nombre.is_empty() || es_virtual(&nombre) || vistas.contains(&nombre) {
+            continue;
+        }
+        let bytes = |valor: &str| {
+            k.get_raw_value(valor).ok().and_then(|r| match r.bytes.len() {
+                8 => Some(u64::from_le_bytes(r.bytes[..8].try_into().ok()?)),
+                4 => Some(u32::from_le_bytes(r.bytes[..4].try_into().ok()?) as u64),
+                _ => None,
+            })
+        };
+        let vram = bytes("HardwareInformation.qwMemorySize").or_else(|| bytes("HardwareInformation.MemorySize"));
+        vistas.push(nombre.clone());
+        v.push(grafica(nombre, vram));
+    }
+    v
+}
+
+/// Linux: `nvidia-smi` da nombre y memoria de las NVIDIA; `lspci` nombra las demás; las AMD publican su
+/// memoria en /sys. Si falta alguna herramienta se informa lo que se pueda.
+#[cfg(not(windows))]
+fn graficas() -> Vec<Value> {
+    let mut v: Vec<Value> = Vec::new();
+    let mut hay_nvidia = false;
+    if let Some(texto) = salida("nvidia-smi", &["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]) {
+        for linea in texto.lines() {
+            let mut partes = linea.split(',').map(str::trim);
+            let (Some(nombre), mib) = (partes.next(), partes.next().and_then(|m| m.parse::<u64>().ok())) else { continue };
+            if nombre.is_empty() {
+                continue;
+            }
+            hay_nvidia = true;
+            v.push(grafica(nombre.to_string(), mib.map(|m| m * 1024 * 1024)));
+        }
+    }
+    let vram_amd = std::fs::read_dir("/sys/class/drm")
+        .ok()
+        .into_iter()
+        .flat_map(|it| it.flatten())
+        .filter_map(|d| std::fs::read_to_string(d.path().join("device/mem_info_vram_total")).ok())
+        .filter_map(|t| t.trim().parse::<u64>().ok())
+        .max();
+    if let Some(texto) = salida("lspci", &["-mm"]) {
+        for (clase, fabricante, modelo) in texto.lines().filter_map(linea_lspci) {
+            if !(clase.contains("VGA") || clase.contains("3D") || clase.contains("Display")) {
+                continue;
+            }
+            let nvidia = fabricante.to_lowercase().contains("nvidia");
+            if nvidia && hay_nvidia {
+                continue; // ya vino con nombre y memoria de nvidia-smi
+            }
+            let nombre = nombre_lspci(&fabricante, &modelo);
+            if es_virtual(&nombre) {
+                continue;
+            }
+            let amd = fabricante.contains("AMD") || fabricante.contains("ATI");
+            v.push(grafica(nombre, if amd { vram_amd } else { None }));
+        }
+    }
+    v
+}
+
+/// Una línea de `lspci -mm`: `00:02.0 "VGA compatible controller" "Intel Corporation" "AlderLake-S GT1" …`.
+#[cfg(not(windows))]
+fn linea_lspci(linea: &str) -> Option<(String, String, String)> {
+    let campos: Vec<&str> = linea.split('"').collect();
+    // [ranura, clase, " ", fabricante, " ", modelo, …]
+    Some((campos.get(1)?.to_string(), campos.get(3)?.to_string(), campos.get(5)?.to_string()))
+}
+
+/// «NVIDIA Corporation» + «GA106GL [RTX A2000 12GB]» → «NVIDIA RTX A2000 12GB».
+#[cfg(not(windows))]
+fn nombre_lspci(fabricante: &str, modelo: &str) -> String {
+    let marca = match fabricante {
+        f if f.contains("NVIDIA") => "NVIDIA",
+        f if f.contains("Intel") => "Intel",
+        f if f.contains("AMD") || f.contains("ATI") => "AMD",
+        f => f.split_whitespace().next().unwrap_or(f),
+    };
+    let comercial = match (modelo.rfind('['), modelo.rfind(']')) {
+        (Some(a), Some(b)) if b > a => &modelo[a + 1..b],
+        _ => modelo,
+    };
+    format!("{marca} {}", comercial.trim())
+}
+
+#[cfg(not(windows))]
+fn salida(programa: &str, args: &[&str]) -> Option<String> {
+    let s = std::process::Command::new(programa).args(args).output().ok()?;
+    s.status.success().then(|| String::from_utf8_lossy(&s.stdout).into_owned())
+}
+
+// ------------------------------------------------------------------ cámaras
+
+/// Nombres de las cámaras conectadas. No se abre ningún dispositivo.
+#[cfg(windows)]
+fn camaras() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
+    let Ok(s) = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-PnpDevice -PresentOnly -Status OK -Class Camera,Image -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName",
+        ])
+        .creation_flags(0x0800_0000)
+        .output()
+    else {
+        return vec![];
+    };
+    let mut v: Vec<String> = String::from_utf8_lossy(&s.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty() && !l.to_lowercase().contains("scan"))
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Linux: cada cámara aparece en /sys/class/video4linux (una cámara puede tener varios nodos; se toma
+/// el principal, índice 0).
+#[cfg(not(windows))]
+fn camaras() -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir("/sys/class/video4linux")
+        .ok()
+        .into_iter()
+        .flat_map(|it| it.flatten())
+        .filter(|d| std::fs::read_to_string(d.path().join("index")).map(|i| i.trim() == "0").unwrap_or(true))
+        .filter_map(|d| std::fs::read_to_string(d.path().join("name")).ok())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+// ------------------------------------------------------------------ sistema y cuenta
+
+/// Nombre del sistema con su versión: «Ubuntu 24.04.1 LTS», «Windows 11 Pro».
+fn nombre_sistema() -> Option<String> {
+    #[cfg(not(windows))]
+    if let Ok(t) = std::fs::read_to_string("/etc/os-release") {
+        if let Some(n) = t.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=")) {
+            let n = n.trim().trim_matches('"').trim();
+            if !n.is_empty() {
+                return Some(n.to_string());
+            }
+        }
+    }
+    System::long_os_version()
+}
+
+/// Cuenta del sistema en la que corre Faro (p. ej. «estudiantes»): dice qué perfil está en uso.
+fn cuenta() -> Option<String> {
+    std::env::var("USERNAME").or_else(|_| std::env::var("USER")).ok().map(|c| c.trim().to_string()).filter(|c| !c.is_empty())
 }
 
 /// Procesos que delatan cada programa (nombre del ejecutable, sin «.exe», en minúsculas).
@@ -248,10 +451,36 @@ mod pruebas {
     }
 
     #[test]
+    fn tarjetas_dedicadas_e_integradas() {
+        use super::es_dedicada;
+        for n in ["NVIDIA RTX A2000 12GB", "NVIDIA GeForce GTX 1650", "AMD Radeon RX 6600", "Quadro P620", "Intel(R) Arc(TM) A380"] {
+            assert!(es_dedicada(n), "{n}");
+        }
+        for n in ["Intel(R) UHD Graphics 770", "Intel AlderLake-S GT1", "AMD Radeon(TM) Graphics", "Intel(R) Iris(R) Xe Graphics"] {
+            assert!(!es_dedicada(n), "{n}");
+        }
+        assert!(super::es_virtual("Microsoft Basic Display Adapter"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn lee_lspci() {
+        let l = r#"01:00.0 "VGA compatible controller" "NVIDIA Corporation" "GA106GL [RTX A2000 12GB]" -ra1 "Dell" "Device 151d""#;
+        let (clase, fab, modelo) = super::linea_lspci(l).unwrap();
+        assert_eq!(clase, "VGA compatible controller");
+        assert_eq!(super::nombre_lspci(&fab, &modelo), "NVIDIA RTX A2000 12GB");
+        let i = r#"00:02.0 "VGA compatible controller" "Intel Corporation" "AlderLake-S GT1" -r0c "Dell" "Device 0a9f""#;
+        let (_, fab, modelo) = super::linea_lspci(i).unwrap();
+        assert_eq!(super::nombre_lspci(&fab, &modelo), "Intel AlderLake-S GT1");
+    }
+
+    #[test]
     fn recolecta_algo_razonable() {
         let v = super::recolectar();
         assert!(v["ram_gb"].as_f64().unwrap_or(0.0) > 0.0);
         assert!(v["software"].is_array());
+        assert!(v["gpus"].is_array() && v["camaras"].is_array());
+        assert!(v["hilos"].as_u64().unwrap_or(0) >= 1);
         let mut m = super::Medidor::new();
         std::thread::sleep(std::time::Duration::from_millis(250));
         assert!(m.cpu_pct() <= 100);
