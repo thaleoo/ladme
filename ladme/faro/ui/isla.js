@@ -1,4 +1,4 @@
-import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoReloj, esc, ICONOS, DIBUJO_NFC } from './comun.js';
+import { invocar, escuchar, fijarDesfase, cuenta, progreso, textoHora, textoReloj, esc, ICONOS, DIBUJO_NFC, LOGO } from './comun.js';
 
 // ------------------------------------------------------------------ estado
 const isla = document.getElementById('isla');
@@ -237,7 +237,7 @@ function htmlAbierta(v) {
         No reinicies, apagues ni cierres la sesión.${v.compartido.nota ? ` «${esc(v.compartido.nota)}»` : ''}</span></div>` : ''}
       ${v.espera > 0 && (v.estado === 'por_terminar' || v.estado === 'reservado') ? `<div class="espera">${ICONOS.reloj}<span>${v.espera === 1 ? 'Hay 1 persona esperando' : `Hay ${v.espera} personas esperando`} un equipo. Si ya terminaste, libéralo.</span></div>` : ''}
       ${cuerpo}
-      <div class="pie"><span>Faro · LADME ${esc(paquete?.version ?? '')}${paquete?.clave_disponible && accion !== 'personal'
+      <div class="pie"><span class="pie__marca">${LOGO}Faro ${esc(paquete?.version ?? '')}${paquete?.clave_disponible && accion !== 'personal'
         ? ` · <button class="link-pie" data-personal title="Personal del laboratorio">${ICONOS.llave} Personal</button>` : ''}</span><span class="num" data-vivo="hora">--</span></div>
     </div>`;
 }

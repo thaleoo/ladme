@@ -112,6 +112,8 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
 .pie { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--borde);
        color: var(--texto-3); font-size: 11px; }
 .pie .mover { color: var(--texto-3); }
+.pie__marca { display: inline-flex; align-items: center; gap: 6px; }
+.pie__marca .logo-ladme { width: 15px; height: 15px; }
 
 /* 0.4: enlace corto, QR de llegada, anuncios, sesión limpia, personal */
 .panel-qr .corto { font-size: 12px !important; color: var(--texto-3) !important; }
@@ -119,16 +121,17 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
 .barra.fina { height: 3px; margin: 0 0 12px; }
 .barra.fina i { transition: width 1s linear; }
 .anuncio { display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; padding: 10px 12px; border-radius: 14px;
-  background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.35); font-size: 13px; line-height: 1.45; color: var(--texto); }
-.anuncio svg { flex: none; width: 16px; height: 16px; margin-top: 1px; color: #c4b5fd; }
-.megafono svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; color: #c4b5fd; }
+  background: var(--superficie); border: 1px solid var(--borde-fuerte); font-size: 13px; line-height: 1.45; color: var(--texto); }
+.anuncio svg { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--violeta-claro); }
+.megafono svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; color: var(--violeta-claro); }
 .limpieza { margin-top: 12px; padding: 11px 12px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid var(--borde); }
 .limpieza p, .panel-personal p { margin: 0 0 8px; font-size: 13px; color: var(--texto-2); line-height: 1.45; }
 .limpieza p strong, .panel-personal p strong { display: block; color: var(--texto); font-size: 14.5px; margin-bottom: 3px; }
 .limpieza .acciones, .panel-personal .acciones { margin-top: 10px; }
 .panel-personal { margin-top: 12px; }
 .panel-personal .campo { width: 100%; height: 38px; font-size: 14px; }
-.boton.peligro { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.5); color: #fecaca; }
+.boton.peligro { background: transparent; border-color: rgba(248, 113, 113, 0.45); color: #fca5a5; }
+.boton.peligro:hover { background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.6); }
 .link-pie { background: none; border: 0; padding: 0; color: var(--texto-3); font: inherit; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
 .link-pie:hover { color: var(--texto-2); }
 .link-pie svg { width: 12px; height: 12px; }
@@ -159,7 +162,7 @@ html, body { background: transparent; overflow: hidden; width: 100%; height: 100
 .salida ul { margin: 4px 0 0; padding-left: 18px; }
 
 .nfc { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 10px 12px; border-radius: 14px;
-       background: rgba(139, 92, 246, 0.10); border: 1px solid rgba(139, 92, 246, 0.30); }
+       background: var(--superficie); border: 1px solid var(--borde-fuerte); }
 .nfc p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--texto-2); }
 .nfc p strong { display: block; color: var(--texto); }
 .dibujo-nfc { flex: none; width: 72px; height: 48px; color: var(--texto); }

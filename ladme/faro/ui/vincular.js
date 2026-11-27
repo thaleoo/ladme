@@ -1,4 +1,5 @@
-import { invocar } from './comun.js';
+import { invocar, LOGO } from './comun.js';
+document.getElementById('marca').insertAdjacentHTML('afterbegin', LOGO);
 const form = document.getElementById('form');
 const campo = document.getElementById('codigo');
 const error = document.getElementById('error');
