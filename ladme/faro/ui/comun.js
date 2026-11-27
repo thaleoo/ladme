@@ -1,5 +1,8 @@
 // Faro · utilidades compartidas por las ventanas.
 const T = window.__TAURI__;
+
+// Linux (WebKitGTK): faro.css quita ahí los efectos que dejan rastro en ventanas transparentes.
+if (/Linux/i.test(navigator.userAgent)) document.documentElement.classList.add('linux');
 export const invocar = (cmd, args) => T.core.invoke(cmd, args);
 export const escuchar = (ev, fn) => T.event.listen(ev, (e) => fn(e.payload));
 

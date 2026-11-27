@@ -139,3 +139,14 @@ button { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Linux (WebKitGTK). En algunas tarjetas gráficas una ventana transparente no borra los cuadros anteriores:
+   el desenfoque animado y el cambio de tamaño con rebote dejaban la isla «repetida». Aquí las transiciones son
+   cortas y sin desenfoque, y el fondo de la pantalla de bloqueo es estático. */
+html.linux .capa,
+html.linux .capa.activa { filter: none; }
+html.linux .isla { --muelle: ease-out; }
+html.linux .fondo i { filter: none; animation: none; background: radial-gradient(closest-side, var(--mancha, #6d28d9), transparent); }
+html.linux .fondo i:nth-child(2) { --mancha: var(--c); }
+html.linux .fondo i:nth-child(3) { --mancha: #1d4ed8; }
+html.linux .tarjeta { backdrop-filter: none; background: rgba(15, 15, 20, 0.92); }

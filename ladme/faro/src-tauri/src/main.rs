@@ -2,6 +2,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // En Linux, WebKitGTK dibuja por defecto con DMA-BUF. Con algunas tarjetas gráficas (sobre todo NVIDIA)
+    // una ventana transparente como la isla no borra los cuadros anteriores y cada animación deja rastro.
+    // Se usa el camino de memoria compartida, un poco más lento pero sin basura. Quien necesite otra cosa
+    // puede fijar la variable antes de abrir Faro (por ejemplo en el servicio de systemd).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     // En Linux con Wayland (Fedora, Ubuntu 22.04+) una app no puede elegir dónde va su ventana ni
     // quedarse siempre encima: GNOME la pone en el centro. Con XWayland sí puede, así que Faro
     // arranca en ese modo salvo que alguien fije GDK_BACKEND a propósito.
