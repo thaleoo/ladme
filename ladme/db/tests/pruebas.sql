@@ -1100,3 +1100,62 @@ begin
                      'si quitan la tarjeta dedicada, la ficha queda con la integrada');
   perform pg_temp.como('lab@unal.edu.co');
 end $$;
+
+-- 0024: limpieza de textos, palabras bloqueadas y límites.
+do $$
+declare r reservas; t0 timestamptz := date_trunc('hour', now()) + interval '200 hours'; v_ana uuid; n int;
+begin
+  -- Comparación: variantes que sí coinciden y palabras normales que no.
+  perform pg_temp.ok(_palabra_bloqueada('No cerrar, MiErDa') = 'mierda', 'no distingue mayúsculas');
+  perform pg_temp.ok(_palabra_bloqueada('p.u.t.a') = 'puta' and _palabra_bloqueada('p u t a') = 'puta', 'letras separadas por signos o espacios');
+  perform pg_temp.ok(_palabra_bloqueada('pu7a') = 'puta' and _palabra_bloqueada('mierdaaaa') = 'mierda', 'números en lugar de letras y letras estiradas');
+  perform pg_temp.ok(_palabra_bloqueada('qué imbéciles') = 'imbecil' and _palabra_bloqueada('IDIOTAS') = 'idiota', 'tildes y plurales');
+  perform pg_temp.ok(_palabra_bloqueada('Entrenando un modelo en la computadora, no cerrar la terminal') is null, 'un texto normal pasa («computadora» no es «puta»)');
+  perform pg_temp.ok(_palabra_bloqueada('pera, perro, cono, Vergara, el proceso va retrasado') is null, 'palabras parecidas o normales pasan');
+  perform pg_temp.ok(_palabra_bloqueada(null) is null and _palabra_bloqueada('') is null, 'texto vacío');
+
+  -- Limpieza: invisibles, saltos de línea, espacios y acentos apilados.
+  perform pg_temp.ok(_limpiar_texto('  hola' || chr(8203) || chr(8238) || E'\n\n mundo  ') = 'hola mundo', 'se quitan invisibles, control de dirección y saltos en una línea');
+  perform pg_temp.ok(_limpiar_texto(E'uno\n\n\n\n\ndos', false) = E'uno\n\ndos', 'en varias líneas se dejan como máximo dos saltos');
+  perform pg_temp.ok(char_length(_limpiar_texto('z' || repeat(chr(769), 30))) = 3, 'el «zalgo» queda en dos acentos');
+  perform pg_temp.ok(_limpiar_texto('   ') is null, 'solo espacios queda vacío');
+
+  -- Público: el mensaje para quien llegue no se guarda con una palabra de la lista.
+  perform pg_temp.como('ana@unal.edu.co');
+  select id into v_ana from perfiles where correo = 'ana@unal.edu.co';
+  r := crear_reserva('UNAL-03', t0, t0 + interval '1 hour', 'Docencia');
+  perform pg_temp.falla(format($q$update reservas set mensaje_llegada = 'no tocar, gonorrea' where id = %L$q$, r.id), 'no se puede publicar');
+  update reservas set mensaje_llegada = E'  Entrenando\nun modelo' || chr(8203) where id = r.id;
+  perform pg_temp.ok((select mensaje_llegada from reservas where id = r.id) = 'Entrenando un modelo', 'el mensaje se guarda limpio y en una línea');
+  perform pg_temp.falla(format($q$update reservas set protegidos = array['RStudio', 'm.i.e.r.d.a'] where id = %L$q$, r.id), 'programas protegidos');
+  -- El nombre que escribe la persona también.
+  perform pg_temp.falla($q$update perfiles set nombre = 'Ana Hijueputa' where id = auth.uid()$q$, 'el nombre');
+  -- Privado: se guarda y queda marcado.
+  perform reportar_falla('UNAL-03', 'Otro', 'La pantalla parpadea, qué mierda');
+  perform pg_temp.ok(exists (select 1 from moderacion_marcas where tabla = 'reportes' and palabra = 'mierda' and usuario_id = v_ana and not revisada),
+                     'un reporte con una palabra de la lista se guarda y queda marcado');
+
+  -- El personal no se rechaza (solo se limpia).
+  perform pg_temp.como('lab@unal.edu.co');
+  update reservas set mensaje_llegada = 'Prueba del personal: mierda' where id = r.id;
+  perform pg_temp.ok((select mensaje_llegada from reservas where id = r.id) like 'Prueba del personal%', 'al personal no se le rechaza el texto');
+
+  -- Lista: solo la administración la cambia; se guarda en forma comparable.
+  perform pg_temp.falla($q$select moderacion_palabra('Bobo')$q$, 'Solo la administración');
+  perform pg_temp.como('admin@unal.edu.co');
+  perform pg_temp.ok(moderacion_palabra(' BOBÓ ') = 'bobo', 'la administración agrega una palabra (sin tildes ni mayúsculas)');
+  perform pg_temp.ok(moderacion_probar('qué bobos') = 'bobo', 'probar un texto dice qué palabra lo bloquearía');
+  perform moderacion_palabra('bobo', false);
+  perform pg_temp.ok(moderacion_probar('qué bobos') is null, 'quitar una palabra deja de bloquearla');
+  perform pg_temp.falla($q$select moderacion_palabra('a')$q$, 'de 2 a 60');
+
+  -- Límites de frecuencia: solicitudes de software.
+  perform pg_temp.como('ana@unal.edu.co');
+  for n in 1..5 loop
+    insert into solicitudes_software (solicitante, software, uso, estado) values (v_ana, 'Programa ' || n, 'Para la tesis de grado', 'pendiente');
+  end loop;
+  perform pg_temp.falla(format($q$insert into solicitudes_software (solicitante, software, uso, estado) values (%L, 'Otro', 'Para la tesis de grado', 'pendiente')$q$, v_ana),
+                        '5 solicitudes de software en curso');
+  delete from solicitudes_software where solicitante = v_ana;
+  perform pg_temp.como('lab@unal.edu.co');
+end $$;

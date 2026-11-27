@@ -5034,3 +5034,12 @@ a.ronda-fila__codigo:hover { text-decoration: underline; text-underline-offset: 
 .disp-orden { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--ink-500); }
 .disp-orden select { appearance: none; border: 0; background: transparent; font: inherit; font-size: var(--text-sm); font-weight: 600; color: var(--ink-700, var(--ink-900)); padding: 6px 2px; cursor: pointer; max-width: 11rem; }
 .disp-orden select:focus-visible { outline: 2px solid var(--violeta, currentColor); outline-offset: 2px; border-radius: 6px; }
+
+/* Texto que escriben las personas: una palabra larga sin espacios no rompe la tarjeta (0024). */
+body { overflow-wrap: break-word; }
+.equipo-hoja__nota, .reserva-card__nota, .alert__body, .moderacion__fila, .datos__valor { overflow-wrap: anywhere; }
+.moderacion__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.moderacion__fila { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3) 0; border-top: 1px solid var(--line); }
+.moderacion__fila:first-child { border-top: 0; }
+.moderacion__fila { flex-wrap: wrap; }
+.moderacion__acciones { display: flex; gap: var(--s2); flex: none; }

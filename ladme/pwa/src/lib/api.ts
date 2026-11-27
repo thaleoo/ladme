@@ -1369,3 +1369,53 @@ export async function quitarFotoEquipo(equipoId: string): Promise<void> {
   const { error } = await supabase.from('equipos').update({ foto_url: null }).eq('id', equipoId)
   if (error) fail('No se pudo quitar la foto', error)
 }
+
+// ------------------------------------------------- 0024: moderación
+export interface MarcaModeracion {
+  id: number
+  tabla: string
+  fila: string
+  campo: string
+  palabra: string
+  revisada: boolean
+  creado_en: string
+  perfiles: { nombre: string; correo: string } | null
+}
+
+/** Palabras que no se pueden publicar (en su forma comparable: minúsculas y sin tildes). Solo el personal. */
+export async function listarPalabrasBloqueadas(): Promise<string[]> {
+  const { data, error } = await supabase.from('palabras_bloqueadas').select('palabra').order('palabra')
+  if (error) fail('No se pudo cargar la lista de palabras', error)
+  return (data ?? []).map((f) => (f as { palabra: string }).palabra)
+}
+
+/** Agrega o quita una palabra de la lista (solo administración). Devuelve cómo quedó guardada. */
+export async function cambiarPalabraBloqueada(palabra: string, agregar: boolean): Promise<string> {
+  const { data, error } = await supabase.rpc('moderacion_palabra', { p_palabra: palabra, p_agregar: agregar })
+  if (error) fail(agregar ? 'No se pudo agregar la palabra' : 'No se pudo quitar la palabra', error)
+  return data as string
+}
+
+/** La palabra de la lista que bloquearía este texto, o null si se puede publicar. */
+export async function probarModeracion(texto: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('moderacion_probar', { p_texto: texto })
+  if (error) fail('No se pudo probar el texto', error)
+  return (data as string | null) ?? null
+}
+
+/** Textos privados con una palabra de la lista (reportes, apelaciones, solicitudes) pendientes de revisar. */
+export async function listarMarcasModeracion(): Promise<MarcaModeracion[]> {
+  const { data, error } = await supabase
+    .from('moderacion_marcas')
+    .select('id, tabla, fila, campo, palabra, revisada, creado_en, perfiles(nombre, correo)')
+    .eq('revisada', false)
+    .order('creado_en', { ascending: false })
+    .limit(100)
+  if (error) fail('No se pudieron cargar los textos marcados', error)
+  return (data ?? []) as unknown as MarcaModeracion[]
+}
+
+export async function revisarMarcaModeracion(id: number): Promise<void> {
+  const { error } = await supabase.rpc('moderacion_revisar', { p_id: id })
+  if (error) fail('No se pudo marcar como revisado', error)
+}

@@ -320,3 +320,15 @@ Si la PWA se publica antes de ejecutar esta migración, nada se rompe: la ficha 
 - Cuando Faro informa un dato, manda; cuando no lo sabe (p. ej. falta `lspci` en Linux, o un Faro anterior que no envía cámaras ni gráfica) se conserva lo que había. La tarjeta principal es la dedicada con más memoria.
 - El sistema operativo y su versión se actualizan en cada inventario (antes solo si estaban vacíos). En Linux la versión es la distribución, p. ej. «Ubuntu 24.04.1 LTS».
 - Al ejecutarla se llena ya la ficha con el último inventario de cada equipo (procesador, RAM, disco y sistema). La gráfica y la cámara llegan con Faro 0.5.6.
+
+## Migración 0024 — Límites y moderación de lo que escriben las personas
+
+`migrations/0024_moderacion.sql`, después de 0023.
+
+- **Limpieza en el servidor** de todo texto que escriben las personas (`_limpiar_texto`): sin caracteres invisibles ni de control de dirección, sin acentos apilados («zalgo»), espacios colapsados y, en los textos de una línea (mensaje para quien llegue, programas protegidos, nombre, docente, nombre de clase), sin saltos de línea. Se aplica con disparadores `aa_moderacion` en cada tabla, así que vale para cualquier camino (PWA, bot, RPC).
+- **Palabras que no se pueden publicar** (`palabras_bloqueadas`), con lista inicial de insultos frecuentes. La administración la edita en **Administración → Herramientas → Moderación** (`moderacion_palabra`); el personal puede probar un texto (`moderacion_probar`). Se comparan palabras completas sin mayúsculas ni tildes, y se reconocen variantes: «p.u.t.a», «p u t a», «pu7a», «mierdaaa», plurales. «computadora» no coincide con nada.
+- **Texto público** (lo ven otras personas: mensaje en la pantalla de Faro, programas protegidos, nombre que escribe la persona, mensajes al titular, docente, clases): con una palabra de la lista **no se guarda** y la persona ve qué palabra cambiar.
+- **Texto privado** (solo lo ve el personal: reportes, apelaciones, justificaciones, solicitudes de software, verificación de docente, detalle de la reserva): se guarda y queda en `moderacion_marcas` para revisarlo en la misma pantalla.
+- Al personal y a los procesos del sistema (importaciones, tareas, Faro) no se les rechaza nada: solo se limpia. El nombre que llega de Google al crear la cuenta tampoco se rechaza.
+- **Límites nuevos**: como máximo 5 solicitudes de software en curso y 5 por día por persona; como máximo 5 solicitudes de clase pendientes por docente.
+- Faro 0.5.7 y la PWA cortan las palabras largas sin espacios para que no se salgan de su caja; en Faro el mensaje ocupa como máximo tres líneas.
