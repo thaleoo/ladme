@@ -179,6 +179,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function alRecibir(p) {
+  if (!p) return; // con el servicio del sistema, el primer paquete llega por el evento
   const cambio = JSON.stringify(p.vista) !== JSON.stringify(paquete?.vista) || p.qr !== paquete?.qr;
   paquete = p;
   fijarDesfase(p.desfase_ms);

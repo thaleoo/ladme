@@ -18,8 +18,10 @@ const agregar = (clave, patron) => {
     url: `${base.replace(/\/$/, '')}/${encodeURIComponent(nombre)}`
   }
 }
-// Solo instalaciones que se actualizan sin contraseña de administrador.
+// Faro por cuenta (instalador NSIS y AppImage); el servicio de Windows se actualiza con el programa solo
+// y el de Linux con la AppImage. Tauri ignora las claves que no conoce.
 agregar('windows-x86_64-nsis', /windows-x64-setup\.exe$/)
+agregar('windows-x86_64-exe', /windows-x64\.exe$/)
 agregar('linux-x86_64-appimage', /linux-x86_64\.AppImage$/)
 if (Object.keys(plataformas).length === 0) {
   console.error('No hay instaladores firmados (.sig): ¿falta el secreto TAURI_SIGNING_PRIVATE_KEY?')

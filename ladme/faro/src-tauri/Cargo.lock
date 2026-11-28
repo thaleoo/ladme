@@ -2239,14 +2239,16 @@ dependencies = [
 
 [[package]]
 name = "ladme-faro"
-version = "0.7.5"
+version = "0.8.1"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dirs 5.0.1",
  "gtk",
  "hex",
  "if-addrs",
+ "minisign-verify",
  "os_info",
  "qrcode",
  "reqwest 0.12.28",

@@ -41,7 +41,9 @@ personales, liberar). Si Faro pierde la conexión o el reloj del PC está desfas
 
 El mismo Faro responde en una terminal. Al arrancar deja el comando disponible sin permisos de administrador:
 en Linux un enlace `~/.local/bin/faro` al AppImage; en Windows un `faro.cmd` en
-`%LOCALAPPDATA%\Microsoft\WindowsApps` (ya está en el PATH; funciona en cmd y PowerShell).
+`%LOCALAPPDATA%\Microsoft\WindowsApps` (ya está en el PATH; funciona en cmd y PowerShell). Con el servicio
+del sistema, lo deja el instalador para todas las cuentas: `/usr/local/bin/faro` en Linux y
+`C:\Program Files\LADME Faro\faro.cmd` (en el PATH del sistema) en Windows.
 
 La línea de comandos está en inglés (con [clap](https://docs.rs/clap)); `faro --help` y `faro <comando> --help`
 muestran la ayuda. Los nombres en español de Faro 0.6 siguen funcionando como alias ocultos.
@@ -206,18 +208,36 @@ actualizaciones para los Faro ya instalados, y habría que reinstalarlos.
    Run workflow y descargue los artefactos.
 4. **Instalar en cada PC** con los archivos de la release. Basta copiar a una memoria USB el instalador y
    el script, y antes generar en Administración → Faro → **Vincular** el código de cada equipo:
-   - **Windows 10/11.** Con la sesión de «estudiantes» abierta, en la carpeta de la memoria:
+   - **Windows 10/11, como servicio del sistema** (recomendado, desde Faro 0.8.1): con
+     `faro-X.Y.Z-windows-x64.exe` y el script en la memoria, abra PowerShell **como administrador** y, en
+     esa carpeta:
      ```powershell
      powershell -ExecutionPolicy Bypass -File instalar-windows.ps1 -Codigo ABCD-EFGH
      ```
-     Instala en silencio solo para esa cuenta, sin permisos de administrador, y deja el código para que
-     Faro se vincule solo. Faro queda en el inicio de sesión de esa cuenta.
-   - **Linux con AppImage** (recomendado: se actualiza solo):
+     Deja el programa en `C:\Program Files\LADME Faro`, el servicio `ladme-faro` (LocalSystem: vínculo,
+     estado y claves en `C:\ProgramData\LADME Faro`, que solo leen el sistema y los administradores) y el
+     comando `faro`. El servicio abre la isla y las pantallas en la sesión de quien use el equipo y las
+     vuelve a abrir si alguien las cierra con el Administrador de tareas (queda anotado). Si el equipo ya
+     tenía Faro por cuenta, traslada el vínculo y quita esa instalación. Para actualizar a mano o
+     reparar, se vuelve a ejecutar; para retirarlo, `desinstalar-windows.ps1` (con `-Todo` borra también
+     el vínculo). Los registros del servicio se leen con `faro logs` en una terminal de administrador.
+   - **Windows 10/11, solo para una cuenta** (sin administrador): con el instalador `...setup.exe` y el
+     script, en la sesión de esa cuenta, el mismo comando en una PowerShell normal. Faro queda en el inicio
+     de sesión de esa cuenta, pero la cuenta puede cerrarlo.
+   - **Linux con AppImage, como servicio del sistema** (recomendado: sirve para todas las cuentas, nadie
+     sin la contraseña de administrador puede cerrarlo y se actualiza solo):
      ```bash
-     bash instalar-linux.sh ABCD-EFGH
+     sudo bash instalar-linux.sh ABCD-EFGH
      ```
-     Sin sudo. Crea el servicio `ladme-faro` de la cuenta, que lo abre al iniciar sesión y lo reabre si
-     lo cierran.
+     Deja el programa en `/opt/ladme-faro`, el servicio `ladme-faro-servicio` (el núcleo, como root: vínculo,
+     estado y claves en `/var/lib/ladme-faro`) y la interfaz `ladme-faro` en cada sesión, que el servicio
+     vuelve a abrir si alguien la cierra. Si el equipo ya tenía Faro por cuenta, traslada el vínculo y no
+     hace falta código. Para actualizar a mano o reparar, se vuelve a ejecutar el mismo comando. Para
+     retirarlo: `sudo bash desinstalar-linux.sh` (con `--todo` borra también el vínculo). Los registros
+     del servicio se leen con `sudo /usr/local/bin/faro logs`.
+   - **Linux con AppImage, solo para una cuenta** (sin sudo): `bash instalar-linux.sh ABCD-EFGH`. Crea el
+     servicio `ladme-faro` de la cuenta, que lo abre al iniciar sesión y lo reabre si lo cierran, pero la
+     cuenta puede detenerlo.
    - **Linux con paquete** (lo hace TI; se actualiza a mano):
      - Ubuntu/Debian: `sudo apt install ./faro-*.deb`
      - Fedora: `sudo dnf install ./faro-*.rpm`
@@ -233,9 +253,11 @@ arrancar. En Windows es `C:\ProgramData\LADME\faro.json`; en Linux, `/etc/ladme/
 { "supabase_url": "https://xxxx.supabase.co", "supabase_key": "sb_publishable_…", "pwa_url": "https://…" }
 ```
 
-El token del PC se guarda en la carpeta de la cuenta, nunca en ese archivo:
-- Windows: `%APPDATA%\co.edu.unal.ladme.faro\faro.json`
-- Linux: `~/.config/co.edu.unal.ladme.faro/faro.json`
+El token del PC se guarda en la carpeta de Faro, nunca en ese archivo:
+- Windows con el servicio del sistema: `C:\ProgramData\LADME Faro\faro.json` (solo sistema y administradores)
+- Windows por cuenta: `%APPDATA%\co.edu.unal.ladme.faro\faro.json`
+- Linux con el servicio del sistema: `/var/lib/ladme-faro/faro.json` (solo root)
+- Linux por cuenta: `~/.config/co.edu.unal.ladme.faro/faro.json`
 
 En la base de datos solo queda su huella.
 
@@ -245,9 +267,13 @@ En la base de datos solo queda su huella.
   terminar los dos procesos a la vez (por ejemplo, con «Finalizar árbol de procesos»).
   - Faro impide Alt+F4 sobre el bloqueo y registra el intento.
   - Si el proceso muere, el panel muestra el equipo «sin señal».
-  - Para impedirlo de verdad hace falta una fase 3b con TI: un servicio de Windows (o de systemd en
-    Linux) que corra como sistema y vuelva a abrir Faro si lo cierran, o una directiva que bloquee el
-    Administrador de tareas para esa cuenta.
+  - Con el servicio del sistema (Linux desde 0.8.0, Windows desde 0.8.1), el núcleo corre como root o
+    LocalSystem: una cuenta normal no puede detenerlo, y si cierra la interfaz el servicio la vuelve a
+    abrir en unos segundos y lo anota. Lo que queda: la isla no aparece durante esos segundos.
+  - En Windows, la interfaz solo acepta un servicio que corra en la sesión 0 (donde ninguna cuenta abre
+    programas), así nadie puede hacerse pasar por Faro para leer las claves escritas en la isla. Un
+    programa hecho a propósito podría ocupar el nombre de la tubería mientras el servicio se reinicia
+    (unos segundos al actualizarse): la isla no aparecería hasta reiniciar el equipo.
 - **Linux con Wayland.** Fedora y Ubuntu 22.04+ usan Wayland por defecto, y en Wayland una app no puede
   fijar su ventana arriba ni quedarse siempre encima. Por eso Faro arranca en modo XWayland y lee la
   inactividad desde GNOME. Con apps nativas de Wayland, la detección de pantalla completa no siempre
