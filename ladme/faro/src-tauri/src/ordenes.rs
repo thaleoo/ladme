@@ -22,6 +22,14 @@ pub fn codigo_numero(secreto: &str, equipo: &str, ventana: i64) -> String {
     format!("{:06}", n % 1_000_000)
 }
 
+/// Código del personal: 8 dígitos que cambian cada 30 s, del secreto de este equipo.
+/// Mismo cálculo que `_faro_codigo_personal` en la base de datos.
+pub fn codigo_personal(secreto: &str, equipo: &str, ventana: i64) -> String {
+    let resumen = Sha256::digest(format!("{secreto}:{equipo}:{ventana}").as_bytes());
+    let n = u32::from_be_bytes([resumen[0], resumen[1], resumen[2], resumen[3]]);
+    format!("{:08}", n % 100_000_000)
+}
+
 /// Wake-on-LAN: «paquete mágico» (6 × 0xFF y la MAC 16 veces) por difusión UDP.
 /// Se envía por cada tarjeta de red con IPv4 a su dirección de difusión (p. ej. 10.0.5.255) y
 /// también a 255.255.255.255, a los puertos 9 y 7, tres veces: en Windows la difusión general
@@ -195,6 +203,9 @@ mod pruebas {
         assert_eq!(super::codigo_llegada("abc", "UNAL-08", 123).len(), 10);
         // _faro_codigo_numero('abc', 'UNAL-08', 123) en PostgreSQL.
         assert_eq!(super::codigo_numero("abc", "UNAL-08", 123), "199997");
+        // _faro_codigo_personal('abc', 'UNAL-08', 123) y (…, 124) en PostgreSQL.
+        assert_eq!(super::codigo_personal("abc", "UNAL-08", 123), "60199997");
+        assert_eq!(super::codigo_personal("abc", "UNAL-08", 124), "98451045");
     }
 
     #[test]

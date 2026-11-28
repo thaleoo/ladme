@@ -1350,3 +1350,45 @@ begin
   perform pg_temp.como('lab@unal.edu.co');
   update reservas set estado = 'cancelada' where id = r.id;
 end $$;
+
+-- 0028: código del personal que cambia cada 30 s y clave de emergencia que se puede desactivar.
+do $$
+declare t text; j jsonb; v_sec text; v_vent bigint := floor(extract(epoch from now()) / 30); v_clave text;
+begin
+  perform pg_temp.como('lab@unal.edu.co');
+  t := faro_vincular(faro_codigo_vinculo('UNAL-07') ->> 'codigo', 'PC-07', 'Windows', '0.8.2') ->> 'token';
+  perform set_config('request.jwt.claim.sub', '', false);
+
+  -- Faro por cuenta no recibe el secreto; como servicio, recibe el de su equipo.
+  perform pg_temp.ok(faro_estado(t, '{"version": "0.8.2"}') -> 'personal' is null, 'Faro por cuenta no recibe el secreto del código del personal');
+  v_sec := faro_estado(t, '{"version": "0.8.2", "servicio": true}') ->> 'personal';
+  perform pg_temp.ok(v_sec ~ '^[0-9a-f]{64}$' and v_sec = _faro_secreto_equipo('UNAL-07') and v_sec <> _faro_secreto_equipo('UNAL-08'),
+                     'el servicio recibe un secreto propio de su equipo');
+  perform pg_temp.ok(_faro_codigo_personal('abc', 'UNAL-08', 123) ~ '^[0-9]{8}$', 'el código del personal tiene 8 dígitos');
+
+  -- El personal ve el código vigente de los equipos con servicio; nadie más.
+  perform pg_temp.como('ana@unal.edu.co');
+  perform pg_temp.falla($q$select faro_codigos_personal()$q$, 'Solo el personal');
+  perform pg_temp.como('lab@unal.edu.co');
+  j := faro_codigos_personal();
+  perform pg_temp.ok(j -> 'codigos' @> jsonb_build_array(jsonb_build_object('equipo', 'UNAL-07',
+                       'codigo', _faro_codigo_personal(v_sec, 'UNAL-07', v_vent))) or
+                     j -> 'codigos' @> jsonb_build_array(jsonb_build_object('equipo', 'UNAL-07',
+                       'codigo', _faro_codigo_personal(v_sec, 'UNAL-07', v_vent + 1))),
+                     'el personal ve el mismo código que calcula Faro');
+  perform pg_temp.ok((select x ->> 'servicio' from jsonb_array_elements(faro_panel() -> 'equipos') x where x ->> 'codigo' = 'UNAL-07') = 'true',
+                     'el panel muestra qué equipos corren como servicio');
+
+  -- Desactivar la clave fija: la anterior deja de servir; crear otra la reactiva.
+  perform pg_temp.falla($q$select faro_desactivar_clave()$q$, 'administrador');
+  perform pg_temp.como('admin@unal.edu.co');
+  v_clave := faro_generar_clave();
+  perform faro_desactivar_clave();
+  j := faro_estado(t, '{"servicio": true}') -> 'clave';
+  perform pg_temp.ok(_faro_hash_clave(j ->> 'sal', v_clave, (j ->> 'iteraciones')::int) <> j ->> 'hash'
+                     and faro_panel() ->> 'clave_desactivada_en' is not null, 'la clave fija desactivada deja de servir');
+  v_clave := faro_generar_clave();
+  j := faro_estado(t, '{"servicio": true}') -> 'clave';
+  perform pg_temp.ok(_faro_hash_clave(j ->> 'sal', v_clave, (j ->> 'iteraciones')::int) = j ->> 'hash'
+                     and faro_panel() ->> 'clave_desactivada_en' is null, 'una clave nueva la vuelve a activar');
+end $$;

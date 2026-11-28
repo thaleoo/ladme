@@ -725,6 +725,8 @@ export interface EquipoFaro {
   desbloqueo_hasta: string | null
   /** Pantalla suspendida por el personal hasta este momento (Faro 0.7). */
   suspendido_hasta?: string | null
+  /** Faro corre como servicio del sistema (0.8): acepta el código del personal. */
+  servicio?: boolean
   usos_sin_reserva_7d: number
   canal: 'estable' | 'pruebas'
   cpu_pct: number | null
@@ -768,6 +770,8 @@ export interface EventoFaro {
 export interface PanelFaro {
   ahora: string
   clave_creada_en: string | null
+  /** La clave de emergencia fija se desactivó (0028): queda el código del personal. */
+  clave_desactivada_en?: string | null
   anuncios: Array<{ id: number; texto: string; equipos: string[] | null; hasta: string; obligatorio?: boolean; confirmados?: number }>
   equipos: EquipoFaro[]
   eventos: EventoFaro[]
@@ -805,6 +809,23 @@ export async function generarClaveFaro(): Promise<string> {
   const { data, error } = await supabase.rpc('faro_generar_clave')
   if (error) fail('No se pudo generar la clave', error)
   return String(data)
+}
+
+export async function desactivarClaveFaro(): Promise<void> {
+  const { error } = await supabase.rpc('faro_desactivar_clave')
+  if (error) fail('No se pudo desactivar la clave', error)
+}
+
+/** Códigos del personal vigentes (8 dígitos, cambian cada 30 s) de los equipos con Faro como servicio. */
+export interface CodigosPersonalFaro {
+  cambia_en: number
+  codigos: Array<{ equipo: string; codigo: string }>
+}
+
+export async function codigosPersonalFaro(): Promise<CodigosPersonalFaro> {
+  const { data, error } = await supabase.rpc('faro_codigos_personal')
+  if (error) fail('No se pudieron cargar los códigos', error)
+  return data as CodigosPersonalFaro
 }
 
 export interface UsoEquipoFaro {

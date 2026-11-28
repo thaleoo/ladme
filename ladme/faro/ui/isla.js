@@ -241,8 +241,8 @@ function htmlAbierta(v) {
   let cuerpo;
   if (accion === 'personal') {
     cuerpo = `${cabeceraPanel(v, 'Personal del laboratorio')}
-      <p class="nota">Clave de emergencia o temporal: desbloquea este equipo. Solo la de emergencia quita Faro.</p>
-      <input class="campo" data-clave type="password" autocomplete="off" placeholder="Clave" aria-label="Clave del personal" />
+      <p class="nota">El código del personal (en la app, cambia cada 30 s) o una clave desbloquean este equipo.</p>
+      <input class="campo" data-clave type="password" autocomplete="off" placeholder="Código o clave" aria-label="Código o clave del personal" />
       ${aviso ? `<p class="aviso-error">${esc(aviso)}</p>` : ''}
       <div class="fila-botones">
         <button class="boton grande principal" data-desbloquear>${ICONOS.candado} Desbloquear</button>
@@ -568,7 +568,7 @@ isla.addEventListener('click', async (e) => {
     invocar('isla_foco');
   } else if (d.desbloquear !== undefined || d.retirar !== undefined) {
     const clave = isla.querySelector('input[data-clave]')?.value ?? '';
-    if (!clave) { aviso = 'Escribe la clave de emergencia.'; }
+    if (!clave) { aviso = 'Escribe el código o la clave.'; }
     else if (d.retirar !== undefined && otroConfirmar !== 'retirar') { confirmar = 'retirar'; aviso = ''; }
     else {
       b.disabled = true;

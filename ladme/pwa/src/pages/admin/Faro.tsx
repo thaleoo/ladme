@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   anunciarFaro, canalFaro, codigoVinculoFaro, desbloquearFaro, desvincularFaro, empezarClaseFaro, generarClaveFaro, modoFaro, ordenFaro, textoOrden,
   panelFaro, quitarAnuncioFaro, terminarClaseFaro, suspenderFaro, reanudarFaro, claveTemporalFaro, type OrdenFaro,
+  codigosPersonalFaro, desactivarClaveFaro, type CodigosPersonalFaro,
   type EquipoFaro, type ModoFaro, type PanelFaro
 } from '../../lib/api'
 import { esAdmin, useAuth } from '../../context/AuthContext'
@@ -37,7 +38,7 @@ const EVENTOS: Record<string, string> = {
   codigos_fallidos: 'Códigos equivocados en la pantalla'
 }
 
-const VIA: Record<string, string> = { codigo: 'con el código de la reserva', qr: 'con el QR', qr_personal: 'con el QR, como personal', clave_temporal: 'con una clave temporal', emergencia: 'con la clave de emergencia', panel: 'desde el panel' }
+const VIA: Record<string, string> = { codigo: 'con el código de la reserva', qr: 'con el QR', qr_personal: 'con el QR, como personal', clave_temporal: 'con una clave temporal', emergencia: 'con la clave de emergencia', codigo_personal: 'con el código del personal', panel: 'desde el panel' }
 const duracion = (m: number) => (m < 60 ? `${m} min` : m === 1440 ? 'Todo el día' : `${m / 60} h`)
 
 type Filtro = 'todos' | 'linea' | 'sin_senal' | 'sin_vincular' | 'sin_reserva'
@@ -68,6 +69,9 @@ export default function Faro() {
   const [anuncio, setAnuncio] = useState<{ texto: string; minutos: number; equipos: string[] | null; obligatorio: boolean } | null>(null)
   const [temporal, setTemporal] = useState<{ equipo: string | null; minutos: number; clave?: string; hasta?: string } | null>(null)
   const [abiertoEquipo, setAbiertoEquipo] = useState<string | null>(null)
+  const [verCodigos, setVerCodigos] = useState(false)
+  const [codigos, setCodigos] = useState<(CodigosPersonalFaro & { leido: number }) | null>(null)
+  const [opcionesClave, setOpcionesClave] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -85,11 +89,33 @@ export default function Faro() {
     return () => { window.clearInterval(t); window.clearInterval(r) }
   }, [cargar])
 
+  // Códigos del personal: se piden al abrir y cada vez que cambian (cada 30 s).
+  useEffect(() => {
+    if (!verCodigos) { setCodigos(null); return }
+    let vivo = true
+    let t = 0
+    const traer = async () => {
+      try {
+        const c = await codigosPersonalFaro()
+        if (!vivo) return
+        setCodigos({ ...c, leido: Date.now() })
+        t = window.setTimeout(() => void traer(), c.cambia_en * 1000 + 300)
+      } catch (e) {
+        if (!vivo) return
+        toast.mostrar(e instanceof Error ? e.message : 'No se pudieron cargar los códigos.', 'warn')
+        setVerCodigos(false)
+      }
+    }
+    void traer()
+    return () => { vivo = false; window.clearTimeout(t) }
+  }, [verCodigos, toast])
+
   const equipos = useMemo(() => panel?.equipos ?? [], [panel])
   // La versión más nueva entre los equipos: los que tienen una anterior aún no se actualizaron.
   const ultimaVersion = useMemo(() => equipos.map((e) => e.version).filter((v): v is string => !!v).sort(compararVersion).pop() ?? null, [equipos])
   const desactualizado = (v?: string | null) => !!v && !!ultimaVersion && compararVersion(v, ultimaVersion) < 0
   const atrasados = equipos.filter((e) => e.vinculado && desactualizado(e.version))
+  const sinServicio = equipos.filter((e) => e.vinculado && !e.servicio).length
   const cuentas = useMemo(() => ({
     todos: equipos.length,
     linea: equipos.filter((e) => e.vinculado && enLinea(e)).length,
@@ -222,21 +248,17 @@ export default function Faro() {
           <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => orden(null, 'actualizar')}>
             <Icon nombre="actualizar" /> <span>Actualizar Faro</span>
           </button>
+          <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setVerCodigos(true)}>
+            <Icon nombre="clave" /> <span>Código del personal</span>
+          </button>
           <button className="accion-rapida" type="button" disabled={ocupado} onClick={() => setTemporal({ equipo: null, minutos: 30 })}>
             <Icon nombre="clave" /> <span>Clave temporal</span>
           </button>
           {admin && (
             <button className="accion-rapida" type="button" disabled={ocupado}
-                    title={panel.clave_creada_en ? `Clave creada ${hace(panel.clave_creada_en)}` : 'Aún no se ha creado'}
-                    onClick={() => setConfirmar({
-                      titulo: panel.clave_creada_en ? 'Cambiar la clave de emergencia' : 'Crear la clave de emergencia',
-                      texto: (panel.clave_creada_en
-                        ? 'La clave anterior deja de servir en cuanto cada equipo se conecte. La nueva se muestra una sola vez.'
-                        : 'La clave se muestra una sola vez: guárdela en un lugar seguro del laboratorio.') +
-                        ' Desbloquea cualquier equipo por 2 horas aunque no haya internet, y cada uso avisa al personal.',
-                      accion: () => hacer(async () => setClave(await generarClaveFaro()))
-                    })}>
-              <Icon nombre="clave" /> <span>{panel.clave_creada_en ? 'Clave' : 'Crear clave'}</span>
+                    title={panel.clave_desactivada_en ? 'Clave de emergencia desactivada' : panel.clave_creada_en ? `Clave creada ${hace(panel.clave_creada_en)}` : 'Aún no se ha creado'}
+                    onClick={() => setOpcionesClave(true)}>
+              <Icon nombre="clave" /> <span>{panel.clave_desactivada_en ? 'Clave desactivada' : panel.clave_creada_en ? 'Clave de emergencia' : 'Crear clave'}</span>
             </button>
           )}
         </div>
@@ -313,6 +335,7 @@ export default function Faro() {
                 {e.suspendido_hasta && <span className="badge warn">Suspendido hasta {hora(e.suspendido_hasta)}</span>}
                 {!e.suspendido_hasta && e.vinculado && enLinea(e) && e.bloqueado && <span className="badge danger">Bloqueado ahora</span>}
                 {e.desbloqueo_hasta && <span className="badge info">Libre hasta {hora(e.desbloqueo_hasta)}</span>}
+                {e.vinculado && e.servicio && <span className="badge">Servicio del sistema</span>}
               </div>
               <p className="small muted" style={{ margin: 0 }}>
                 {e.vinculado
@@ -443,6 +466,82 @@ export default function Faro() {
             </p>
           )}
         </div>
+      </Modal>
+
+      <Modal abierto={verCodigos} titulo="Código del personal" onCerrar={() => setVerCodigos(false)}
+             pie={<button className="btn" type="button" onClick={() => setVerCodigos(false)}>Cerrar</button>}>
+        <div className="stack">
+          <p className="small muted" style={{ margin: 0 }}>
+            Escríbalo en «Personal del laboratorio», en la isla o en la pantalla de bloqueo del equipo: lo desbloquea por 2 horas, aunque no haya
+            internet. Cambia cada 30 segundos, así que si alguien lo ve deja de servir enseguida.
+          </p>
+          {codigos === null ? <Cargando /> : codigos.codigos.length === 0 ? (
+            <Empty icono="clave" titulo="Aún no hay equipos con el servicio">
+              El código del personal funciona en los equipos con Faro como servicio del sistema (Faro 0.8). En los demás, use una clave temporal.
+            </Empty>
+          ) : (
+            <>
+              <p className="tiny muted" style={{ margin: 0 }} aria-live="polite">
+                Cambian en {Math.max(0, codigos.cambia_en - Math.floor((Date.now() - codigos.leido) / 1000))} s
+              </p>
+              <ul className="faro-codigos">
+                {codigos.codigos.map((c) => (
+                  <li key={c.equipo}>
+                    <span className="small muted">{c.equipo}</span>
+                    <span className="num faro-codigos__codigo">{c.codigo.slice(0, 4)} {c.codigo.slice(4)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <Modal abierto={opcionesClave} titulo="Clave de emergencia" onCerrar={() => setOpcionesClave(false)}
+             pie={
+               <>
+                 {panel && panel.clave_creada_en && !panel.clave_desactivada_en && (
+                   <button className="btn gray" type="button" disabled={ocupado}
+                           onClick={() => {
+                             setOpcionesClave(false)
+                             setConfirmar({
+                               titulo: 'Desactivar la clave de emergencia',
+                               texto: 'La clave deja de servir en cuanto cada equipo se conecte. En los equipos con Faro como servicio queda el código del personal; ' +
+                                 `en los demás, solo las claves temporales${sinServicio > 0 ? ` (hoy ${sinServicio} ${sinServicio === 1 ? 'equipo no usa' : 'equipos no usan'} el servicio)` : ''}. ` +
+                                 'Para volver a tener una clave, cree otra.',
+                               confirmar: 'Desactivar',
+                               peligro: true,
+                               accion: () => hacer(desactivarClaveFaro, 'Clave de emergencia desactivada.')
+                             })
+                           }}>
+                     Desactivarla
+                   </button>
+                 )}
+                 <button className="btn" type="button" disabled={ocupado}
+                         onClick={() => {
+                           setOpcionesClave(false)
+                           setConfirmar({
+                             titulo: panel?.clave_creada_en && !panel.clave_desactivada_en ? 'Cambiar la clave de emergencia' : 'Crear una clave de emergencia',
+                             texto: 'La clave anterior deja de servir en cuanto cada equipo se conecte. La nueva se muestra una sola vez: guárdela en un lugar seguro del laboratorio.',
+                             accion: () => hacer(async () => setClave(await generarClaveFaro()))
+                           })
+                         }}>
+                   {panel?.clave_creada_en && !panel.clave_desactivada_en ? 'Cambiarla' : 'Crear una clave'}
+                 </button>
+               </>
+             }>
+        <p className="small" style={{ margin: 0 }}>
+          {panel?.clave_desactivada_en
+            ? `Desactivada ${hace(panel.clave_desactivada_en)}. El personal usa el código del personal (equipos con Faro como servicio) o claves temporales.`
+            : panel?.clave_creada_en
+              ? `Creada ${hace(panel.clave_creada_en)}. Desbloquea cualquier equipo por 2 horas aunque no haya internet, retira Faro y cada uso avisa al personal. Es fija: si se filtra, sirve hasta que la cambie.`
+              : 'Aún no hay clave de emergencia. Desbloquea cualquier equipo por 2 horas aunque no haya internet, retira Faro y cada uso avisa al personal.'}
+        </p>
+        {panel && !panel.clave_desactivada_en && (
+          <p className="small muted" style={{ margin: 'var(--s2) 0 0' }}>
+            Cuando todos los equipos usen Faro como servicio del sistema, puede desactivarla: el código del personal hace lo mismo y cambia cada 30 segundos.
+          </p>
+        )}
       </Modal>
 
       <Modal abierto={!!clave} titulo="Nueva clave de emergencia" onCerrar={() => setClave(null)}

@@ -135,7 +135,7 @@ main.addEventListener('submit', async (e) => {
 function pintarPie(v) {
   const izquierda = pidiendoClave
     ? `<form class="personal" id="form-clave">
-        <input class="campo" id="clave" placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="16" />
+        <input class="campo" id="clave" placeholder="Código del personal o clave" aria-label="Código del personal o clave" autocomplete="off" spellcheck="false" maxlength="16" />
         <button class="boton principal" type="submit">Desbloquear</button>
         <button class="boton" type="button" data-cancelar>Cancelar</button>
         <span class="error" id="error"></span>

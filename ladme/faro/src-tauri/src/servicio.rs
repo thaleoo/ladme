@@ -201,6 +201,7 @@ fn resumen(c: &Compartido) -> Value {
         r.clave = None;
         r.qr = None;
         r.claves_temporales.clear();
+        r.personal = None;
         r.comandos.clear();
         if let Some(a) = r.actual.as_mut() {
             a.desbloqueo = None;

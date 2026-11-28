@@ -56,7 +56,7 @@ muestran la ayuda. Los nombres en español de Faro 0.6 siguen funcionando como a
 | `faro inventory` | Lo que Faro envía: procesador, RAM, gráfica, cámaras, disco, sistema, cuenta y programas. |
 | `faro version` | Versión, canal (stable o testing) e instalación. `faro -V` solo da el número. |
 | `faro link ABCD-EFGH` | Vincula el equipo con un código del panel (si Faro está cerrado, se usa al abrirlo). |
-| `faro update`, `faro unlink` | Piden la **clave de emergencia** (sin mostrarla) y se la pasan al Faro abierto, que la verifica como en la pantalla (5 intentos y una pausa). |
+| `faro update`, `faro unlink` | Piden la **clave de emergencia** o el **código del personal** (sin mostrarlos) y se la pasan al Faro abierto, que la verifica como en la pantalla (5 intentos y una pausa). |
 | `faro unlock` | Igual, y acepta también una **clave temporal** del personal (hasta que vence). |
 | `faro start` | Abre Faro si está cerrado (en Linux, con el servicio `ladme-faro`). |
 | `faro restart` | Reinicia Faro. |
@@ -102,8 +102,13 @@ Más detalles:
 - **Sin internet.** Faro sigue las mismas reglas con lo último que supo. Una reserva vale hasta su fin, y
   un equipo sin reserva sigue sin ella. Desconectar el cable no desbloquea nada.
 - **Desbloqueo del personal.** Desde la PWA, un equipo puede quedar libre por 30 min, 1 h o 4 h. Sin
-  internet se usa la **clave de emergencia** del laboratorio (Administración → Faro), que deja el equipo
-  libre por 2 horas. Cada uso de la clave avisa al personal.
+  internet se usa el **código del personal** (Administración → Faro → «Código del personal», desde Faro
+  0.8.2): 8 dígitos por equipo que cambian cada 30 segundos, así que si alguien lo ve por encima del
+  hombro deja de servir enseguida. Solo lo aceptan los equipos con Faro como servicio del sistema (en Faro
+  por cuenta el secreto quedaría donde la cuenta lo lee). También sirven una **clave temporal** o la
+  **clave de emergencia** fija del laboratorio, que se puede desactivar cuando todos los equipos usen el
+  servicio. Todas dejan el equipo libre por 2 horas (la temporal, hasta que vence) y cada uso avisa al
+  personal.
 - **Registro.** Todo queda en «Actividad reciente»: bloqueos, desbloqueos, uso sin reserva, cierres e
   intentos de cerrar la pantalla de bloqueo.
 - **Modo clase** (Administración → Faro). Aparta toda la sala para una clase: nadie puede reservarla y los
@@ -135,8 +140,8 @@ Más detalles:
   - **Desinstalar** (solo administradores): Faro se quita solo y desvincula el equipo.
 
   Cada orden se entrega una sola vez y su resultado queda en «Actividad reciente».
-- **Quitar Faro desde el propio PC.** En la isla, «Personal» (al pie) pide la **clave de emergencia** del
-  laboratorio y ofrece «Desbloquear 2 h» o «Quitar Faro de este PC». Faro nunca pide ni guarda la
+- **Quitar Faro desde el propio PC.** En la isla, «Personal» (al pie) pide el **código del personal** o la
+  **clave de emergencia** del laboratorio y ofrece «Desbloquear 2 h» o «Quitar Faro de este PC». Faro nunca pide ni guarda la
   contraseña de administrador del sistema. Con instalación `.deb` o `.rpm` no puede quitarse solo (lo hace
   TI con `dnf`/`apt`).
 - **Inventario y salud.** Al minuto de arrancar y cada hora (o al pulsar «Actualizar datos»), Faro envía

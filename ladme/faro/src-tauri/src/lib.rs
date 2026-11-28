@@ -176,7 +176,7 @@ fn paquete(n: &Nucleo) -> Paquete {
         url_qr,
         version: env!("CARGO_PKG_VERSION"),
         vinculado: n.config.token.is_some(),
-        clave_disponible: n.copia.remoto.as_ref().and_then(|r| r.clave.as_ref()).is_some(),
+        clave_disponible: n.copia.remoto.as_ref().is_some_and(|r| r.clave.is_some() || r.personal.is_some()),
         url_base: n.config.url_pwa(""),
         nfc: n.copia.remoto.as_ref().map(|r| r.nfc).unwrap_or(false),
         sin_red_seg: sin_red_seg(n),
@@ -370,7 +370,7 @@ async fn latir(ctx: &Ctx, api: &Api, compartido: &Compartido, inactivo: Option<u
     };
     let Some(token) = token else { return };
     let mut info = json!({ "inactivo_seg": inactivo, "bloqueado": bloqueado, "host": host(), "so": sistema(),
-                           "version": env!("CARGO_PKG_VERSION"), "cpu": cpu, "programas": programas });
+                           "version": env!("CARGO_PKG_VERSION"), "cpu": cpu, "programas": programas, "servicio": ctx.servicio });
     if let Some(inv) = inventario {
         info["inventario"] = inv;
     }
@@ -763,6 +763,8 @@ fn cerrar_vincular(app: AppHandle) {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Llave {
     Emergencia,
+    /// El código del personal (cambia cada 30 s): vale lo mismo que la clave de emergencia.
+    Personal,
     Temporal(chrono::DateTime<Utc>),
     Reserva,
 }
@@ -771,6 +773,7 @@ impl Llave {
     fn via(self) -> &'static str {
         match self {
             Llave::Emergencia => "emergencia",
+            Llave::Personal => "codigo_personal",
             Llave::Temporal(_) => "clave_temporal",
             Llave::Reserva => "codigo",
         }
@@ -789,6 +792,16 @@ fn verificar_llave(n: &mut Nucleo, ingresada: &str, temporal: bool, reserva: boo
     let Some(r) = n.copia.remoto.as_ref() else {
         return Err("Faro aún no ha recibido datos del laboratorio.".into());
     };
+    // El código del personal: el de esta ventana de 30 s, la anterior o la siguiente (relojes un poco
+    // desfasados). Se compara antes que las huellas, que tardan.
+    let ingresado = clave::normalizar(ingresada);
+    if let Some(secreto) = r.personal.as_deref().filter(|_| ingresado.len() == 8 && ingresado.bytes().all(|b| b.is_ascii_digit())) {
+        let ventana = ahora.timestamp().div_euclid(30);
+        if (ventana - 1..=ventana + 1).any(|v| ordenes::codigo_personal(secreto, &r.equipo.codigo, v) == ingresado) {
+            n.intentos_fallidos = 0;
+            return Ok(Llave::Personal);
+        }
+    }
     let mut candidatas: Vec<(Llave, decision::Clave)> = r.clave.iter().map(|c| (Llave::Emergencia, c.clone())).collect();
     if temporal {
         candidatas.extend(r.claves_temporales.iter().filter(|k| k.hasta > ahora).map(|k| {
@@ -800,7 +813,7 @@ fn verificar_llave(n: &mut Nucleo, ingresada: &str, temporal: bool, reserva: boo
             candidatas.push((Llave::Reserva, c));
         }
     }
-    if candidatas.is_empty() {
+    if candidatas.is_empty() && r.personal.is_none() {
         return Err("El laboratorio aún no ha creado una clave de emergencia.".into());
     }
     if clave::normalizar(ingresada).is_empty() {
@@ -822,7 +835,7 @@ fn verificar_llave(n: &mut Nucleo, ingresada: &str, temporal: bool, reserva: boo
                 n.intentos_fallidos = 0;
                 n.espera_hasta = Some(Instant::now() + Duration::from_secs(60));
             }
-            Err(if reserva { "Ese código no desbloquea este equipo." } else { "Clave incorrecta." }.into())
+            Err(if reserva { "Ese código no desbloquea este equipo." } else { "Código o clave incorrectos." }.into())
         }
     }
 }
@@ -873,7 +886,8 @@ fn quitar_suspension_local(n: &mut Nucleo, codigo: Option<(&str, Llave)>) -> Opt
         n.copia.memoria.anuncio_leido = anuncio;
     }
     // La clave de emergencia no viaja: el servidor se entera por el evento de desbloqueo.
-    if let Some((c, llave)) = codigo.filter(|(_, l)| *l != Llave::Emergencia) {
+    // Tampoco el código del personal: cambia cada 30 s y el servidor no lo necesita.
+    if let Some((c, llave)) = codigo.filter(|(_, l)| !matches!(l, Llave::Emergencia | Llave::Personal)) {
         n.acciones.push(("reanudar".into(), json!({ "codigo": clave::normalizar(c), "via": llave.via() })));
     } else if let Some(id) = anuncio.filter(|_| s.motivo == "anuncio") {
         n.acciones.push(("leido".into(), json!({ "anuncio": id })));
@@ -891,7 +905,7 @@ async fn quitar_suspension(app: AppHandle, codigo: String) -> Result<Value, Stri
 fn c_quitar_suspension(c: &Compartido, codigo: &str) -> Result<String, String> {
     let mut n = c.lock().unwrap();
     let llave = verificar_llave(&mut n, codigo, true, true)?;
-    if llave == Llave::Emergencia {
+    if matches!(llave, Llave::Emergencia | Llave::Personal) {
         desbloquear_emergencia(&mut n, llave);
         return Ok("Desbloqueado por el personal.".into());
     }
@@ -1307,4 +1321,29 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod pruebas_llaves {
+    use super::*;
+
+    #[test]
+    fn el_codigo_del_personal_vale_solo_unos_segundos_y_solo_con_el_servicio() {
+        let carpeta = std::env::temp_dir().join(format!("faro-llaves-{}", std::process::id()));
+        let c = nuevo_nucleo(carpeta.clone(), false);
+        let mut n = c.lock().unwrap();
+        let mut r = decision::remoto_de_prueba();
+        r.personal = Some("abc".into());
+        n.copia.remoto = Some(r);
+        let ventana = Utc::now().timestamp().div_euclid(30);
+        let vigente = ordenes::codigo_personal("abc", "UNAL-05", ventana);
+        assert!(matches!(verificar_llave(&mut n, &format!("{} {}", &vigente[..4], &vigente[4..]), false, false), Ok(Llave::Personal)));
+        let viejo = ordenes::codigo_personal("abc", "UNAL-05", ventana - 3);
+        assert!(verificar_llave(&mut n, &viejo, false, false).is_err());
+        // Sin el secreto (Faro por cuenta), el código no sirve.
+        n.copia.remoto.as_mut().unwrap().personal = None;
+        assert!(verificar_llave(&mut n, &vigente, false, false).is_err());
+        drop(n);
+        let _ = std::fs::remove_dir_all(carpeta);
+    }
 }

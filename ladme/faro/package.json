@@ -1,7 +1,7 @@
 {
   "name": "ladme-faro",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Faro: agente de los computadores de la sala LADME",
   "scripts": {
     "tauri": "tauri",

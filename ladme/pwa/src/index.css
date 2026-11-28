@@ -3689,6 +3689,11 @@ a.sala__equipo:hover { transform: translateY(-2px); box-shadow: inset 4px 0 0 va
 .faro-detalle__datos dd { margin: 0; }
 .faro-detalle__alerta { color: var(--danger-600, #dc2626); font-weight: 650; }
 
+/* Faro: códigos del personal (8 dígitos que cambian cada 30 s) */
+.faro-codigos { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s2); }
+.faro-codigos li { display: grid; gap: 2px; padding: var(--s2) var(--s3); border-radius: 12px; background: var(--surface-3); }
+.faro-codigos__codigo { font-family: var(--mono); font-size: 1.35rem; font-weight: 800; letter-spacing: 0.06em; }
+
 /* Botón con aspecto de enlace, dentro de un texto. */
 .link-btn {
   appearance: none; background: none; border: 0; padding: 0; font: inherit; font-weight: 650;

@@ -40,6 +40,10 @@ pub struct Remoto {
     pub suspension: Option<Suspension>,
     #[serde(default)]
     pub claves_temporales: Vec<ClaveTemporal>,
+    /// Desde la 0028, solo para Faro como servicio del sistema: secreto de este equipo para el código del
+    /// personal (8 dígitos que cambian cada 30 s; el personal los ve en la app).
+    #[serde(default)]
+    pub personal: Option<String>,
 }
 
 /// La pantalla se tapa sin cerrar programas hasta que la persona de la reserva (o el personal) la quite.
@@ -570,6 +574,12 @@ pub fn recordar(m: &mut Memoria, antes: Option<&Remoto>, ahora_remoto: Option<&R
     }
 }
 
+/// Un estado del servidor para las pruebas de otros módulos.
+#[cfg(test)]
+pub(crate) fn remoto_de_prueba() -> Remoto {
+    pruebas::remoto(Modo::Bloquear, None)
+}
+
 #[cfg(test)]
 mod pruebas {
     use super::*;
@@ -578,7 +588,7 @@ mod pruebas {
         DateTime::parse_from_rfc3339("2026-11-17T20:00:00Z").unwrap().with_timezone(&Utc) + Duration::minutes(min)
     }
 
-    fn remoto(modo: Modo, actual: Option<Ocupacion>) -> Remoto {
+    pub(crate) fn remoto(modo: Modo, actual: Option<Ocupacion>) -> Remoto {
         Remoto {
             ahora: t(0),
             equipo: EquipoRemoto { codigo: "UNAL-05".into(), nombre: "HP Z1".into(), estado: "activo".into(), sistema: "Windows 11 Pro".into() },
@@ -597,6 +607,7 @@ mod pruebas {
             nfc: false,
             suspension: None,
             claves_temporales: vec![],
+            personal: None,
         }
     }
 
